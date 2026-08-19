@@ -1,0 +1,93 @@
+<script lang="ts">
+  import type { EditorWorkspace } from "../../editor/workspace.svelte";
+  import type { ArchiveStore } from "../../stores/archive.svelte";
+  import type { ExecutionStore } from "../../stores/execution.svelte";
+  import type { GeneratorStore } from "../../stores/generator.svelte";
+  import type { SettingsStore } from "../../stores/settings.svelte";
+  import type { ActivityId, ShellStore } from "../../stores/shell.svelte";
+  import type { TemplateStore } from "../../stores/templates.svelte";
+  import type { WorkspaceStore } from "../../stores/workspace.svelte";
+  import ExplorerPanel from "../explorer/ExplorerPanel.svelte";
+  import TestcasePanel from "../testcases/TestcasePanel.svelte";
+  import SettingsPanel from "../settings/SettingsPanel.svelte";
+  import TemplateSidebar from "../templates/TemplateSidebar.svelte";
+  import Icon from "./Icon.svelte";
+
+  interface Props {
+    shell: ShellStore;
+    workspace: EditorWorkspace;
+    fileWorkspace: WorkspaceStore;
+    templateStore: TemplateStore;
+    settings: SettingsStore;
+    execution: ExecutionStore;
+    generator: GeneratorStore;
+    archiveStore: ArchiveStore;
+  }
+
+  const titles: Record<ActivityId, string> = {
+    explorer: "资源管理器",
+    testcases: "测试点",
+    search: "搜索",
+    templates: "模板",
+    debug: "运行与调试",
+    judge: "评测",
+    settings: "设置",
+  };
+
+  let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore }: Props = $props();
+
+  function beginResize(event: PointerEvent): void {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = shell.sidebarWidth;
+    const onMove = (moveEvent: PointerEvent) =>
+      shell.setSidebarWidth(startWidth + moveEvent.clientX - startX);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  }
+</script>
+
+<aside class="sidebar" style:width={`${shell.sidebarWidth}px`} aria-label={titles[shell.activeActivity]}>
+  <header class="sidebar-header">
+    <span>{titles[shell.activeActivity]}</span>
+    <button aria-label="隐藏侧栏" title="隐藏侧栏 · Ctrl+B" onclick={() => shell.toggleSidebar()}>
+      <Icon name="close" size={14} />
+    </button>
+  </header>
+
+  <div
+    class:explorer-content={shell.activeActivity === "explorer"}
+    class:templates-content={shell.activeActivity === "templates"}
+    class="sidebar-content"
+  >
+    {#if shell.activeActivity === "settings"}
+      <SettingsPanel {settings} />
+    {:else if shell.activeActivity === "explorer"}
+      <ExplorerPanel {fileWorkspace} {templateStore} {archiveStore} editor={workspace} />
+    {:else if shell.activeActivity === "testcases"}
+      <TestcasePanel {workspace} {execution} {generator} />
+    {:else if shell.activeActivity === "search"}
+      <div class="search-box"><Icon name="search" size={15} /><input aria-label="搜索" placeholder="搜索工作区" /></div>
+      <div class="empty-state"><p>搜索工作区文件</p><span>请先打开一个文件夹。</span></div>
+    {:else if shell.activeActivity === "templates"}
+      <TemplateSidebar {templateStore} />
+    {:else if shell.activeActivity === "debug"}
+      <section class="sidebar-section"><h3>变量</h3></section>
+      <section class="sidebar-section"><h3>监视</h3></section>
+      <section class="sidebar-section"><h3>调用栈</h3></section>
+      <section class="sidebar-section"><h3>断点</h3></section>
+      <div class="empty-state compact"><Icon name="debug" size={26} /><span>尚未启用 GDB/MI 集成。</span></div>
+    {:else if shell.activeActivity === "judge"}
+      <div class="empty-state">
+        <Icon name="judge" size={30} />
+        <p>本地运行器已就绪</p>
+        <span>按 F5 运行当前文件，按 F6 运行全部已启用测试点。</span>
+      </div>
+    {/if}
+  </div>
+  <div class="sidebar-resize-handle" role="separator" aria-orientation="vertical" onpointerdown={beginResize}></div>
+</aside>
