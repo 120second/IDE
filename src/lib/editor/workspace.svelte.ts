@@ -51,6 +51,8 @@ export interface EditorTab {
   externalModified: boolean;
 }
 
+const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024;
+
 export interface EditorBreakpointLocation {
   file: string;
   line: number;
@@ -153,16 +155,20 @@ export class EditorWorkspace {
 
   private view: EditorView | undefined;
   private readonly appearance = new Compartment();
+  private currentAppearance: Extension;
   private nextTabNumber = 1;
   private suppressDirty = false;
   private breakpointToggleHandler: ((file: string, line: number) => void) | undefined;
   private breakpointMoveHandler: ((file: string, lines: number[]) => void) | undefined;
+  private openSequence = 0;
+  private readonly recentWrites = new Map<string, number>();
 
   constructor(settings: AppSettings) {
+    this.currentAppearance = createAppearanceExtension(settings);
     this.tabs = STARTER_TABS.map((tab, index) => ({
       id: `starter-${index + 1}`,
       title: tab.title,
-      state: this.createState(tab.document, settings),
+      state: this.createState(tab.document, undefined, this.currentAppearance),
       scrollTop: 0,
       dirty: false,
       deleted: false,
@@ -267,8 +273,15 @@ export class EditorWorkspace {
     this.captureActiveView();
     this.activeId = id;
 
-    const activeTab = this.activeTab;
+    let activeTab = this.activeTab;
     if (this.view && activeTab) {
+      activeTab = {
+        ...activeTab,
+        state: activeTab.state.update({
+          effects: this.appearance.reconfigure(this.currentAppearance),
+        }).state,
+      };
+      this.replaceTab(id, activeTab);
       this.view.setState(activeTab.state);
       this.restoreScroll(activeTab.scrollTop);
       this.updateCursor(activeTab.state);
@@ -280,20 +293,10 @@ export class EditorWorkspace {
     this.captureActiveView();
     const id = `untitled-${Date.now()}-${this.nextTabNumber}`;
     const title = `未命名-${this.nextTabNumber++}.cpp`;
-    const referenceState = this.activeTab?.state;
-    const appearance = referenceState
-      ? this.appearance.get(referenceState)
-      : createAppearanceExtension({
-          theme: "dark",
-          fontFamily: "Consolas, monospace",
-          fontSize: 14,
-          lineHeight: 1.62,
-        });
-
     const tab: EditorTab = {
       id,
       title,
-      state: this.createState("", undefined, appearance),
+      state: this.createState("", undefined, this.currentAppearance),
       scrollTop: 0,
       dirty: false,
       deleted: false,
@@ -307,6 +310,7 @@ export class EditorWorkspace {
   }
 
   async openFile(path: string): Promise<void> {
+    const request = ++this.openSequence;
     const existing = this.tabs.find((tab) => tab.path && samePath(tab.path, path));
     if (existing) {
       this.switchTab(existing.id);
@@ -320,31 +324,29 @@ export class EditorWorkspace {
         (tab) => tab.path && samePath(tab.path, file.path),
       );
       if (duplicate) {
-        this.switchTab(duplicate.id);
+        if (request === this.openSequence) this.switchTab(duplicate.id);
         return;
       }
 
       this.captureActiveView();
-      const referenceState = this.activeTab?.state;
-      const appearance = referenceState
-        ? this.appearance.get(referenceState)
-        : createAppearanceExtension({});
       const tab: EditorTab = {
         id: `file-${Date.now()}-${this.nextTabNumber++}`,
         title: fileName(file.path),
         path: file.path,
-        state: this.createState(file.content, undefined, appearance),
+        state: this.createState(file.content, undefined, this.currentAppearance),
         scrollTop: 0,
         dirty: false,
         deleted: false,
         externalModified: false,
       };
       this.tabs = [...this.tabs, tab];
-      this.activeId = tab.id;
-      this.view?.setState(tab.state);
-      this.restoreScroll(0);
-      this.view?.focus();
-      this.notice = `已打开 ${tab.title}`;
+      if (request === this.openSequence) {
+        this.activeId = tab.id;
+        this.view?.setState(tab.state);
+        this.restoreScroll(0);
+        this.view?.focus();
+        this.notice = `已打开 ${tab.title}`;
+      }
     } catch (error) {
       this.saveState = "error";
       this.notice = errorMessage(error);
@@ -370,6 +372,7 @@ export class EditorWorkspace {
     this.notice = `正在保存 ${active.title}…`;
     try {
       await writeTextFile(active.path, content);
+      this.recentWrites.set(normalizedPath(active.path), performance.now());
       this.tabs = this.tabs.map((tab) =>
         tab.id === active.id
           ? {
@@ -401,6 +404,12 @@ export class EditorWorkspace {
     if (change.kind !== "changed") return;
 
     for (const path of change.paths) {
+      const key = normalizedPath(path);
+      const writtenAt = this.recentWrites.get(key);
+      if (writtenAt !== undefined) {
+        this.recentWrites.delete(key);
+        if (performance.now() - writtenAt < 1_000) continue;
+      }
       const tab = this.tabs.find((candidate) => candidate.path && samePath(candidate.path, path));
       if (!tab) continue;
       if (tab.dirty) {
@@ -470,8 +479,15 @@ export class EditorWorkspace {
 
     this.tabs = remaining;
     if (id === this.activeId) {
-      const next = remaining[Math.min(index, remaining.length - 1)];
+      let next = remaining[Math.min(index, remaining.length - 1)];
       this.activeId = next.id;
+      next = {
+        ...next,
+        state: next.state.update({
+          effects: this.appearance.reconfigure(this.currentAppearance),
+        }).state,
+      };
+      this.replaceTab(next.id, next);
       this.view?.setState(next.state);
       this.restoreScroll(next.scrollTop);
       this.updateCursor(next.state);
@@ -481,16 +497,20 @@ export class EditorWorkspace {
 
   updateAppearance(settings: AppSettings): void {
     const extension = createAppearanceExtension(settings);
-    this.tabs = this.tabs.map((tab) => {
-      if (tab.id === this.activeId && this.view) return tab;
-      return {
-        ...tab,
-        state: tab.state.update({ effects: this.appearance.reconfigure(extension) }).state,
-      };
-    });
+    this.currentAppearance = extension;
 
     if (this.view) {
       this.view.dispatch({ effects: this.appearance.reconfigure(extension) });
+    } else {
+      const active = this.activeTab;
+      if (active) {
+        this.replaceTab(active.id, {
+          ...active,
+          state: active.state.update({
+            effects: this.appearance.reconfigure(extension),
+          }).state,
+        });
+      }
     }
   }
 
@@ -502,6 +522,19 @@ export class EditorWorkspace {
     const appearance =
       appearanceExtension ??
       (settings ? createAppearanceExtension(settings) : createAppearanceExtension({}));
+
+    const largeFile = document.length >= LARGE_FILE_THRESHOLD;
+    const editingExtensions: Extension[] = largeFile
+      ? []
+      : [
+          foldGutter(),
+          indentOnInput(),
+          bracketMatching(),
+          highlightActiveLine(),
+          highlightSelectionMatches(),
+          cpp(),
+          EditorView.lineWrapping,
+        ];
 
     return EditorState.create({
       doc: document,
@@ -518,22 +551,16 @@ export class EditorWorkspace {
         highlightActiveLineGutter(),
         highlightSpecialChars(),
         history(),
-        foldGutter(),
         drawSelection(),
         dropCursor(),
-        indentOnInput(),
-        bracketMatching(),
         rectangularSelection(),
         crosshairCursor(),
-        highlightActiveLine(),
-        highlightSelectionMatches(),
         keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
-        cpp(),
+        ...editingExtensions,
         EditorState.allowMultipleSelections.of(true),
         EditorState.tabSize.of(4),
         indentUnit.of("    "),
         keymap.of([indentWithTab]),
-        EditorView.lineWrapping,
         this.appearance.of(appearance),
         EditorView.updateListener.of((update) => this.handleViewUpdate(update)),
       ],
@@ -542,15 +569,10 @@ export class EditorWorkspace {
 
   private handleViewUpdate(update: { state: EditorState; docChanged: boolean }): void {
     const id = this.activeId;
-    this.tabs = this.tabs.map((tab) =>
-      tab.id === id
-        ? {
-            ...tab,
-            state: update.state,
-            dirty: tab.dirty || (update.docChanged && !this.suppressDirty),
-          }
-        : tab,
-    );
+    const tab = this.activeTab;
+    if (tab && update.docChanged && !this.suppressDirty && !tab.dirty) {
+      this.replaceTab(id, { ...tab, dirty: true });
+    }
     this.updateCursor(update.state);
     const path = this.activeTab?.path;
     if (update.docChanged && path && this.breakpointMoveHandler) {
@@ -563,9 +585,8 @@ export class EditorWorkspace {
     const id = this.activeId;
     const state = this.view.state;
     const scrollTop = this.view.scrollDOM.scrollTop;
-    this.tabs = this.tabs.map((tab) =>
-      tab.id === id ? { ...tab, state, scrollTop } : tab,
-    );
+    const tab = this.activeTab;
+    if (tab) this.replaceTab(id, { ...tab, state, scrollTop });
   }
 
   private restoreScroll(scrollTop: number): void {
@@ -584,11 +605,16 @@ export class EditorWorkspace {
         changes: { from: 0, to: this.view.state.doc.length, insert: content },
       });
       this.suppressDirty = false;
-      this.tabs = this.tabs.map((candidate) =>
-        candidate.id === id
-          ? { ...candidate, dirty: false, externalModified: false, deleted: false }
-          : candidate,
-      );
+      const current = this.tabs.find((candidate) => candidate.id === id);
+      if (current) {
+        this.replaceTab(id, {
+          ...current,
+          state: this.view.state,
+          dirty: false,
+          externalModified: false,
+          deleted: false,
+        });
+      }
       return;
     }
 
@@ -609,6 +635,14 @@ export class EditorWorkspace {
     const line = state.doc.lineAt(head);
     this.cursorLine = line.number;
     this.cursorColumn = head - line.from + 1;
+  }
+
+  private replaceTab(id: string, replacement: EditorTab): void {
+    const index = this.tabs.findIndex((tab) => tab.id === id);
+    if (index < 0) return;
+    const tabs = this.tabs.slice();
+    tabs[index] = replacement;
+    this.tabs = tabs;
   }
 }
 

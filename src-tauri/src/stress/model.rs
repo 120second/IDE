@@ -98,6 +98,10 @@ pub enum StressEvent {
         session_id: String,
         result: StressCasePassed,
     },
+    CasesPassed {
+        session_id: String,
+        results: Vec<StressCasePassed>,
+    },
     Failure {
         session_id: String,
         failure: StressFailure,

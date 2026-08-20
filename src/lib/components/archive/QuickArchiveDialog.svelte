@@ -27,9 +27,11 @@
   });
 
   onMount(() => {
+    let disposed = false;
     draft = { ...draft, path, title: fileTitle(path) };
     void archiveStore.loadFile(path)
       .then((file) => {
+        if (disposed) return;
         if (file) {
           draft = {
             path: file.path,
@@ -47,9 +49,15 @@
         }
       })
       .catch((error: unknown) => {
+        if (disposed) return;
         archiveStore.error = error instanceof Error ? error.message : String(error);
       })
-      .finally(() => (loading = false));
+      .finally(() => {
+        if (!disposed) loading = false;
+      });
+    return () => {
+      disposed = true;
+    };
   });
 
   function parseTags(value: string): void {

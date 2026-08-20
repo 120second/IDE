@@ -1318,7 +1318,16 @@ input:focus-visible {
   scrollbar-color: var(--border-strong) transparent;
 }
 
+.category-tree-spacer,
+.template-list-spacer {
+  position: relative;
+  width: 100%;
+}
+
 .category-row {
+  position: absolute;
+  right: 0;
+  left: 0;
   display: flex;
   height: 27px;
   align-items: center;
@@ -1522,6 +1531,11 @@ input:focus-visible {
 }
 
 .template-list-row {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 62px;
+  box-sizing: border-box;
   display: flex;
   min-height: 62px;
   align-items: flex-start;
@@ -4240,11 +4254,16 @@ input[type="range"]:disabled {
 }
 
 .process-output {
+  width: 100%;
   min-width: 0;
   min-height: 0;
   flex: 1;
   margin: 0;
   padding: 8px 10px;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
   overflow: auto;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--editor-background) 86%, transparent);

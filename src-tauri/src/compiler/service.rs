@@ -14,6 +14,7 @@ use std::{
 };
 
 use crate::error::{AppError, AppResult};
+use crate::paths::is_within;
 
 use super::{CompileProfile, CompileRequest, CompileResult};
 
@@ -65,14 +66,18 @@ pub fn compile_current_file(
             AppError::ProcessStart(format!("failed to launch {compiler}: {error}"))
         }
     })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AppError::Internal("compiler stdout pipe was unavailable".to_owned()))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| AppError::Internal("compiler stderr pipe was unavailable".to_owned()))?;
+    let Some(stdout) = child.stdout.take() else {
+        terminate_child(&mut child);
+        return Err(AppError::Internal(
+            "compiler stdout pipe was unavailable".to_owned(),
+        ));
+    };
+    let Some(stderr) = child.stderr.take() else {
+        terminate_child(&mut child);
+        return Err(AppError::Internal(
+            "compiler stderr pipe was unavailable".to_owned(),
+        ));
+    };
     let limit = request
         .config
         .max_output_bytes
@@ -82,7 +87,13 @@ pub fn compile_current_file(
     let truncated = Arc::new(AtomicBool::new(false));
     let stdout_reader = spawn_limited_reader(stdout, limit, used.clone(), truncated.clone());
     let stderr_reader = spawn_limited_reader(stderr, limit, used, truncated.clone());
-    let status = child.wait()?;
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(error) => {
+            terminate_child(&mut child);
+            return Err(AppError::from(error));
+        }
+    };
     let stdout = join_reader(stdout_reader)?;
     let stderr = join_reader(stderr_reader)?;
     let success = status.success();
@@ -101,7 +112,7 @@ pub fn compile_current_file(
 fn checked_source(root: &Path, source_path: &str) -> AppResult<PathBuf> {
     let root = dunce::canonicalize(root)?;
     let source = dunce::canonicalize(source_path)?;
-    if !source.starts_with(&root) || !source.is_file() {
+    if !is_within(&root, &source) || !source.is_file() {
         return Err(AppError::FileSystemOperation(format!(
             "source file is outside the active workspace: {}",
             source.display()
@@ -176,6 +187,11 @@ fn join_reader(handle: thread::JoinHandle<std::io::Result<String>>) -> AppResult
         .join()
         .map_err(|_| AppError::Internal("compiler output reader panicked".to_owned()))?
         .map_err(AppError::from)
+}
+
+fn terminate_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn elapsed_millis(started: Instant) -> u64 {

@@ -26,6 +26,8 @@ import type {
 } from "../types/execution";
 import type { SettingsStore } from "./settings.svelte";
 import type { ShellStore } from "./shell.svelte";
+import { recordIpcEvent } from "../performance";
+import { BoundedOutputBuffer, OUTPUT_FLUSH_INTERVAL_MS } from "../outputBuffer";
 
 const FRONTEND_OUTPUT_LIMIT = 16 * 1024 * 1024;
 
@@ -46,6 +48,17 @@ export class ExecutionStore {
   private runSequence = 0;
   private activeClientRunId = "";
   private streamReceived = false;
+  private readonly outputBuffer = new BoundedOutputBuffer(
+    FRONTEND_OUTPUT_LIMIT,
+    "[较早的输出因界面容量限制已被丢弃]\n",
+  );
+  private outputTimer: ReturnType<typeof setTimeout> | undefined;
+  private truncationNoticeQueued = false;
+  private disposed = false;
+
+  get approximateOutputBytes(): number {
+    return this.outputBuffer.approximateLength(this.output) * 2;
+  }
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -56,21 +69,28 @@ export class ExecutionStore {
   async initialize(): Promise<void> {
     if (!isTauri()) return;
     try {
-      this.unlisten = await listen<RunnerOutputBatch>("runner-output", (event) => {
+      const unlisten = await listen<RunnerOutputBatch>("runner-output", (event) => {
+        recordIpcEvent();
         if (event.payload.clientRunId !== this.activeClientRunId) return;
         this.streamReceived = true;
         this.appendOutput(event.payload.stdout);
         this.appendOutput(event.payload.stderr);
         if (event.payload.outputTruncated) this.appendTruncationNotice();
       });
+      if (this.disposed) unlisten();
+      else this.unlisten = unlisten;
     } catch (error) {
       this.error = errorMessage(error);
     }
   }
 
   dispose(): void {
+    this.disposed = true;
     this.unlisten?.();
     this.unlisten = undefined;
+    if (this.outputTimer) clearTimeout(this.outputTimer);
+    this.outputTimer = undefined;
+    this.outputBuffer.clear();
   }
 
   async syncActiveSource(sourcePath?: string, force = false): Promise<void> {
@@ -224,6 +244,10 @@ export class ExecutionStore {
   }
 
   clearOutput(): void {
+    if (this.outputTimer) clearTimeout(this.outputTimer);
+    this.outputTimer = undefined;
+    this.outputBuffer.clear();
+    this.truncationNoticeQueued = false;
     this.output = "";
     this.error = "";
   }
@@ -372,15 +396,22 @@ export class ExecutionStore {
 
   private appendOutput(value: string): void {
     if (!value) return;
-    const next = this.output + value;
-    this.output = next.length <= FRONTEND_OUTPUT_LIMIT
-      ? next
-      : `[较早的输出因界面容量限制已被丢弃]\n${next.slice(-FRONTEND_OUTPUT_LIMIT)}`;
+    this.outputBuffer.enqueue(value);
+    if (!this.outputTimer) {
+      this.outputTimer = setTimeout(() => this.flushOutput(), OUTPUT_FLUSH_INTERVAL_MS);
+    }
+  }
+
+  private flushOutput(): void {
+    this.outputTimer = undefined;
+    this.output = this.outputBuffer.flush(this.output);
   }
 
   private appendTruncationNotice(): void {
     const notice = "\n[LightCP] 输出容量已达上限，后续内容已被丢弃。\n";
-    if (!this.output.endsWith(notice)) this.appendOutput(notice);
+    if (this.truncationNoticeQueued) return;
+    this.truncationNoticeQueued = true;
+    this.appendOutput(notice);
   }
 }
 

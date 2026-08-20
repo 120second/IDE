@@ -4,6 +4,7 @@ pub mod debugger;
 pub mod filesystem;
 pub mod generator;
 pub mod health;
+pub mod performance;
 pub mod runner;
 pub mod settings;
 pub mod stress;

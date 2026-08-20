@@ -15,8 +15,10 @@ pub async fn start_stress_test(
     let workspace_root = state.active_workspace_root().map_err(CommandError::from)?;
     let build_root = state.paths.data_dir.join("build");
     let manager = state.stress.clone();
+    let performance = state.performance.clone();
     tauri::async_runtime::spawn_blocking(move || {
         manager.run(&workspace_root, &build_root, &request, |event| {
+            performance.record_ipc_event();
             if let Err(error) = app.emit("stress-event", event) {
                 log::warn!("failed to emit stress event: {error}");
             }

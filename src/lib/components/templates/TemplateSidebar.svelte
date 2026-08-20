@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { TemplateCategoryRow, TemplateSort } from "../../types/templates";
   import Icon from "../shell/Icon.svelte";
@@ -17,6 +18,31 @@
   ];
 
   let { templateStore }: Props = $props();
+  const CATEGORY_ROW_HEIGHT = 27;
+  const CATEGORY_OVERSCAN = 8;
+  let categoryViewport: HTMLDivElement;
+  let categoryScrollTop = $state(0);
+  let categoryViewportHeight = $state(300);
+  let categoryRows = $derived(templateStore.categoryRows);
+  let categoryStart = $derived(
+    Math.max(0, Math.floor(categoryScrollTop / CATEGORY_ROW_HEIGHT) - CATEGORY_OVERSCAN),
+  );
+  let categoryEnd = $derived(
+    Math.min(
+      categoryRows.length,
+      Math.ceil((categoryScrollTop + categoryViewportHeight) / CATEGORY_ROW_HEIGHT) + CATEGORY_OVERSCAN,
+    ),
+  );
+  let renderedCategories = $derived(categoryRows.slice(categoryStart, categoryEnd));
+
+  onMount(() => {
+    void templateStore.initialize();
+    const observer = new ResizeObserver(([entry]) => {
+      categoryViewportHeight = entry.contentRect.height;
+    });
+    observer.observe(categoryViewport);
+    return () => observer.disconnect();
+  });
 
   function beginCategoryDrag(event: DragEvent, id: number): void {
     event.dataTransfer?.setData("application/x-lightcp-template-category", String(id));
@@ -128,13 +154,16 @@
 
   <div
     class="category-tree"
+    bind:this={categoryViewport}
     role="tree"
     tabindex="0"
     aria-label="模板分类"
+    onscroll={(event) => (categoryScrollTop = event.currentTarget.scrollTop)}
     ondragover={allowCategoryDrop}
     ondrop={dropOnRoot}
   >
-    {#each templateStore.categoryRows as row (row.category.id)}
+    <div class="category-tree-spacer" style:height={`${categoryRows.length * CATEGORY_ROW_HEIGHT}px`}>
+    {#each renderedCategories as row, index (row.category.id)}
       <div
         class="category-row"
         class:active={templateStore.selectedCategoryId === row.category.id && templateStore.collection === "all"}
@@ -144,6 +173,7 @@
         aria-selected={templateStore.selectedCategoryId === row.category.id}
         tabindex="0"
         draggable="true"
+        style:top={`${(categoryStart + index) * CATEGORY_ROW_HEIGHT}px`}
         style:padding-left={`${7 + row.depth * 14}px`}
         onclick={() => void templateStore.setCategory(row.category.id)}
         onkeydown={(event) => {
@@ -172,6 +202,7 @@
         </span>
       </div>
     {/each}
+    </div>
     {#if templateStore.categories.length === 0}
       <div class="category-empty">暂无分类</div>
     {/if}

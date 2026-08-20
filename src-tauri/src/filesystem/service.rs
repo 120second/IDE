@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::error::{AppError, AppResult};
+use crate::paths::is_within;
 
 use super::{EntryKind, FileContent, FileEntry, PathResult, WorkspaceInfo};
 
@@ -212,7 +213,7 @@ pub fn move_entry(root: &Path, source: &str, target_directory: &str) -> AppResul
 
 fn checked_existing(root: &Path, input: &str) -> AppResult<PathBuf> {
     let canonical = dunce::canonicalize(input)?;
-    if !canonical.starts_with(root) {
+    if !is_within(root, &canonical) {
         return Err(operation_error(format!(
             "path is outside the active workspace: {}",
             canonical.display()

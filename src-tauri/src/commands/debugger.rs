@@ -16,8 +16,10 @@ pub async fn start_debug_session(
     state: State<'_, AppState>,
 ) -> Result<DebugSessionSnapshot, CommandError> {
     let manager = state.debugger.clone();
+    let performance = state.performance.clone();
     blocking(move || {
         manager.start(request, move |event| {
+            performance.record_ipc_event();
             if let Err(error) = app.emit("debug-event", event) {
                 log::warn!("failed to emit debugger event: {error}");
             }

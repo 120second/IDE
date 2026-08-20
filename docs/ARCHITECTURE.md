@@ -2,7 +2,7 @@
 
 ## 范围
 
-Batch 6 在 IDE Shell、编辑器、Workspace、Template Center、Compiler、Runner、Fixed Testcases 与代码归档基础上加入离线、确定性的结构化 Random Generator。当前仍不包含 GDB 或 Stress。
+当前架构已完成至 Batch 9：IDE Shell、编辑器、Workspace、Template Center、Compiler、Runner、Fixed Testcases、代码归档、结构化 Random Generator、GDB/MI Debugger、Stress Test 与性能专项优化。clangd 尚未加入。
 
 ## 进程与职责边界
 
@@ -111,7 +111,7 @@ ExecutionStore
 └── testcase metadata/results → Bottom Panel
 ```
 
-F5/F6 等快捷键统一定义在 `keybindings.ts`，Workbench 是唯一的全局键盘分发点。固定样例按当前物理源文件加载；UI 支持编辑、复制、删除、启用和拖放排序。输出区使用单个 `<pre>`，Test Results 只为每个样例创建一个结果行。
+F5/F6 等快捷键统一定义在 `keybindings.ts`，Workbench 是唯一的全局键盘分发点。固定样例按当前物理源文件加载；UI 支持编辑、复制、删除、启用和拖放排序。输出区使用单个原生只读文本控件并按 32ms 合批更新，Test Results 只为每个样例创建一个结果行。
 
 编译和运行 command 均为异步 Tauri command，耗时工作通过 `spawn_blocking` 离开 UI 线程。Runner 读取 stdout/stderr 的线程只发送原始块到 Rust 聚合器，聚合器约每 24ms 发出一个 `runner-output` 事件，不按行发送 IPC。Rust 与前端分别限制输出容量。
 
@@ -190,7 +190,7 @@ Tauri 根据 bundle identifier `com.lightcp.ide` 解析操作系统应用数据�
 5. 在事务中顺序执行尚未应用的 migration。
 6. 将 schema 版本放入 Tauri managed state。
 
-schema v2 新增 `recent_workspaces`。schema v3 新增模板表和索引。schema v4 新增按 `source_path, sort_order, id` 索引的 `testcases`。schema v5 新增 `workspace_files`、`tags`、`file_tags`、`collections` 及归档索引。schema v6 新增按 canonical `source_path` 保存版本化 JSON 的 `generator_profiles`。
+schema v2 新增 `recent_workspaces`。schema v3 新增模板表和索引。schema v4 新增按 `source_path, sort_order, id` 索引的 `testcases`。schema v5 新增 `workspace_files`、`tags`、`file_tags`、`collections` 及归档索引。schema v6 新增按 canonical `source_path` 保存版本化 JSON 的 `generator_profiles`。schema v7 为 Template 常用排序与 Archive Inbox 排序补充覆盖索引。
 
 `workspace_files` 同时记录 Inbox 和已归档文件。`available` 允许外部删除先隐藏记录、随后在配对 rename 事件到达时恢复并更新路径，因此 Windows 的 From/To 两段式事件不会丢失归档 metadata。
 

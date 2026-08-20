@@ -1,6 +1,6 @@
 # LightCP
 
-LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 8：Stress Test**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
+LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 9：Performance Audit**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
 
 已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档、确定性随机数据生成器、GDB/MI 图形化调试器和后台并发压力测试。clangd 尚未实现。
 
@@ -88,9 +88,9 @@ settings.json
 
 设置在 UI 中实时预览，并在最后一次变化 400ms 后写盘。Rust 日志默认写入终端和 Tauri 应用日志目录。
 
-SQLite migration 为只追加机制；详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+SQLite migration 为只追加机制；详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。本批性能审计与实测结果见 [docs/PERFORMANCE_REPORT_BATCH9.md](docs/PERFORMANCE_REPORT_BATCH9.md)。
 
-最近打开的工作区保存在 `recent_workspaces`。模板数据保存在 schema v3 的模板表中，固定样例保存在 schema v4 的 `testcases` 表中，归档 metadata、标签和智能集合保存在 schema v5，版本化随机生成规则保存在 schema v6 的 `generator_profiles`。所有 Workspace 文件操作均通过 Rust command 执行并校验当前根目录边界；Windows watcher 使用原生 `ReadDirectoryChangesW`，不轮询磁盘。
+最近打开的工作区保存在 `recent_workspaces`。模板数据保存在 schema v3 的模板表中，固定样例保存在 schema v4 的 `testcases` 表中，归档 metadata、标签和智能集合保存在 schema v5，版本化随机生成规则保存在 schema v6 的 `generator_profiles`，schema v7 补充 Template 与 Archive 热查询索引。所有 Workspace 文件操作均通过 Rust command 执行并校验当前根目录边界；Windows watcher 使用原生 `ReadDirectoryChangesW`，不轮询磁盘。
 
 ## 当前目录
 
@@ -129,7 +129,7 @@ CodeMirror/C++ 解析器独立为异步 chunk，避免把完整编辑器核心�
 - Runner 在后台线程执行，支持 stdin、stdout、stderr、exit code、超时和 Stop。输出在 Rust 侧每约 24ms 合并后发送，且前后端均有容量上限。
 - Testcases Activity 按当前 C++ 文件管理 Sample、Custom、Hack，支持新增、编辑、启用、复制、删除、拖动排序、Run One 和 Run All。
 - 比较器仅忽略行末空格与最终多余换行，不忽略内部空格差异。
-- Output 使用单一 `<pre>` 文本节点，避免大量 stdout 创建成千上万个 DOM 节点。
+- Output 使用单一原生只读文本控件并按 32ms 合并更新，避免大量 stdout 创建成千上万个 DOM 节点。
 
 ## 竞赛代码归档
 
@@ -181,4 +181,4 @@ CodeMirror/C++ 解析器独立为异步 chunk，避免把完整编辑器核心�
 
 ## 下一批
 
-Batch 8 已完成；后续能力按新的批次说明继续开发。
+Batch 9 已完成；下一批为 Batch 10：clangd。

@@ -16,6 +16,11 @@
   import { TemplateStore } from "./lib/stores/templates.svelte";
   import { WorkspaceStore } from "./lib/stores/workspace.svelte";
   import type { CommandError, HealthStatus } from "./lib/types/health";
+  import {
+    installPerformanceConsole,
+    markFrontendReady,
+    registerPerformanceReaders,
+  } from "./lib/performance";
 
   const shell = new ShellStore();
   const settings = new SettingsStore();
@@ -40,6 +45,7 @@
 
   onMount(() => {
     let disposed = false;
+    installPerformanceConsole();
     void Promise.all([
       settings.initialize(),
       import("./lib/editor/workspace.svelte"),
@@ -54,21 +60,29 @@
         execution = new ExecutionStore(editor, settings, shell);
         debugStore = new DebugStore(editor, execution, settings, shell);
         stressStore = new StressStore(editor, generator, execution, debugStore, settings, shell);
+        registerPerformanceReaders(
+          () => execution!.approximateOutputBytes + debugStore!.approximateOutputBytes,
+          () => Number(execution!.running) + Number(debugStore!.active) + Number(stressStore!.running),
+        );
         void fileWorkspace.initialize();
-        void templateStore.initialize();
         void execution.initialize();
         void debugStore.initialize();
         void stressStore.initialize();
+        requestAnimationFrame(() => markFrontendReady());
       })
       .catch((error: unknown) => {
+        if (disposed) return;
         editorLoadError = error instanceof Error ? error.message : String(error);
       });
 
     void (async () => {
       try {
-        health = await healthCheck();
+        const result = await healthCheck();
+        if (disposed) return;
+        health = result;
         backendState = "ready";
       } catch (error) {
+        if (disposed) return;
         const commandError = error as Partial<CommandError>;
         console.info(commandError.userMessage ?? "浏览器预览模式下无法使用 Rust IPC。");
         backendState = "error";

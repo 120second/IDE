@@ -39,6 +39,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "generator_profiles",
         sql: include_str!("migrations/0006_generator_profiles.sql"),
     },
+    Migration {
+        version: 7,
+        name: "performance_indexes",
+        sql: include_str!("migrations/0007_performance_indexes.sql"),
+    },
 ];
 
 pub fn apply_pending(connection: &mut Connection) -> AppResult<i64> {
@@ -94,11 +99,11 @@ mod tests {
 
         assert_eq!(
             apply_pending(&mut connection).expect("first migration run"),
-            6
+            7
         );
         assert_eq!(
             apply_pending(&mut connection).expect("second migration run"),
-            6
+            7
         );
 
         let applied_count: i64 = connection
@@ -106,6 +111,32 @@ mod tests {
                 row.get(0)
             })
             .expect("migration count should be readable");
-        assert_eq!(applied_count, 6);
+        assert_eq!(applied_count, 7);
+    }
+
+    #[test]
+    fn template_indexes_avoid_temporary_sort_tables() {
+        let mut connection = Connection::open_in_memory().expect("in-memory database should open");
+        apply_pending(&mut connection).expect("migrations");
+        for ordering in [
+            "sort_order, id",
+            "name COLLATE NOCASE, id",
+            "use_count DESC, name COLLATE NOCASE, id",
+            "created_at DESC, id",
+        ] {
+            let sql = format!(
+                "EXPLAIN QUERY PLAN SELECT id FROM templates WHERE kind = 'snippet' ORDER BY {ordering}"
+            );
+            let mut statement = connection.prepare(&sql).expect("query plan");
+            let details = statement
+                .query_map([], |row| row.get::<_, String>(3))
+                .expect("query plan rows")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("query plan details");
+            assert!(
+                details.iter().all(|detail| !detail.contains("TEMP B-TREE")),
+                "unexpected temporary sort for {ordering}: {details:?}"
+            );
+        }
     }
 }

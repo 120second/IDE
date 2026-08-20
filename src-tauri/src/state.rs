@@ -8,6 +8,7 @@ use crate::{
     error::{AppError, AppResult},
     filesystem::WorkspaceRuntime,
     paths::AppPaths,
+    performance::PerformanceMetrics,
     runner::RunnerManager,
     stress::StressManager,
 };
@@ -15,11 +16,12 @@ use crate::{
 pub struct AppState {
     pub paths: AppPaths,
     pub database_schema_version: i64,
-    pub settings_write_lock: Mutex<()>,
+    pub settings_write_lock: Arc<Mutex<()>>,
     pub workspace: Mutex<WorkspaceRuntime>,
     pub runner: Arc<RunnerManager>,
     pub debugger: Arc<DebugManager>,
     pub stress: Arc<StressManager>,
+    pub performance: Arc<PerformanceMetrics>,
 }
 
 impl AppState {
@@ -28,11 +30,12 @@ impl AppState {
         Self {
             paths,
             database_schema_version,
-            settings_write_lock: Mutex::new(()),
+            settings_write_lock: Arc::new(Mutex::new(())),
             workspace: Mutex::new(WorkspaceRuntime::default()),
             runner: Arc::new(RunnerManager::default()),
             debugger: Arc::new(DebugManager::new(debug_data_dir)),
             stress: Arc::new(StressManager::default()),
+            performance: Arc::new(PerformanceMetrics::default()),
         }
     }
 

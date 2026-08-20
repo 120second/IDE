@@ -26,6 +26,8 @@ use super::{
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(800);
 const CHILD_PAGE_LIMIT: u32 = 100;
+const OUTPUT_BATCH_INTERVAL: Duration = Duration::from_millis(32);
+const OUTPUT_BATCH_BYTES: usize = 32 * 1024;
 
 type EventSink = Arc<dyn Fn(DebugEvent) + Send + Sync + 'static>;
 
@@ -33,6 +35,48 @@ type EventSink = Arc<dyn Fn(DebugEvent) + Send + Sync + 'static>;
 struct CommandResult {
     class: String,
     results: Vec<MiResult>,
+}
+
+struct PendingDebugOutput {
+    chunks: Vec<(String, String)>,
+    bytes: usize,
+    last_flush: Instant,
+}
+
+impl PendingDebugOutput {
+    fn new() -> Self {
+        Self {
+            chunks: Vec::new(),
+            bytes: 0,
+            last_flush: Instant::now(),
+        }
+    }
+
+    fn push(&mut self, stream: &str, text: String) {
+        if text.is_empty() {
+            return;
+        }
+        self.bytes = self.bytes.saturating_add(text.len());
+        if let Some((last_stream, last_text)) = self.chunks.last_mut() {
+            if last_stream == stream {
+                last_text.push_str(&text);
+                return;
+            }
+        }
+        self.chunks.push((stream.to_owned(), text));
+    }
+
+    fn should_flush(&self) -> bool {
+        self.bytes >= OUTPUT_BATCH_BYTES || self.last_flush.elapsed() >= OUTPUT_BATCH_INTERVAL
+    }
+
+    fn flush(&mut self, session: &DebugSession) {
+        for (stream, text) in self.chunks.drain(..) {
+            session.emit_output(&stream, text);
+        }
+        self.bytes = 0;
+        self.last_flush = Instant::now();
+    }
 }
 
 pub struct DebugManager {
@@ -183,6 +227,13 @@ impl DebugManager {
 
     pub fn remove_breakpoint(&self, id: &str) -> AppResult<bool> {
         self.session()?.remove_breakpoint(id)
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
+            .lock()
+            .map(|active| active.is_some())
+            .unwrap_or(false)
     }
 
     fn session(&self) -> AppResult<Arc<DebugSession>> {
@@ -670,12 +721,15 @@ impl DebugSession {
         let weak = Arc::downgrade(session);
         thread::spawn(move || {
             let reader = BufReader::new(stdout);
+            let mut pending_output = PendingDebugOutput::new();
             for line in reader.lines() {
                 let Some(session) = weak.upgrade() else {
                     return;
                 };
                 match line {
-                    Ok(line) if !line.trim().is_empty() => session.handle_record(&line),
+                    Ok(line) if !line.trim().is_empty() => {
+                        session.handle_record(&line, &mut pending_output)
+                    }
                     Ok(_) => {}
                     Err(error) => {
                         session.emit_output("log", format!("GDB 输出读取失败：{error}\n"));
@@ -684,6 +738,7 @@ impl DebugSession {
                 }
             }
             if let Some(session) = weak.upgrade() {
+                pending_output.flush(&session);
                 session.handle_gdb_eof();
             }
         });
@@ -712,13 +767,14 @@ impl DebugSession {
         });
     }
 
-    fn handle_record(&self, line: &str) {
+    fn handle_record(&self, line: &str, pending_output: &mut PendingDebugOutput) {
         match parse_record(line) {
             Ok(MiRecord::Result {
                 token: Some(token),
                 class,
                 results,
             }) => {
+                pending_output.flush(self);
                 let sender = self
                     .pending
                     .lock()
@@ -733,31 +789,45 @@ impl DebugSession {
                 class,
                 results,
                 ..
-            }) => match class.as_str() {
-                "running" => self.set_state(DebugSessionState::Running, "程序正在运行"),
-                "stopped" => {
-                    let reason = const_field(&results, "reason").unwrap_or("stopped");
-                    if reason.starts_with("exited") {
-                        self.set_state(DebugSessionState::Exited, stopped_reason(reason, &results));
-                    } else {
-                        self.set_state(
-                            DebugSessionState::Stopped,
-                            stopped_reason(reason, &results),
-                        );
+            }) => {
+                pending_output.flush(self);
+                match class.as_str() {
+                    "running" => self.set_state(DebugSessionState::Running, "程序正在运行"),
+                    "stopped" => {
+                        let reason = const_field(&results, "reason").unwrap_or("stopped");
+                        if reason.starts_with("exited") {
+                            self.set_state(
+                                DebugSessionState::Exited,
+                                stopped_reason(reason, &results),
+                            );
+                        } else {
+                            self.set_state(
+                                DebugSessionState::Stopped,
+                                stopped_reason(reason, &results),
+                            );
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Ok(MiRecord::Stream { kind, text }) => {
                 let stream = match kind {
                     MiStreamKind::Console => "console",
                     MiStreamKind::Target => "target",
                     MiStreamKind::Log => "log",
                 };
-                self.emit_output(stream, text);
+                pending_output.push(stream, text);
+                if pending_output.should_flush() {
+                    pending_output.flush(self);
+                }
             }
-            Ok(_) => {}
-            Err(error) => self.emit_output("log", format!("[MI 解析警告] {error}\n")),
+            Ok(_) => pending_output.flush(self),
+            Err(error) => {
+                pending_output.push("log", format!("[MI 解析警告] {error}\n"));
+                if pending_output.should_flush() {
+                    pending_output.flush(self);
+                }
+            }
         }
     }
 
@@ -1002,6 +1072,17 @@ mod tests {
         assert_eq!(child_expression("a", "12"), "a[12]");
         assert_eq!(child_expression("node", "next"), "node.next");
         assert_eq!(child_expression("node", "->value"), "node->value");
+    }
+
+    #[test]
+    fn mi_stream_output_is_merged_before_ipc() {
+        let mut pending = PendingDebugOutput::new();
+        for _ in 0..100_000 {
+            pending.push("target", "line\n".to_owned());
+        }
+        assert_eq!(pending.chunks.len(), 1);
+        assert_eq!(pending.bytes, 500_000);
+        assert!(pending.should_flush());
     }
 
     #[test]

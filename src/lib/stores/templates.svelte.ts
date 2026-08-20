@@ -30,6 +30,7 @@ import type {
   TemplateVersionDetail,
   TemplateVersionMetadata,
 } from "../types/templates";
+import { buildTemplateCategoryRows } from "../templateTree";
 
 const EMPTY_DRAFT: TemplateInput = {
   kind: "snippet",
@@ -72,31 +73,50 @@ export class TemplateStore {
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   private listRequest = 0;
   private quickRequest = 0;
+  private initialized = false;
+  private initializePromise: Promise<void> | undefined;
+  private fileTemplatesLoaded = false;
+  private fileTemplatesPromise: Promise<void> | undefined;
+  private categoryRowsCache: TemplateCategoryRow[] = [];
+  private categoryRowsCacheRevision = -1;
 
   constructor(private readonly editor: EditorWorkspace) {}
 
   get categoryRows(): TemplateCategoryRow[] {
-    this.categoryRevision;
-    const rows: TemplateCategoryRow[] = [];
-    this.appendCategoryRows(undefined, 0, rows);
-    return rows;
+    const revision = this.categoryRevision;
+    if (revision !== this.categoryRowsCacheRevision) {
+      this.categoryRowsCache = this.buildCategoryRows();
+      this.categoryRowsCacheRevision = revision;
+    }
+    return this.categoryRowsCache;
   }
 
   async initialize(): Promise<void> {
+    if (this.initialized) return;
+    if (this.initializePromise) return this.initializePromise;
+    this.initializePromise = this.loadInitialMetadata();
+    await this.initializePromise;
+  }
+
+  private async loadInitialMetadata(): Promise<void> {
+    const initialListRequest = this.listRequest;
     this.loading = true;
     try {
-      const [categories, snippets, files] = await Promise.all([
+      const [categories, snippets] = await Promise.all([
         listTemplateCategories(),
         listTemplates(defaultFilter("snippet")),
-        listTemplates(defaultFilter("file")),
       ]);
       this.categories = categories;
-      this.templates = snippets;
-      this.fileTemplates = files;
+      if (this.kind === "snippet" && this.listRequest === initialListRequest) {
+        this.templates = snippets;
+      }
+      this.categoryRevision += 1;
+      this.initialized = true;
     } catch (error) {
       this.error = errorMessage(error);
     } finally {
-      this.loading = false;
+      if (this.listRequest === initialListRequest) this.loading = false;
+      this.initializePromise = undefined;
     }
   }
 
@@ -156,8 +176,20 @@ export class TemplateStore {
   async refreshFileTemplates(): Promise<void> {
     try {
       this.fileTemplates = await listTemplates(defaultFilter("file"));
+      this.fileTemplatesLoaded = true;
     } catch (error) {
       this.error = errorMessage(error);
+    }
+  }
+
+  async ensureFileTemplates(): Promise<void> {
+    if (this.fileTemplatesLoaded) return;
+    if (this.fileTemplatesPromise) return this.fileTemplatesPromise;
+    this.fileTemplatesPromise = this.refreshFileTemplates();
+    try {
+      await this.fileTemplatesPromise;
+    } finally {
+      this.fileTemplatesPromise = undefined;
     }
   }
 
@@ -414,20 +446,8 @@ export class TemplateStore {
     this.categoryRevision += 1;
   }
 
-  private appendCategoryRows(
-    parentId: number | undefined,
-    depth: number,
-    rows: TemplateCategoryRow[],
-  ): void {
-    const siblings = this.categories
-      .filter((category) => category.parentId === parentId)
-      .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
-    for (const category of siblings) {
-      const hasChildren = this.categories.some((candidate) => candidate.parentId === category.id);
-      const expanded = this.expandedCategories.has(category.id);
-      rows.push({ category, depth, expanded, hasChildren });
-      if (expanded) this.appendCategoryRows(category.id, depth + 1, rows);
-    }
+  private buildCategoryRows(): TemplateCategoryRow[] {
+    return buildTemplateCategoryRows(this.categories, this.expandedCategories);
   }
 }
 

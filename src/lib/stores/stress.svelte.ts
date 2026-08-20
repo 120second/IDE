@@ -4,6 +4,7 @@ import { chooseCppSource, startStressTest, stopStressTest } from "../api/stress"
 import type { EditorWorkspace } from "../editor/workspace.svelte";
 import type {
   StressEvent,
+  StressCasePassed,
   StressFailure,
   StressLogEntry,
   StressRunRequest,
@@ -16,6 +17,7 @@ import type { ExecutionStore } from "./execution.svelte";
 import type { GeneratorStore } from "./generator.svelte";
 import type { SettingsStore } from "./settings.svelte";
 import type { ShellStore } from "./shell.svelte";
+import { recordIpcEvent } from "../performance";
 
 const MAX_LOG_ENTRIES = 500;
 const EMPTY_STATS: StressStats = {
@@ -46,6 +48,7 @@ export class StressStore {
 
   private unlisten: UnlistenFn | undefined;
   private sequence = 0;
+  private disposed = false;
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -62,15 +65,19 @@ export class StressStore {
   async initialize(): Promise<void> {
     if (!isTauri()) return;
     try {
-      this.unlisten = await listen<StressEvent>("stress-event", (event) => {
+      const unlisten = await listen<StressEvent>("stress-event", (event) => {
+        recordIpcEvent();
         this.handleEvent(event.payload);
       });
+      if (this.disposed) unlisten();
+      else this.unlisten = unlisten;
     } catch (error) {
       this.error = errorMessage(error);
     }
   }
 
   dispose(): void {
+    this.disposed = true;
     this.unlisten?.();
     this.unlisten = undefined;
     if (this.running) void stopStressTest();
@@ -259,14 +266,11 @@ export class StressStore {
       return;
     }
     if (event.kind === "casePassed") {
-      this.stats = event.result.stats;
-      this.appendLog({
-        status: "AC",
-        index: event.result.index,
-        seed: event.result.seed,
-        solutionTimeMs: event.result.solutionTimeMs,
-        bruteTimeMs: event.result.bruteTimeMs,
-      });
+      this.appendPassed([event.result]);
+      return;
+    }
+    if (event.kind === "casesPassed") {
+      this.appendPassed(event.results);
       return;
     }
     this.failure = event.failure;
@@ -290,6 +294,22 @@ export class StressStore {
 
   private appendLog(entry: StressLogEntry): void {
     const next = [...this.logs, entry];
+    this.logs = next.length <= MAX_LOG_ENTRIES
+      ? next
+      : next.slice(next.length - MAX_LOG_ENTRIES);
+  }
+
+  private appendPassed(results: StressCasePassed[]): void {
+    if (results.length === 0) return;
+    this.stats = results[results.length - 1].stats;
+    const entries: StressLogEntry[] = results.map((result) => ({
+      status: "AC",
+      index: result.index,
+      seed: result.seed,
+      solutionTimeMs: result.solutionTimeMs,
+      bruteTimeMs: result.bruteTimeMs,
+    }));
+    const next = [...this.logs, ...entries];
     this.logs = next.length <= MAX_LOG_ENTRIES
       ? next
       : next.slice(next.length - MAX_LOG_ENTRIES);

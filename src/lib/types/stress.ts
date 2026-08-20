@@ -65,6 +65,7 @@ export interface StressSummary {
 export type StressEvent =
   | { kind: "state"; sessionId: string; status: Exclude<StressStatus, "idle">; message: string }
   | { kind: "casePassed"; sessionId: string; result: StressCasePassed }
+  | { kind: "casesPassed"; sessionId: string; results: StressCasePassed[] }
   | { kind: "failure"; sessionId: string; failure: StressFailure };
 
 export type StressLogEntry =

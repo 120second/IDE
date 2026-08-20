@@ -14,8 +14,13 @@ pub fn open_workspace(
     state: State<'_, AppState>,
 ) -> Result<WorkspaceInfo, CommandError> {
     let (root, info) = canonical_workspace(&path).map_err(CommandError::from)?;
-    let watcher = WorkspaceWatcher::start(&root, &state.paths.database_file, app)
-        .map_err(CommandError::from)?;
+    let watcher = WorkspaceWatcher::start(
+        &root,
+        &state.paths.database_file,
+        app,
+        state.performance.clone(),
+    )
+    .map_err(CommandError::from)?;
     recent_workspaces::record(&state.paths.database_file, &info).map_err(CommandError::from)?;
 
     let mut runtime = state.workspace.lock().map_err(|_| {

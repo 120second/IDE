@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use tauri::State;
 
@@ -14,10 +15,19 @@ pub fn list_directory(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<FileEntry>, CommandError> {
+    let started = Instant::now();
     let root = active_root(&state)?;
+    let is_workspace_root = dunce::canonicalize(&path).ok().is_some_and(|candidate| {
+        crate::paths::is_within(&root, &candidate) && crate::paths::is_within(&candidate, &root)
+    });
     let entries = fs_core::list_directory(&root, &path).map_err(CommandError::from)?;
     archive::register_entries(&state.paths.database_file, &root, &entries)
         .map_err(CommandError::from)?;
+    if is_workspace_root {
+        state.performance.set_workspace_load_duration(
+            started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        );
+    }
     Ok(entries)
 }
 

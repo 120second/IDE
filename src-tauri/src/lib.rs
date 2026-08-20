@@ -7,6 +7,7 @@ pub mod error;
 pub mod filesystem;
 pub mod generator;
 pub mod paths;
+pub mod performance;
 pub mod runner;
 pub mod settings;
 pub mod state;
@@ -23,6 +24,7 @@ pub(crate) static PROCESS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::ne
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let backend_started = std::time::Instant::now();
     let application = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -31,7 +33,7 @@ pub fn run() {
                 .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             let paths = AppPaths::initialize(app.handle())?;
             let database = database::initialize(&paths.database_file)?;
 
@@ -41,11 +43,19 @@ pub fn run() {
                 paths.data_dir.display()
             );
 
-            app.manage(AppState::new(paths, database.schema_version));
+            let state = AppState::new(paths, database.schema_version);
+            state.performance.set_backend_startup_duration(
+                backend_started
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64,
+            );
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::health::health_check,
+            commands::performance::get_performance_snapshot,
             commands::settings::load_settings,
             commands::settings::save_settings,
             commands::workspace::open_workspace,

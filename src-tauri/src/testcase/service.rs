@@ -5,6 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use crate::{
     database::connect,
     error::{AppError, AppResult},
+    paths::is_within,
 };
 
 use super::{Testcase, TestcaseInput, TestcaseKind};
@@ -195,7 +196,7 @@ fn map_testcase(row: &Row<'_>) -> rusqlite::Result<Testcase> {
 fn checked_source(root: &Path, source_path: &str) -> AppResult<PathBuf> {
     let root = dunce::canonicalize(root)?;
     let source = dunce::canonicalize(source_path)?;
-    if !source.starts_with(root) || !source.is_file() {
+    if !is_within(&root, &source) || !source.is_file() {
         return Err(AppError::FileSystemOperation(format!(
             "testcase source is outside the active workspace: {}",
             source.display()

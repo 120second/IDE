@@ -5,6 +5,7 @@ use rusqlite::{params, OptionalExtension};
 use crate::{
     database::connect,
     error::{AppError, AppResult},
+    paths::is_within,
 };
 
 use super::VisualGeneratorProfile;
@@ -72,7 +73,7 @@ pub fn save_profile(
 fn checked_source(root: &Path, source_path: &str) -> AppResult<PathBuf> {
     let root = dunce::canonicalize(root)?;
     let source = dunce::canonicalize(source_path)?;
-    if !source.starts_with(root) || !source.is_file() {
+    if !is_within(&root, &source) || !source.is_file() {
         return Err(AppError::FileSystemOperation(format!(
             "generator source is outside the active workspace: {}",
             source.display()

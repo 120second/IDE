@@ -19,6 +19,7 @@ import type {
   WorkspaceChange,
   WorkspaceInfo,
 } from "../types/workspace";
+import { recordIpcEvent, recordWorkspaceLoad } from "../performance";
 
 interface DirectoryState {
   loaded: boolean;
@@ -39,6 +40,9 @@ export class WorkspaceStore {
   private unlisten: UnlistenFn | undefined;
   private pendingChanges: WorkspaceChange[] = [];
   private eventTimer: ReturnType<typeof setTimeout> | undefined;
+  private visibleRowsCache: TreeRow[] = [];
+  private visibleRowsRevision = -1;
+  private disposed = false;
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -46,28 +50,36 @@ export class WorkspaceStore {
   ) {}
 
   get visibleRows(): TreeRow[] {
-    this.revision;
+    const revision = this.revision;
     if (!this.info) return [];
-    const rows: TreeRow[] = [];
-    this.appendRows(this.info.path, 0, rows);
-    return rows;
+    if (revision !== this.visibleRowsRevision) {
+      const rows: TreeRow[] = [];
+      this.appendRows(this.info.path, 0, rows);
+      this.visibleRowsCache = rows;
+      this.visibleRowsRevision = revision;
+    }
+    return this.visibleRowsCache;
   }
 
   async initialize(): Promise<void> {
     await this.refreshRecent();
     if (!isTauri()) return;
     try {
-      this.unlisten = await listen<WorkspaceChange>("workspace-changed", (event) => {
-        this.pendingChanges.push(event.payload);
+      const unlisten = await listen<WorkspaceChange[] | WorkspaceChange>("workspace-changed", (event) => {
+        recordIpcEvent();
+        this.pendingChanges.push(...(Array.isArray(event.payload) ? event.payload : [event.payload]));
         if (this.eventTimer) clearTimeout(this.eventTimer);
         this.eventTimer = setTimeout(() => void this.flushChanges(), 90);
       });
+      if (this.disposed) unlisten();
+      else this.unlisten = unlisten;
     } catch (error) {
       this.error = errorMessage(error);
     }
   }
 
   dispose(): void {
+    this.disposed = true;
     this.unlisten?.();
     this.unlisten = undefined;
     if (this.eventTimer) clearTimeout(this.eventTimer);
@@ -84,6 +96,7 @@ export class WorkspaceStore {
   }
 
   async openPath(path: string): Promise<void> {
+    const started = performance.now();
     this.loading = true;
     this.error = "";
     try {
@@ -101,6 +114,7 @@ export class WorkspaceStore {
       await this.loadDirectory(info.path, true);
       await this.refreshRecent();
       await this.archive?.setWorkspaceReady(true);
+      recordWorkspaceLoad(performance.now() - started);
     } catch (error) {
       this.error = errorMessage(error);
     } finally {
@@ -272,7 +286,10 @@ export class WorkspaceStore {
     if (!this.info || changes.length === 0) return;
 
     const parents = new Map<string, string>();
-    for (const change of changes) {
+    const grouped = coalesceChanges(changes);
+    let structuralChange = false;
+    for (const change of grouped) {
+      structuralChange ||= change.kind !== "changed";
       await this.editor.handleExternalChange(change);
       for (const path of change.paths) {
         const parent = parentPath(path);
@@ -285,7 +302,7 @@ export class WorkspaceStore {
         .filter((path) => this.directories.get(pathKey(path))?.loaded)
         .map((path) => this.loadDirectory(path, true)),
     );
-    await this.archive?.refreshAll();
+    if (structuralChange) await this.archive?.refreshAll();
   }
 
   private async refreshLoadedParent(path: string): Promise<void> {
@@ -316,6 +333,30 @@ export class WorkspaceStore {
   private bump(): void {
     this.revision += 1;
   }
+}
+
+function coalesceChanges(changes: WorkspaceChange[]): WorkspaceChange[] {
+  const pathsByKind = new Map<string, Map<string, string>>();
+  const renamed: WorkspaceChange[] = [];
+  for (const change of changes) {
+    if (change.kind === "renamed") {
+      renamed.push(change);
+      continue;
+    }
+    let paths = pathsByKind.get(change.kind);
+    if (!paths) {
+      paths = new Map();
+      pathsByKind.set(change.kind, paths);
+    }
+    for (const path of change.paths) paths.set(pathKey(path), path);
+  }
+  return [
+    ...renamed,
+    ...[...pathsByKind.entries()].map(([kind, paths]) => ({
+      kind: kind as WorkspaceChange["kind"],
+      paths: [...paths.values()],
+    })),
+  ];
 }
 
 function pathKey(path: string): string {

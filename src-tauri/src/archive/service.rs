@@ -8,6 +8,7 @@ use crate::{
     database::connect,
     error::{AppError, AppResult},
     filesystem::{EntryKind, FileEntry},
+    paths::is_within,
 };
 
 use super::{
@@ -35,6 +36,16 @@ pub fn register_path(database_path: &Path, root: &Path, path: &str) -> AppResult
     let mut connection = connect(database_path)?;
     let transaction = connection.transaction()?;
     register_path_in_transaction(&transaction, root, path)?;
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn register_paths(database_path: &Path, root: &Path, paths: &[String]) -> AppResult<()> {
+    let mut connection = connect(database_path)?;
+    let transaction = connection.transaction()?;
+    for path in paths {
+        register_path_in_transaction(&transaction, root, path)?;
+    }
     transaction.commit()?;
     Ok(())
 }
@@ -416,7 +427,21 @@ pub fn sync_renamed_path(
 }
 
 pub fn sync_deleted_path(database_path: &Path, root: &Path, deleted_path: &str) -> AppResult<()> {
-    let deleted = normalized_path(deleted_path);
+    sync_deleted_paths(database_path, root, &[deleted_path.to_owned()])
+}
+
+pub fn sync_deleted_paths(
+    database_path: &Path,
+    root: &Path,
+    deleted_paths: &[String],
+) -> AppResult<()> {
+    if deleted_paths.is_empty() {
+        return Ok(());
+    }
+    let deleted = deleted_paths
+        .iter()
+        .map(|path| normalized_path(path).to_lowercase())
+        .collect::<HashSet<_>>();
     let mut connection = connect(database_path)?;
     let transaction = connection.transaction()?;
     let rows = {
@@ -430,7 +455,16 @@ pub fn sync_deleted_path(database_path: &Path, root: &Path, deleted_path: &str) 
         rows.collect::<Result<Vec<_>, _>>()?
     };
     for (id, path) in rows {
-        if same_or_child_path(&path, &deleted) {
+        let mut candidate = path.to_lowercase();
+        let mut removed = deleted.contains(&candidate);
+        while !removed {
+            let Some(separator) = candidate.rfind('\\') else {
+                break;
+            };
+            candidate.truncate(separator);
+            removed = deleted.contains(&candidate);
+        }
+        if removed {
             transaction.execute(
                 "UPDATE workspace_files SET available = 0 WHERE id = ?1",
                 [id],
@@ -848,7 +882,7 @@ fn sanitize_tags(tags: &[String]) -> AppResult<Vec<String>> {
 
 fn checked_cpp_path(root: &Path, path: &str) -> AppResult<String> {
     let canonical = dunce::canonicalize(path)?;
-    if !canonical.starts_with(root) || !canonical.is_file() {
+    if !is_within(root, &canonical) || !canonical.is_file() {
         return Err(archive_error(
             "archive path must be an existing workspace file",
         ));

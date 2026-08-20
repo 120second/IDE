@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { TemplateMetadata } from "../../types/templates";
   import Icon from "../shell/Icon.svelte";
@@ -9,6 +10,29 @@
 
   let { templateStore }: Props = $props();
   let historyOpen = $state(false);
+  const TEMPLATE_ROW_HEIGHT = 62;
+  const TEMPLATE_OVERSCAN = 8;
+  let listViewport: HTMLDivElement;
+  let listScrollTop = $state(0);
+  let listViewportHeight = $state(400);
+  let templateStart = $derived(
+    Math.max(0, Math.floor(listScrollTop / TEMPLATE_ROW_HEIGHT) - TEMPLATE_OVERSCAN),
+  );
+  let templateEnd = $derived(
+    Math.min(
+      templateStore.templates.length,
+      Math.ceil((listScrollTop + listViewportHeight) / TEMPLATE_ROW_HEIGHT) + TEMPLATE_OVERSCAN,
+    ),
+  );
+  let renderedTemplates = $derived(templateStore.templates.slice(templateStart, templateEnd));
+
+  onMount(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      listViewportHeight = entry.contentRect.height;
+    });
+    observer.observe(listViewport);
+    return () => observer.disconnect();
+  });
 
   function beginTemplateDrag(event: DragEvent, template: TemplateMetadata): void {
     event.dataTransfer?.setData("application/x-lightcp-template", String(template.id));
@@ -71,14 +95,16 @@
         <span>{templateStore.loading ? "正在加载…" : `${templateStore.templates.length} 个模板`}</span>
         {#if templateStore.sort !== "manual"}<small>当前排序方式不支持拖动</small>{/if}
       </div>
-      <div class="template-list">
-        {#each templateStore.templates as template (template.id)}
+      <div class="template-list" bind:this={listViewport} onscroll={(event) => (listScrollTop = event.currentTarget.scrollTop)}>
+        <div class="template-list-spacer" style:height={`${templateStore.templates.length * TEMPLATE_ROW_HEIGHT}px`}>
+        {#each renderedTemplates as template, index (template.id)}
           <div
             class="template-list-row"
             class:active={templateStore.selectedId === template.id}
             role="button"
             tabindex="0"
             draggable={templateStore.sort === "manual" && !templateStore.search}
+            style:top={`${(templateStart + index) * TEMPLATE_ROW_HEIGHT}px`}
             onclick={() => void templateStore.openTemplate(template.id)}
             onkeydown={(event) => {
               if (event.key === "Enter") void templateStore.openTemplate(template.id);
@@ -105,6 +131,7 @@
             >★</button>
           </div>
         {/each}
+        </div>
         {#if !templateStore.loading && templateStore.templates.length === 0}
           <div class="template-list-empty">
             <Icon name="templates" size={27} />

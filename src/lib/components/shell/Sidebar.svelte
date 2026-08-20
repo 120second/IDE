@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ArchiveStore } from "../../stores/archive.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
@@ -38,19 +39,25 @@
   };
 
   let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug }: Props = $props();
+  let stopResize = () => {};
+  onDestroy(() => stopResize());
 
   function beginResize(event: PointerEvent): void {
     event.preventDefault();
+    stopResize();
     const startX = event.clientX;
     const startWidth = shell.sidebarWidth;
     const onMove = (moveEvent: PointerEvent) =>
       shell.setSidebarWidth(startWidth + moveEvent.clientX - startX);
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      stopResize = () => {};
     };
+    const onUp = () => cleanup();
+    stopResize = cleanup;
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointerup", onUp);
   }
 </script>
 

@@ -29,11 +29,15 @@ export class SettingsStore {
 
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private saveSequence = 0;
+  private persistedFingerprint = "";
+  private persisting = false;
+  private retryAfterPersist = false;
 
   async initialize(): Promise<void> {
     this.saveState = "loading";
     try {
       this.value = normalizeSettings(await loadSettings(DEFAULT_SETTINGS));
+      this.persistedFingerprint = fingerprint(this.value);
       this.saveState = "idle";
       this.errorMessage = "";
     } catch (error) {
@@ -44,18 +48,24 @@ export class SettingsStore {
   }
 
   update(patch: Partial<AppSettings>): void {
-    this.value = normalizeSettings({ ...this.value, ...patch });
+    const next = normalizeSettings({ ...this.value, ...patch });
+    if (fingerprint(next) === fingerprint(this.value)) return;
+    this.value = next;
     this.queueSave();
   }
 
   reset(): void {
-    this.value = { ...DEFAULT_SETTINGS };
+    const next = { ...DEFAULT_SETTINGS };
+    if (fingerprint(next) === fingerprint(this.value)) return;
+    this.value = next;
     this.queueSave();
   }
 
   dispose(): void {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
+      this.saveTimer = undefined;
+      void this.persist(this.saveSequence);
     }
   }
 
@@ -65,14 +75,29 @@ export class SettingsStore {
     }
     this.saveState = "saving";
     const sequence = ++this.saveSequence;
-    this.saveTimer = setTimeout(() => void this.persist(sequence), 400);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      void this.persist(sequence);
+    }, 400);
   }
 
   private async persist(sequence: number): Promise<void> {
+    if (this.persisting) {
+      this.retryAfterPersist = true;
+      return;
+    }
+    const snapshot = this.value;
+    const snapshotFingerprint = fingerprint(snapshot);
+    if (snapshotFingerprint === this.persistedFingerprint) {
+      if (sequence === this.saveSequence) this.saveState = "saved";
+      return;
+    }
+    this.persisting = true;
     try {
-      const saved = await saveSettings(this.value);
+      const saved = normalizeSettings(await saveSettings(snapshot));
+      this.persistedFingerprint = fingerprint(saved);
       if (sequence === this.saveSequence) {
-        this.value = normalizeSettings(saved);
+        if (fingerprint(this.value) !== this.persistedFingerprint) this.value = saved;
         this.saveState = "saved";
         this.errorMessage = "";
       }
@@ -81,8 +106,18 @@ export class SettingsStore {
         this.saveState = "error";
         this.errorMessage = errorMessage(error);
       }
+    } finally {
+      this.persisting = false;
+      if (this.retryAfterPersist) {
+        this.retryAfterPersist = false;
+        void this.persist(this.saveSequence);
+      }
     }
   }
+}
+
+function fingerprint(settings: AppSettings): string {
+  return JSON.stringify(settings);
 }
 
 export function applyDocumentAppearance(settings: AppSettings): void {

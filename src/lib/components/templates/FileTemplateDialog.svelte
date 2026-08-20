@@ -18,10 +18,17 @@
   let creating = $state(false);
 
   onMount(() => {
-    const preferred = templateStore.fileTemplates.find((template) => template.name === "Contest C++")
-      ?? templateStore.fileTemplates[0];
-    selectedId = preferred?.id;
-    nameInput.focus();
+    let disposed = false;
+    void templateStore.ensureFileTemplates().then(() => {
+      if (disposed) return;
+      const preferred = templateStore.fileTemplates.find((template) => template.name === "Contest C++")
+        ?? templateStore.fileTemplates[0];
+      selectedId = preferred?.id;
+      nameInput.focus();
+    });
+    return () => {
+      disposed = true;
+    };
   });
 
   async function submit(): Promise<void> {

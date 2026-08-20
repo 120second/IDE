@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
   import type { GeneratorStore } from "../../stores/generator.svelte";
@@ -20,6 +20,11 @@
   let saving = $state(false);
   let draft = $state<TestcaseInput>(emptyDraft(""));
   let observedSource = "";
+  let sourceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  onDestroy(() => {
+    if (sourceTimer) clearTimeout(sourceTimer);
+  });
 
   $effect(() => {
     if (!generator.editorRequested) return;
@@ -37,8 +42,12 @@
       formOpen = false;
       editingId = undefined;
       draft = emptyDraft(sourcePath ?? "");
-      void execution.syncActiveSource(sourcePath, true);
-      void generator.syncSource(sourcePath);
+      if (sourceTimer) clearTimeout(sourceTimer);
+      sourceTimer = setTimeout(() => {
+        sourceTimer = undefined;
+        void execution.syncActiveSource(sourcePath, true);
+        void generator.syncSource(sourcePath);
+      }, 80);
     });
   });
 

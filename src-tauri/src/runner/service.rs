@@ -162,25 +162,33 @@ impl RunnerManager {
                 executable.display()
             ))
         })?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| AppError::Internal("runner stdin pipe was unavailable".to_owned()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| AppError::Internal("runner stdout pipe was unavailable".to_owned()))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| AppError::Internal("runner stderr pipe was unavailable".to_owned()))?;
+        let Some(stdin) = child.stdin.take() else {
+            terminate_child(&mut child);
+            return Err(AppError::Internal(
+                "runner stdin pipe was unavailable".to_owned(),
+            ));
+        };
+        let Some(stdout) = child.stdout.take() else {
+            terminate_child(&mut child);
+            return Err(AppError::Internal(
+                "runner stdout pipe was unavailable".to_owned(),
+            ));
+        };
+        let Some(stderr) = child.stderr.take() else {
+            terminate_child(&mut child);
+            return Err(AppError::Internal(
+                "runner stderr pipe was unavailable".to_owned(),
+            ));
+        };
         let input = request.stdin.as_bytes().to_vec();
         let input_writer = thread::spawn(move || -> std::io::Result<()> {
             let mut stdin = stdin;
             stdin.write_all(&input)?;
             stdin.flush()
         });
-        let (sender, receiver) = mpsc::channel();
+        // A bounded channel prevents an extremely chatty child from allocating
+        // unbounded memory when it produces output faster than the UI batcher.
+        let (sender, receiver) = mpsc::sync_channel(64);
         let stdout_reader = spawn_reader(stdout, OutputStream::Stdout, sender.clone());
         let stderr_reader = spawn_reader(stderr, OutputStream::Stderr, sender);
 
@@ -225,8 +233,13 @@ impl RunnerManager {
                 let exit = child.wait()?;
                 break (RunStatus::TimedOut, exit.code());
             }
-            if let Some(exit) = child.try_wait()? {
-                break (RunStatus::Exited, exit.code());
+            match child.try_wait() {
+                Ok(Some(exit)) => break (RunStatus::Exited, exit.code()),
+                Ok(None) => {}
+                Err(error) => {
+                    terminate_child(&mut child);
+                    return Err(AppError::from(error));
+                }
             }
             thread::sleep(POLL_INTERVAL);
         };
@@ -263,10 +276,20 @@ impl RunnerManager {
     }
 }
 
+impl Drop for RunnerManager {
+    fn drop(&mut self) {
+        if let Ok(active) = self.active.get_mut() {
+            if let Some(run) = active.as_ref() {
+                run.stop_requested.store(true, Ordering::Release);
+            }
+        }
+    }
+}
+
 fn spawn_reader<R: Read + Send + 'static>(
     mut reader: R,
     stream: OutputStream,
-    sender: mpsc::Sender<RawChunk>,
+    sender: mpsc::SyncSender<RawChunk>,
 ) -> thread::JoinHandle<std::io::Result<()>> {
     thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
@@ -343,6 +366,11 @@ fn join_reader(handle: thread::JoinHandle<std::io::Result<()>>) -> AppResult<()>
         .join()
         .map_err(|_| AppError::Internal("runner output reader panicked".to_owned()))?
         .map_err(AppError::from)
+}
+
+fn terminate_child(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn elapsed_millis(started: Instant) -> u64 {

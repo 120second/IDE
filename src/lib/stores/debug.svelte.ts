@@ -30,6 +30,8 @@ import type { Testcase } from "../types/execution";
 import type { ExecutionStore } from "./execution.svelte";
 import type { SettingsStore } from "./settings.svelte";
 import type { ShellStore } from "./shell.svelte";
+import { recordIpcEvent } from "../performance";
+import { BoundedOutputBuffer, OUTPUT_FLUSH_INTERVAL_MS } from "../outputBuffer";
 
 const CONSOLE_LIMIT = 2 * 1024 * 1024;
 
@@ -49,6 +51,16 @@ export class DebugStore {
   private unlisten: UnlistenFn | undefined;
   private sequence = 0;
   private watchSequence = 0;
+  private readonly consoleBuffer = new BoundedOutputBuffer(
+    CONSOLE_LIMIT,
+    "[较早的调试输出已丢弃]\n",
+  );
+  private consoleTimer: ReturnType<typeof setTimeout> | undefined;
+  private disposed = false;
+
+  get approximateOutputBytes(): number {
+    return this.consoleBuffer.approximateLength(this.console) * 2;
+  }
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -73,17 +85,24 @@ export class DebugStore {
   async initialize(): Promise<void> {
     if (!isTauri()) return;
     try {
-      this.unlisten = await listen<DebugEvent>("debug-event", (event) => {
+      const unlisten = await listen<DebugEvent>("debug-event", (event) => {
+        recordIpcEvent();
         this.handleEvent(event.payload);
       });
+      if (this.disposed) unlisten();
+      else this.unlisten = unlisten;
     } catch (error) {
       this.error = errorMessage(error);
     }
   }
 
   dispose(): void {
+    this.disposed = true;
     this.unlisten?.();
     this.unlisten = undefined;
+    if (this.consoleTimer) clearTimeout(this.consoleTimer);
+    this.consoleTimer = undefined;
+    this.consoleBuffer.clear();
     if (this.active) void stopDebugSession();
   }
 
@@ -233,6 +252,9 @@ export class DebugStore {
   }
 
   clearConsole(): void {
+    if (this.consoleTimer) clearTimeout(this.consoleTimer);
+    this.consoleTimer = undefined;
+    this.consoleBuffer.clear();
     this.console = "";
   }
 
@@ -240,7 +262,7 @@ export class DebugStore {
     if (this.active || this.busy) return;
     this.busy = true;
     this.error = "";
-    this.console = "";
+    this.clearConsole();
     this.state = "starting";
     this.reason = testcaseName ? `正在调试测试点“${testcaseName}”` : "正在准备调试";
     const sourcePath = this.editor.activeTab?.path;
@@ -353,6 +375,7 @@ export class DebugStore {
     const existing = this.breakpoints
       .filter((breakpoint) => samePath(breakpoint.file, file))
       .sort((left, right) => left.line - right.line);
+    if (existing.length === 0) return;
     if (existing.length !== lines.length) return;
     const replacements = new Map(existing.map((breakpoint, index) => [breakpoint.id, lines[index]]));
     this.breakpoints = this.breakpoints.map((breakpoint) => ({
@@ -369,10 +392,13 @@ export class DebugStore {
 
   private appendConsole(text: string): void {
     if (!text) return;
-    const next = this.console + text;
-    this.console = next.length <= CONSOLE_LIMIT
-      ? next
-      : `[较早的调试输出已丢弃]\n${next.slice(-CONSOLE_LIMIT)}`;
+    this.consoleBuffer.enqueue(text);
+    if (!this.consoleTimer) {
+      this.consoleTimer = setTimeout(() => {
+        this.consoleTimer = undefined;
+        this.console = this.consoleBuffer.flush(this.console);
+      }, OUTPUT_FLUSH_INTERVAL_MS);
+    }
   }
 }
 

@@ -182,10 +182,13 @@ impl StressManager {
         let mut passed = request.initial_passed;
         let failed = request.initial_failed;
         let mut total = request.start_case;
+        let mut pending_passed = Vec::with_capacity(32);
+        let mut last_progress_emit = Instant::now();
 
         while request.infinite || total < request.iterations {
             if session.stop_requested.load(Ordering::Acquire) {
                 let stats = statistics(request, started, total, passed, failed);
+                emit_passed(emit, &session.session_id, &mut pending_passed);
                 emit_state(
                     emit,
                     &session.session_id,
@@ -239,6 +242,7 @@ impl StressManager {
                 || brute.status == RunStatus::Stopped
             {
                 let stats = statistics(request, started, total, passed, failed);
+                emit_passed(emit, &session.session_id, &mut pending_passed);
                 emit_state(
                     emit,
                     &session.session_id,
@@ -259,6 +263,7 @@ impl StressManager {
             current_seed = next_case_seed;
             if let Some(reason) = failure_reason(&solution, &brute) {
                 let stats = statistics(request, started, total, passed, failed.saturating_add(1));
+                emit_passed(emit, &session.session_id, &mut pending_passed);
                 let failure = StressFailure {
                     index: case_number,
                     seed: case_seed.to_string(),
@@ -297,19 +302,21 @@ impl StressManager {
 
             passed = passed.saturating_add(1);
             let stats = statistics(request, started, total, passed, failed);
-            emit(StressEvent::CasePassed {
-                session_id: session.session_id.clone(),
-                result: StressCasePassed {
-                    index: case_number,
-                    seed: case_seed.to_string(),
-                    solution_time_ms: solution.duration_ms,
-                    brute_time_ms: brute.duration_ms,
-                    stats,
-                },
+            pending_passed.push(StressCasePassed {
+                index: case_number,
+                seed: case_seed.to_string(),
+                solution_time_ms: solution.duration_ms,
+                brute_time_ms: brute.duration_ms,
+                stats,
             });
+            if pending_passed.len() >= 32 || last_progress_emit.elapsed().as_millis() >= 100 {
+                emit_passed(emit, &session.session_id, &mut pending_passed);
+                last_progress_emit = Instant::now();
+            }
         }
 
         let stats = statistics(request, started, total, passed, failed);
+        emit_passed(emit, &session.session_id, &mut pending_passed);
         emit_state(
             emit,
             &session.session_id,
@@ -325,6 +332,19 @@ impl StressManager {
             None,
         ))
     }
+}
+
+fn emit_passed<F>(emit: &mut F, session_id: &str, pending: &mut Vec<StressCasePassed>)
+where
+    F: FnMut(StressEvent),
+{
+    if pending.is_empty() {
+        return;
+    }
+    emit(StressEvent::CasesPassed {
+        session_id: session_id.to_owned(),
+        results: std::mem::take(pending),
+    });
 }
 
 impl Drop for StressManager {
@@ -684,5 +704,37 @@ mod tests {
         assert!(session.stop_requested.load(Ordering::Acquire));
         manager.finish("stop-test");
         assert!(!manager.stop());
+    }
+
+    #[test]
+    fn ten_thousand_progress_records_are_batched() {
+        let mut pending = Vec::with_capacity(32);
+        let mut events = Vec::new();
+        for index in 1..=10_000 {
+            pending.push(StressCasePassed {
+                index,
+                seed: index.to_string(),
+                solution_time_ms: 0,
+                brute_time_ms: 0,
+                stats: StressStats {
+                    total_cases: index,
+                    passed: index,
+                    ..StressStats::default()
+                },
+            });
+            if pending.len() >= 32 {
+                emit_passed(&mut |event| events.push(event), "batch-test", &mut pending);
+            }
+        }
+        emit_passed(&mut |event| events.push(event), "batch-test", &mut pending);
+        assert_eq!(events.len(), 313);
+        let delivered = events
+            .iter()
+            .map(|event| match event {
+                StressEvent::CasesPassed { results, .. } => results.len(),
+                _ => 0,
+            })
+            .sum::<usize>();
+        assert_eq!(delivered, 10_000);
     }
 }

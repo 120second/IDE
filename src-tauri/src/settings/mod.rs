@@ -142,7 +142,9 @@ pub fn save(path: &Path, settings: AppSettings) -> AppResult<AppSettings> {
     let bytes = serde_json::to_vec_pretty(&settings).map_err(|error| {
         AppError::Internal(format!("failed to serialize application settings: {error}"))
     })?;
-    fs::write(path, bytes)?;
+    if fs::read(path).ok().as_deref() != Some(bytes.as_slice()) {
+        fs::write(path, bytes)?;
+    }
     Ok(settings)
 }
 

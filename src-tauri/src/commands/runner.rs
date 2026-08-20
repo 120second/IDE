@@ -13,8 +13,10 @@ pub async fn run_program(
     state: State<'_, AppState>,
 ) -> Result<RunResult, CommandError> {
     let manager = state.runner.clone();
+    let performance = state.performance.clone();
     tauri::async_runtime::spawn_blocking(move || {
         manager.run(&request, |batch| {
+            performance.record_ipc_event();
             if let Err(error) = app.emit("runner-output", batch) {
                 log::warn!("failed to emit buffered runner output: {error}");
             }

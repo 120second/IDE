@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
   import type { DebugStore } from "../../stores/debug.svelte";
@@ -29,19 +30,25 @@
     execution.results.find((result) => result.testcaseId === selectedResultId)
       ?? execution.results[0],
   );
+  let stopResize = () => {};
+  onDestroy(() => stopResize());
 
   function beginResize(event: PointerEvent): void {
     event.preventDefault();
+    stopResize();
     const startY = event.clientY;
     const startHeight = shell.bottomPanelHeight;
     const onMove = (moveEvent: PointerEvent) =>
       shell.setBottomPanelHeight(startHeight + startY - moveEvent.clientY);
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      stopResize = () => {};
     };
+    const onUp = () => cleanup();
+    stopResize = cleanup;
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp, { once: true });
+    window.addEventListener("pointerup", onUp);
   }
 
   function statusLabel(status: string): string {
@@ -80,7 +87,7 @@
           <button onclick={() => execution.clearOutput()}>清空</button>
           <span>{execution.compiling ? "正在编译…" : execution.running ? "正在运行…" : backendState === "ready" ? `后端就绪 · 数据库 v${health?.databaseSchemaVersion ?? 0}` : "后端不可用"}</span>
         </div>
-        <pre class="process-output" aria-live="polite">{execution.output || `[LightCP] 已就绪。当前共 ${workspace.tabs.length} 个编辑器状态。\n${workspace.notice ? `[文件] ${workspace.notice}\n` : ""}`}</pre>
+        <textarea class="process-output" readonly spellcheck="false" aria-label="程序输出" value={execution.output || `[LightCP] 已就绪。当前共 ${workspace.tabs.length} 个编辑器状态。\n${workspace.notice ? `[文件] ${workspace.notice}\n` : ""}`}></textarea>
       </div>
     {:else if shell.activeBottomPanel === "tests"}
       <div class="test-results-panel">
@@ -111,7 +118,7 @@
           <button onclick={() => debug.clearConsole()}>清空</button>
           <span>{debug.state === "idle" ? "调试器未启动" : debug.reason || "GDB/MI 会话已连接"}</span>
         </div>
-        <pre class="process-output" aria-live="polite">{debug.console || "[调试控制台] 启动调试后将在此显示程序输出和 GDB 消息。\n"}</pre>
+        <textarea class="process-output" readonly spellcheck="false" aria-label="调试控制台输出" value={debug.console || "[调试控制台] 启动调试后将在此显示程序输出和 GDB 消息。\n"}></textarea>
       </div>
     {/if}
   </div>

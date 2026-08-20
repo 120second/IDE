@@ -42,6 +42,10 @@
   let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, settings, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
 
+  $effect(() => {
+    if (shell.activeActivity === "templates") void templateStore.initialize();
+  });
+
   onMount(() => {
     let awaitingZenKey = false;
     let chordTimer: ReturnType<typeof setTimeout> | undefined;
