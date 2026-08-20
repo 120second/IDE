@@ -5,6 +5,7 @@
   import type { DebugStore } from "../../stores/debug.svelte";
   import type { BottomPanelId, ShellStore } from "../../stores/shell.svelte";
   import type { HealthStatus } from "../../types/health";
+  import type { LspStore } from "../../stores/lsp.svelte";
   import Icon from "./Icon.svelte";
 
   interface Props {
@@ -14,17 +15,33 @@
     health?: HealthStatus;
     execution: ExecutionStore;
     debug: DebugStore;
+    lsp: LspStore;
   }
 
-  const panels: { id: BottomPanelId; label: string; badge?: string }[] = [
-    { id: "problems", label: "问题", badge: "0" },
+  const panels: { id: BottomPanelId; label: string }[] = [
+    { id: "problems", label: "问题" },
     { id: "output", label: "输出" },
     { id: "tests", label: "测试结果" },
     { id: "terminal", label: "终端" },
     { id: "debugConsole", label: "调试控制台" },
   ];
 
-  let { shell, workspace, backendState, health, execution, debug }: Props = $props();
+  let { shell, workspace, backendState, health, execution, debug, lsp }: Props = $props();
+  const LSP_PAGE_SIZE = 150;
+  let referencePage = $state(0);
+  let diagnosticPage = $state(0);
+  let referencePageCount = $derived(Math.max(1, Math.ceil(lsp.referencesResult.length / LSP_PAGE_SIZE)));
+  let diagnosticPageCount = $derived(Math.max(1, Math.ceil(lsp.diagnostics.length / LSP_PAGE_SIZE)));
+  let currentReferencePage = $derived(Math.min(referencePage, referencePageCount - 1));
+  let currentDiagnosticPage = $derived(Math.min(diagnosticPage, diagnosticPageCount - 1));
+  let visibleReferences = $derived(lsp.referencesResult.slice(
+    currentReferencePage * LSP_PAGE_SIZE,
+    (currentReferencePage + 1) * LSP_PAGE_SIZE,
+  ));
+  let visibleDiagnostics = $derived(lsp.diagnostics.slice(
+    currentDiagnosticPage * LSP_PAGE_SIZE,
+    (currentDiagnosticPage + 1) * LSP_PAGE_SIZE,
+  ));
   let selectedResultId = $state<number>();
   let selectedResult = $derived(
     execution.results.find((result) => result.testcaseId === selectedResultId)
@@ -70,7 +87,7 @@
           onclick={() => shell.showBottomPanel(panel.id)}
         >
           {panel.label}
-          {#if panel.badge}<span class="panel-badge">{panel.badge}</span>{/if}
+          {#if panel.id === "problems"}<span class="panel-badge">{lsp.diagnostics.length}</span>{/if}
         </button>
       {/each}
     </div>
@@ -80,7 +97,59 @@
   </header>
   <div class="panel-content">
     {#if shell.activeBottomPanel === "problems"}
-      <div class="panel-empty"><Icon name="check" size={20} /><span>当前编辑器中没有检测到问题。</span></div>
+      <div class="lsp-results">
+        {#if lsp.referencesResult.length > 0}
+          <div class="lsp-results-heading">
+            <strong>引用（{lsp.referencesResult.length}）</strong>
+            {#if referencePageCount > 1}
+              <span>第 {currentReferencePage + 1}/{referencePageCount} 页</span>
+              <button disabled={currentReferencePage <= 0} onclick={() => (referencePage = currentReferencePage - 1)}>上一页</button>
+              <button disabled={currentReferencePage >= referencePageCount - 1} onclick={() => (referencePage = currentReferencePage + 1)}>下一页</button>
+            {/if}
+            <button onclick={() => { lsp.clearReferences(); referencePage = 0; }}>清除</button>
+          </div>
+          <div class="lsp-result-list">
+            {#each visibleReferences as location, index (`${location.path}:${location.range.start.line}:${location.range.start.character}:${index}`)}
+              <button onclick={() => void workspace.openLocation(location)}>
+                <strong>{location.path.replaceAll("/", "\\").split("\\").at(-1)}</strong>
+                <span>行 {location.range.start.line + 1}，列 {location.range.start.character + 1}</span>
+                <small>{location.path}</small>
+              </button>
+            {/each}
+          </div>
+        {/if}
+        {#if lsp.diagnostics.length > 0}
+          <div class="lsp-results-heading">
+            <strong>诊断（{lsp.errorCount} 个错误，{lsp.warningCount} 个警告）</strong>
+            <span>{lsp.message}</span>
+            {#if diagnosticPageCount > 1}
+              <span>第 {currentDiagnosticPage + 1}/{diagnosticPageCount} 页</span>
+              <button disabled={currentDiagnosticPage <= 0} onclick={() => (diagnosticPage = currentDiagnosticPage - 1)}>上一页</button>
+              <button disabled={currentDiagnosticPage >= diagnosticPageCount - 1} onclick={() => (diagnosticPage = currentDiagnosticPage + 1)}>下一页</button>
+            {/if}
+          </div>
+          <div class="lsp-result-list">
+            {#each visibleDiagnostics as diagnostic, index (`${diagnostic.path}:${diagnostic.range.start.line}:${diagnostic.range.start.character}:${diagnostic.message}:${index}`)}
+              <button onclick={() => void workspace.openLocation({ path: diagnostic.path, range: diagnostic.range })}>
+                <span class:error={diagnostic.severity === 1} class:warning={diagnostic.severity === 2} class="lsp-severity">
+                  {diagnostic.severity === 1 ? "错误" : diagnostic.severity === 2 ? "警告" : diagnostic.severity === 4 ? "提示" : "信息"}
+                </span>
+                <strong>{diagnostic.message}</strong>
+                <span>行 {diagnostic.range.start.line + 1}，列 {diagnostic.range.start.character + 1}</span>
+                <small>{diagnostic.path}{diagnostic.code ? ` · ${diagnostic.code}` : ""}</small>
+              </button>
+            {/each}
+          </div>
+        {:else if lsp.referencesResult.length === 0}
+          <div class="panel-empty">
+            <Icon name="check" size={20} />
+            <span>{lsp.state === "ready" ? "当前工作区没有检测到问题。" : lsp.message}</span>
+            {#if lsp.state === "unavailable" || lsp.state === "crashed"}
+              <button onclick={() => lsp.reconnect()}>重新连接</button>
+            {/if}
+          </div>
+        {/if}
+      </div>
     {:else if shell.activeBottomPanel === "output"}
       <div class="execution-output">
         <div class="execution-toolbar">

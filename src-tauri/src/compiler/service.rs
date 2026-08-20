@@ -28,6 +28,7 @@ pub fn compile_current_file(
     let source = checked_source(workspace_root, &request.source_path)?;
     fs::create_dir_all(build_root)?;
     let executable = output_path(build_root, &source);
+    let compiler_executable = compatible_compiler_output(&executable)?;
     let compiler = request.config.compiler_path.trim();
     let compiler = if compiler.is_empty() { "g++" } else { compiler };
     let standard = request.config.standard.trim();
@@ -51,7 +52,7 @@ pub fn compile_current_file(
         )
         .arg(&source)
         .arg("-o")
-        .arg(&executable)
+        .arg(&compiler_executable)
         .current_dir(source.parent().unwrap_or(workspace_root))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -97,6 +98,13 @@ pub fn compile_current_file(
     let stdout = join_reader(stdout_reader)?;
     let stderr = join_reader(stderr_reader)?;
     let success = status.success();
+    if success && compiler_executable != executable {
+        let copied = fs::copy(&compiler_executable, &executable);
+        let _ = fs::remove_file(&compiler_executable);
+        copied?;
+    } else if compiler_executable != executable {
+        let _ = fs::remove_file(&compiler_executable);
+    }
 
     Ok(CompileResult {
         success,
@@ -138,6 +146,36 @@ fn output_path(build_root: &Path, source: &Path) -> PathBuf {
         })
         .collect::<String>();
     build_root.join(format!("{stem}-{:016x}.exe", hasher.finish()))
+}
+
+#[cfg(windows)]
+fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
+    if desired.as_os_str().to_string_lossy().is_ascii() {
+        return Ok(desired.to_owned());
+    }
+    let mut roots = vec![std::env::temp_dir()];
+    if let Some(system_root) = std::env::var_os("SystemRoot") {
+        roots.push(PathBuf::from(system_root).join("Temp"));
+    }
+    for root in roots {
+        if !root.as_os_str().to_string_lossy().is_ascii() {
+            continue;
+        }
+        let staging = root.join(format!("lightcp-compiler-output-{}", std::process::id()));
+        if fs::create_dir_all(&staging).is_ok() {
+            return Ok(staging.join(
+                desired
+                    .file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("solution.exe")),
+            ));
+        }
+    }
+    Ok(desired.to_owned())
+}
+
+#[cfg(not(windows))]
+fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
+    Ok(desired.to_owned())
 }
 
 fn spawn_limited_reader<R: Read + Send + 'static>(
@@ -238,7 +276,11 @@ mod tests {
         .unwrap();
         let request = request(&source);
         let compiled = compile_current_file(&root, &build, &request).unwrap();
-        assert!(compiled.success);
+        assert!(
+            compiled.success,
+            "compiler stderr for Chinese-path integration test: {}",
+            compiled.stderr
+        );
         assert_eq!(compiled.exit_code, Some(0));
         assert!(compiled.executable_path.is_some());
 

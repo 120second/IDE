@@ -1,6 +1,12 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { snippet } from "@codemirror/autocomplete";
+import {
+  snippet,
+  type Completion,
+  type CompletionContext,
+  type CompletionResult,
+} from "@codemirror/autocomplete";
 import { cpp } from "@codemirror/lang-cpp";
+import { setDiagnostics } from "@codemirror/lint";
 import {
   bracketMatching,
   foldGutter,
@@ -33,12 +39,30 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
+  type Tooltip,
+  type ViewUpdate,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 import { readTextFile, writeTextFile } from "../api/workspace";
 import type { AppSettings } from "../types/settings";
+import type { LspClient } from "../lsp/client";
+import type {
+  LspDiagnostic,
+  LspLocation,
+  LspPosition,
+} from "../types/lsp";
 import type { WorkspaceChange } from "../types/workspace";
 import { normalizeSnippetTemplate } from "./snippets";
+import {
+  completionType,
+  createLspExtensions,
+  createTextTooltip,
+  incrementalChange,
+  offsetAt,
+  positionAt,
+  showSignatureTooltip,
+  toCodeMirrorDiagnostic,
+} from "./lspCodeMirror";
 
 export interface EditorTab {
   id: string;
@@ -160,6 +184,8 @@ export class EditorWorkspace {
   private suppressDirty = false;
   private breakpointToggleHandler: ((file: string, line: number) => void) | undefined;
   private breakpointMoveHandler: ((file: string, lines: number[]) => void) | undefined;
+  private lspClient: LspClient | undefined;
+  private signatureTimer: ReturnType<typeof setTimeout> | undefined;
   private openSequence = 0;
   private readonly recentWrites = new Map<string, number>();
 
@@ -199,6 +225,44 @@ export class EditorWorkspace {
 
   focus(): void {
     this.view?.focus();
+  }
+
+  dispose(): void {
+    if (this.signatureTimer) clearTimeout(this.signatureTimer);
+    this.signatureTimer = undefined;
+    this.detach();
+    this.lspClient = undefined;
+  }
+
+  setLspClient(client: LspClient | undefined): void {
+    this.lspClient = client;
+  }
+
+  openLspDocuments(): { path: string; text: string }[] {
+    this.captureActiveView();
+    return this.tabs.flatMap((tab) =>
+      tab.path && !tab.deleted ? [{ path: tab.path, text: tab.state.doc.toString() }] : [],
+    );
+  }
+
+  setLspDiagnostics(path: string, diagnostics: readonly LspDiagnostic[]): void {
+    const tab = this.tabs.find((candidate) => candidate.path && samePath(candidate.path, path));
+    if (!tab) return;
+    const state = tab.id === this.activeId && this.view ? this.view.state : tab.state;
+    const mapped = diagnostics.map((diagnostic) => toCodeMirrorDiagnostic(state, diagnostic));
+    if (tab.id === this.activeId && this.view) {
+      this.view.dispatch(setDiagnostics(this.view.state, mapped));
+      return;
+    }
+    this.replaceTab(tab.id, { ...tab, state: state.update(setDiagnostics(state, mapped)).state });
+  }
+
+  clearLspDiagnostics(): void {
+    this.tabs = this.tabs.map((tab) => {
+      if (tab.id === this.activeId && this.view) return tab;
+      return { ...tab, state: tab.state.update(setDiagnostics(tab.state, [])).state };
+    });
+    if (this.view) this.view.dispatch(setDiagnostics(this.view.state, []));
   }
 
   setBreakpointHandlers(
@@ -340,6 +404,7 @@ export class EditorWorkspace {
         externalModified: false,
       };
       this.tabs = [...this.tabs, tab];
+      this.lspClient?.didOpen(file.path, file.content);
       if (request === this.openSequence) {
         this.activeId = tab.id;
         this.view?.setState(tab.state);
@@ -384,6 +449,7 @@ export class EditorWorkspace {
       );
       this.saveState = "saved";
       this.notice = `已保存 ${active.title}`;
+      this.lspClient?.didSave(active.path);
       return true;
     } catch (error) {
       this.saveState = "error";
@@ -440,10 +506,13 @@ export class EditorWorkspace {
   }
 
   handlePathRenamed(previousPath: string, nextPath: string): void {
+    this.captureActiveView();
+    const renamed: { previous: string; next: string; text: string }[] = [];
     this.tabs = this.tabs.map((tab) => {
       if (!tab.path || !sameOrChildPath(tab.path, previousPath)) return tab;
       const suffix = tab.path.slice(previousPath.length);
       const path = `${nextPath}${suffix}`;
+      renamed.push({ previous: tab.path, next: path, text: tab.state.doc.toString() });
       return {
         ...tab,
         path,
@@ -451,13 +520,18 @@ export class EditorWorkspace {
         deleted: false,
       };
     });
+    for (const document of renamed) {
+      this.lspClient?.didClose(document.previous);
+      this.lspClient?.didOpen(document.next, document.text);
+    }
   }
 
   handlePathDeleted(path: string): void {
     let affected = false;
     this.tabs = this.tabs.map((tab) => {
-      if (!tab.path || !sameOrChildPath(tab.path, path)) return tab;
+      if (!tab.path || tab.deleted || !sameOrChildPath(tab.path, path)) return tab;
       affected = true;
+      this.lspClient?.didClose(tab.path);
       return { ...tab, deleted: true };
     });
     if (affected) this.notice = `${fileName(path)} 已在当前编辑器外部被删除。`;
@@ -468,6 +542,8 @@ export class EditorWorkspace {
     if (index < 0) return;
 
     if (id === this.activeId) this.captureActiveView();
+    const closing = this.tabs[index];
+    if (closing.path && !closing.deleted) this.lspClient?.didClose(closing.path);
     const remaining = this.tabs.filter((tab) => tab.id !== id);
 
     if (remaining.length === 0) {
@@ -514,6 +590,63 @@ export class EditorWorkspace {
     }
   }
 
+  async goToDefinition(): Promise<void> {
+    const context = this.lspPosition();
+    if (!context) return;
+    const initialState = this.view?.state;
+    const locations = await this.lspClient?.definition(context.path, context.position) ?? [];
+    if (initialState && this.view?.state !== initialState) return;
+    if (locations.length === 0) {
+      this.notice = this.lspClient?.ready ? "未找到定义。" : "clangd 尚未就绪。";
+      return;
+    }
+    await this.openLocation(locations[0]);
+  }
+
+  async findReferences(): Promise<void> {
+    const context = this.lspPosition();
+    if (!context) return;
+    const initialState = this.view?.state;
+    const locations = await this.lspClient?.references(context.path, context.position) ?? [];
+    if (initialState && this.view?.state !== initialState) return;
+    this.lspClient?.revealReferences(locations);
+    this.notice = locations.length ? `找到 ${locations.length} 处引用。` : "未找到引用。";
+  }
+
+  async requestSignatureHelp(): Promise<void> {
+    const context = this.lspPosition();
+    if (!context || !this.view) return;
+    const initialState = this.view.state;
+    const signature = await this.lspClient?.signatureHelp(context.path, context.position);
+    if (!signature || !this.view || this.view.state !== initialState || !samePath(this.activeTab?.path ?? "", context.path)) {
+      if (this.view) showSignatureTooltip(this.view, null);
+      return;
+    }
+    const parameter = signature.activeParameter + 1;
+    const text = signature.documentation
+      ? `${signature.label}\n参数 ${parameter}\n${signature.documentation}`
+      : `${signature.label}\n参数 ${parameter}`;
+    showSignatureTooltip(this.view, {
+      position: this.view.state.selection.main.head,
+      text,
+    });
+  }
+
+  async openLocation(location: LspLocation): Promise<void> {
+    await this.openFile(location.path);
+    const tab = this.activeTab;
+    if (!tab || !tab.path || !samePath(tab.path, location.path)) return;
+    const state = this.view?.state ?? tab.state;
+    const position = offsetAt(state, location.range.start);
+    if (this.view) {
+      this.view.dispatch({
+        selection: { anchor: position },
+        effects: EditorView.scrollIntoView(position, { y: "center" }),
+      });
+      this.view.focus();
+    }
+  }
+
   private createState(
     document: string,
     settings?: AppSettings,
@@ -556,6 +689,13 @@ export class EditorWorkspace {
         rectangularSelection(),
         crosshairCursor(),
         keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+        ...createLspExtensions({
+          completion: (context) => this.lspCompletion(context),
+          hover: (view, position) => this.lspHoverTooltip(view, position),
+          definition: () => void this.goToDefinition(),
+          references: () => void this.findReferences(),
+          signatureHelp: () => void this.requestSignatureHelp(),
+        }, !largeFile),
         ...editingExtensions,
         EditorState.allowMultipleSelections.of(true),
         EditorState.tabSize.of(4),
@@ -567,7 +707,7 @@ export class EditorWorkspace {
     });
   }
 
-  private handleViewUpdate(update: { state: EditorState; docChanged: boolean }): void {
+  private handleViewUpdate(update: ViewUpdate): void {
     const id = this.activeId;
     const tab = this.activeTab;
     if (tab && update.docChanged && !this.suppressDirty && !tab.dirty) {
@@ -575,6 +715,17 @@ export class EditorWorkspace {
     }
     this.updateCursor(update.state);
     const path = this.activeTab?.path;
+    if (update.docChanged && path && this.lspClient?.ready) {
+      const change = incrementalChange(update);
+      if (change) this.lspClient.didChange(path, [change]);
+      if (update.state.doc.length < LARGE_FILE_THRESHOLD && change && /[(,]$/.test(change.text)) {
+        if (this.signatureTimer) clearTimeout(this.signatureTimer);
+        this.signatureTimer = setTimeout(() => {
+          this.signatureTimer = undefined;
+          void this.requestSignatureHelp();
+        }, 140);
+      }
+    }
     if (update.docChanged && path && this.breakpointMoveHandler) {
       this.breakpointMoveHandler(path, breakpointLines(update.state));
     }
@@ -618,6 +769,7 @@ export class EditorWorkspace {
       return;
     }
 
+    const previousState = tab.state;
     this.suppressDirty = true;
     const state = tab.state.update({
       changes: { from: 0, to: tab.state.doc.length, insert: content },
@@ -628,6 +780,76 @@ export class EditorWorkspace {
         ? { ...candidate, state, dirty: false, externalModified: false, deleted: false }
         : candidate,
     );
+    if (tab.path && this.lspClient?.ready) {
+      this.lspClient.didChange(tab.path, [{
+        range: {
+          start: { line: 0, character: 0 },
+          end: positionAt(previousState, previousState.doc.length),
+        },
+        text: content,
+      }]);
+    }
+  }
+
+  private lspPosition(): { path: string; position: LspPosition } | undefined {
+    const tab = this.activeTab;
+    const state = this.view?.state ?? tab?.state;
+    if (!tab?.path || !state || !this.lspClient?.ready) return undefined;
+    return { path: tab.path, position: positionAt(state, state.selection.main.head) };
+  }
+
+  private async lspCompletion(context: CompletionContext): Promise<CompletionResult | null> {
+    const tab = this.activeTab;
+    if (!tab?.path || !this.lspClient?.ready || context.state.doc.length >= LARGE_FILE_THRESHOLD) {
+      return null;
+    }
+    const word = context.matchBefore(/[\w:]*$/);
+    if (!context.explicit && (!word || word.from === word.to)) {
+      const trigger = context.state.sliceDoc(Math.max(0, context.pos - 1), context.pos);
+      if (![".", ">", ":"].includes(trigger)) return null;
+    }
+    const controller = new AbortController();
+    context.addEventListener("abort", () => controller.abort(), { onDocChange: true });
+    const triggerCharacter = context.state.sliceDoc(Math.max(0, context.pos - 1), context.pos);
+    const items = await this.lspClient.completion(
+      tab.path,
+      positionAt(context.state, context.pos),
+      [".", ">", ":"].includes(triggerCharacter)
+        ? { triggerKind: 2, triggerCharacter }
+        : { triggerKind: 1 },
+      controller.signal,
+    );
+    if (controller.signal.aborted || items.length === 0) return null;
+    const from = word?.from ?? context.pos;
+    const options: Completion[] = items.map((item) => ({
+      label: item.label,
+      detail: item.detail || undefined,
+      info: item.documentation || undefined,
+      type: completionType(item.kind),
+      sortText: item.sortText || undefined,
+      apply: (view, _completion, completionFrom, completionTo) => {
+        const edit = item.textEdit;
+        const editFrom = edit ? offsetAt(view.state, edit.range.start) : completionFrom;
+        const editTo = edit ? offsetAt(view.state, edit.range.end) : completionTo;
+        view.dispatch({
+          changes: { from: editFrom, to: editTo, insert: item.insertText },
+          selection: { anchor: editFrom + item.insertText.length },
+        });
+      },
+    }));
+    return { from, options, validFor: /^[\w:]*$/ };
+  }
+
+  private async lspHoverTooltip(view: EditorView, position: number): Promise<Tooltip | null> {
+    const tab = this.activeTab;
+    if (!tab?.path || !this.lspClient?.ready || view.state.doc.length >= LARGE_FILE_THRESHOLD) {
+      return null;
+    }
+    const initialState = view.state;
+    const text = await this.lspClient.hover(tab.path, positionAt(initialState, position));
+    if (!text || this.view !== view || view.state !== initialState || !samePath(this.activeTab?.path ?? "", tab.path)) return null;
+    const word = view.state.wordAt(position);
+    return createTextTooltip(word?.from ?? position, text, "cm-lsp-hover", word?.to);
   }
 
   private updateCursor(state: EditorState): void {

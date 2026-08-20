@@ -2910,6 +2910,96 @@ kbd {
   color: var(--text-muted);
 }
 
+.panel-empty > button,
+.lsp-results-heading button {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: var(--hover-background);
+}
+
+.lsp-results-heading button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.lsp-results {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lsp-results-heading {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+}
+
+.lsp-results-heading > span {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lsp-result-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.lsp-result-list > button {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 29px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  text-align: left;
+  background: transparent;
+}
+
+.lsp-result-list > button:last-child {
+  border-bottom: 0;
+}
+
+.lsp-result-list > button:hover {
+  background: var(--hover-background);
+}
+
+.lsp-result-list strong,
+.lsp-result-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lsp-result-list small {
+  grid-column: 2 / -1;
+  color: var(--text-muted);
+}
+
+.lsp-severity {
+  min-width: 30px;
+  color: var(--text-muted);
+}
+
+.lsp-severity.error {
+  color: var(--danger);
+}
+
+.lsp-severity.warning {
+  color: var(--warning);
+}
+
 .output-lines p {
   margin: 0 0 5px;
   color: var(--text-secondary);
@@ -2977,6 +3067,28 @@ button.status-item:hover {
 
 .status-dot.error {
   background: #ff9ca2;
+}
+
+.lsp-status.ready .status-dot {
+  background: #8de6b9;
+}
+
+.lsp-status.error .status-dot {
+  background: #ff9ca2;
+}
+
+.cm-tooltip .cm-lsp-hover,
+.cm-tooltip .cm-lsp-signature {
+  max-width: min(640px, 72vw);
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  background: var(--panel-background);
+  font-family: var(--editor-font-family);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .exit-zen {

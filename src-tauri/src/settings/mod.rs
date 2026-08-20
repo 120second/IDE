@@ -27,6 +27,7 @@ pub struct AppSettings {
     pub performance_mode: bool,
     pub compiler_path: String,
     pub gdb_path: String,
+    pub clangd_path: String,
     pub compiler_standard: String,
     pub release_args: Vec<String>,
     pub debug_args: Vec<String>,
@@ -49,6 +50,7 @@ impl Default for AppSettings {
             performance_mode: false,
             compiler_path: "g++".to_owned(),
             gdb_path: "gdb".to_owned(),
+            clangd_path: String::new(),
             compiler_standard: "c++20".to_owned(),
             release_args: vec!["-O2".to_owned()],
             debug_args: vec!["-g".to_owned(), "-O0".to_owned()],
@@ -79,6 +81,7 @@ impl AppSettings {
 
         self.compiler_path = bounded_nonempty(&self.compiler_path, "g++", 2048);
         self.gdb_path = bounded_nonempty(&self.gdb_path, "gdb", 2048);
+        self.clangd_path = self.clangd_path.trim().chars().take(2048).collect();
         self.compiler_standard = bounded_nonempty(&self.compiler_standard, "c++20", 32);
         self.release_args = sanitize_arguments(self.release_args, &["-O2"]);
         self.debug_args = sanitize_arguments(self.debug_args, &["-g", "-O0"]);
@@ -162,6 +165,7 @@ mod tests {
             font_size: 3.0,
             line_height: 9.0,
             font_family: "   ".to_owned(),
+            clangd_path: "  C:\\Program Files\\LLVM\\bin\\clangd.exe  ".to_owned(),
             ..AppSettings::default()
         }
         .sanitize();
@@ -174,6 +178,10 @@ mod tests {
         assert_eq!(settings.line_height, 2.0);
         assert!(!settings.font_family.is_empty());
         assert_eq!(settings.compiler_path, "g++");
+        assert_eq!(
+            settings.clangd_path,
+            r"C:\Program Files\LLVM\bin\clangd.exe"
+        );
         assert_eq!(settings.run_timeout_ms, 2_000);
     }
 
@@ -193,6 +201,7 @@ mod tests {
             font_size: 17.0,
             line_height: 1.74,
             performance_mode: true,
+            clangd_path: r"C:\Program Files\LLVM\bin\clangd.exe".to_owned(),
             ..AppSettings::default()
         };
 
@@ -203,6 +212,7 @@ mod tests {
         assert_eq!(loaded.font_size, 17.0);
         assert_eq!(loaded.line_height, 1.74);
         assert!(loaded.performance_mode);
+        assert_eq!(loaded.clangd_path, r"C:\Program Files\LLVM\bin\clangd.exe");
 
         fs::remove_file(path).expect("temporary settings file should be removable");
     }

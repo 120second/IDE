@@ -1,8 +1,8 @@
 # LightCP
 
-LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 9：Performance Audit**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
+LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 10：clangd**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
 
-已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档、确定性随机数据生成器、GDB/MI 图形化调试器和后台并发压力测试。clangd 尚未实现。
+已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档、确定性随机数据生成器、GDB/MI 图形化调试器、后台并发压力测试，以及基于 clangd 的 C++ 诊断、补全与代码导航。
 
 ## 环境要求
 
@@ -13,6 +13,7 @@ LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完�
 - Microsoft Edge WebView2
 - g++（默认从 `PATH` 查找，也可在 Settings 中指定完整路径）
 - GDB（默认从 `PATH` 查找，也可在 Settings 中指定 `gdb.exe` 完整路径）
+- clangd（可选；默认自动查找 `PATH`、LLVM 和 Visual Studio 2022 LLVM 目录，也可在 Settings 中指定完整路径）
 
 Tauri 的 Windows 前置环境参考：[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
 
@@ -56,6 +57,9 @@ Rust backend ready
 - `Ctrl+Shift+A`：快速归档当前工作区 C++ 文件
 - `F5`：编译并运行当前 C++ 文件
 - `F6`：编译并运行当前文件的所有已启用固定样例
+- `F12`：跳转到定义
+- `Shift+F12`：查找引用并显示在“问题”面板
+- `Ctrl+Shift+Space`：显示函数签名帮助
 - `Ctrl+Z` / `Ctrl+Y`：Undo / Redo
 
 只启动 Vite 浏览器预览时无法连接 Rust backend，这是预期行为：
@@ -179,6 +183,15 @@ CodeMirror/C++ 解析器独立为异步 chunk，避免把完整编辑器核心�
 - 失败用例可保存为固定 Hack 测试点、复制输入、继续使用下一 seed 对拍，或直接复用 Debug Testcase 流程启动 GDB 调试。
 - Stop 使用共享取消信号终止当前待测程序和暴力程序；界面日志只保留最近 500 条，不会随无限压力测试持续增长。
 
+## clangd 语言服务
+
+- clangd 由 Rust `ClangdManager` 集中启动、初始化、停止和回收；切换 Workspace 会先结束旧会话，再按新根目录重新初始化。
+- 打开文件时发送一次完整文本，后续编辑只发送 LSP range 增量；连续编辑在约 32ms 内合并为一次 IPC，并保证同一文档通知顺序。
+- Diagnostics 同步为 CodeMirror 波浪线、行标记和中文“问题”列表；点击列表项可定位到对应文件和位置。
+- 补全支持文档变更取消和新请求淘汰旧请求；Hover、定义、签名帮助和引用都会丢弃已经过期的结果。
+- 状态栏显示 clangd 状态。未安装、路径错误或进程崩溃时会给出明确说明并允许点击重连；clangd 不可用不会影响编辑、编译、运行、测试、调试等功能。
+- 为避免 5~10 MiB 源文件触发高成本交互，超大文件保留增量文档同步与诊断，但关闭自动补全、Hover、语法树和装饰性编辑扩展。
+
 ## 下一批
 
-Batch 9 已完成；下一批为 Batch 10：clangd。
+Batch 10 已完成；下一批为 Batch 11：最终体验优化。

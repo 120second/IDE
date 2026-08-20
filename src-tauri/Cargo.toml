@@ -24,6 +24,7 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 thiserror = "2"
+url = "2"
 
 # The Tauri context embeds the complete frontend in this crate. On the current
 # Windows MSVC toolchain, LLVM opt-level 3 can overflow/crash while optimizing

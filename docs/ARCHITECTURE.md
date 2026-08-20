@@ -1,8 +1,8 @@
-# LightCP 架构（Batch 6）
+# LightCP 架构（Batch 10）
 
 ## 范围
 
-当前架构已完成至 Batch 9：IDE Shell、编辑器、Workspace、Template Center、Compiler、Runner、Fixed Testcases、代码归档、结构化 Random Generator、GDB/MI Debugger、Stress Test 与性能专项优化。clangd 尚未加入。
+当前架构已完成至 Batch 10：IDE Shell、编辑器、Workspace、Template Center、Compiler、Runner、Fixed Testcases、代码归档、结构化 Random Generator、GDB/MI Debugger、Stress Test、性能专项优化与 clangd 语言服务。
 
 ## 进程与职责边界
 
@@ -33,15 +33,16 @@ src/
 ├── lib/
 │   ├── api/          # Tauri command 调用
 │   ├── components/   # Shell、Editor、Explorer、Templates、Settings 组件
-│   ├── editor/       # CodeMirror EditorView / EditorState 管理
-│   ├── stores/       # Shell、Settings、Workspace、Template、Execution、Archive 与 Generator 状态
+│   ├── editor/       # CodeMirror EditorView / EditorState 与 LSP 编辑器接入
+│   ├── lsp/          # LSP client abstraction 与响应归一化
+│   ├── stores/       # Shell、Settings、Workspace、Template、Execution、Archive、Generator 与 LSP 状态
 │   └── types/        # IPC 数据契约
 ├── App.svelte        # 服务组合与启动入口
 ├── app.css           # 全局基础样式和 CSS variables
 └── main.ts           # Svelte 挂载入口
 ```
 
-前端通过 typed API 调用健康检查、设置、Workspace、文件、模板、编译、运行和样例命令。各 Store 保持分离，ExecutionStore 只编排保存、编译、运行和判题，不直接执行进程或 SQLite 操作。
+前端通过 typed API 调用健康检查、设置、Workspace、文件、模板、编译、运行、样例和 LSP 命令。各 Store 保持分离，ExecutionStore 只编排保存、编译、运行和判题，LspStore 只编排文档同步、请求取消和诊断状态；二者都不直接执行进程、文件 IO 或 SQLite 操作。
 
 ### Editor 状态模型
 
@@ -60,11 +61,29 @@ EditorWorkspace
 
 切换 Tab 前保存当前 `EditorView.state` 和 scroll offset，然后用 `EditorView.setState()` 装载目标 Tab。不会为每个 Tab 长期保留完整编辑器 DOM。
 
-CodeMirror 扩展按需组合，只包含行号、C++ 高亮、括号匹配、缩进、搜索、历史、折叠、多 selection 和 active line 等本批需要的能力，没有引入全量 IDE completion/lint 功能。
+CodeMirror 扩展按需组合，并通过轻量 LSP adapter 接入 clangd completion、hover、signature help、definition、references 和 diagnostics；没有重建编辑器或引入第二套文档状态。
 
 编辑器模块使用动态 import，与 Shell 主包分离。CodeMirror/C++ 解析器在启动阶段异步加载。
 
 真实文件通过 Rust 读取为 UTF-8 文本。`Ctrl+S` 将当前 EditorState 写回原路径；写入完成前后比较文档快照，避免异步保存期间的新输入被错误标记为已保存。文件被外部修改时，无本地编辑的 Tab 自动重载；有未保存编辑的 Tab 保留内存内容并显示冲突标记。外部删除与重命名会同步更新标签状态和路径。
+
+### clangd / LSP
+
+```text
+CodeMirror extensions
+        │ incremental change / cancellable request
+        ▼
+LspClient interface → LspStore（32ms change batch + stale guard）
+        │ typed Tauri invoke/event
+        ▼
+Rust ClangdManager → one ClangdSession → clangd stdio JSON-RPC
+```
+
+`didOpen` 只在文档首次同步时携带全文；后续 CodeMirror `ChangeSet` 合并为单个最小替换 range，多次快速编辑按顺序组成一个 `contentChanges` batch。补全使用 AbortSignal，并把新请求映射到 Rust 侧 `$/cancelRequest`；Hover、定义、签名和引用分别维护最新请求编号，编辑状态变化后不再应用旧结果。
+
+Rust 会话按 `Content-Length` 流式解析 JSON-RPC，单消息限制 32 MiB，每文件最多传回 2000 条诊断，Completion 最多 500 项，Definition/References 最多 2000 项；问题面板每页只渲染 150 行。所有等待响应的工作都在 `spawn_blocking` 中执行；Reader thread 只解析响应、完成 pending request 或发送诊断/状态事件。Manager 使用独立 lifecycle lock 串行化 start/stop，切换 Workspace、重新配置、窗口退出和 Drop 都会先请求 shutdown/exit，超时后 kill/wait。
+
+clangd 路径为空时依次尝试 PATH 和 Windows LLVM 默认目录。启动失败或异常退出只更新 LSP 状态，不影响其他 IDE 能力；用户可从状态栏重新连接。大文件仍使用增量同步，但关闭自动补全、Hover 和高成本 CodeMirror 扩展。
 
 ### Workspace 与 Explorer
 
@@ -168,8 +187,9 @@ src-tauri/src/
 ├── runner/           # 子进程、stdin、缓冲输出、timeout 与 stop
 ├── testcase/         # SQLite CRUD、排序与输出比较器
 ├── generator/        # Visual DTO/校验/profile、兼容 DSL parser、SplitMix64 与生成策略
-├── stress/           # 后续批次预留
-├── debugger/         # 后续批次预留
+├── stress/           # 并发对拍、取消、进度合批与失败保留
+├── debugger/         # GDB/MI 会话、断点、栈帧和变量分页
+├── lsp/              # clangd lifecycle、JSON-RPC framing 与诊断模型
 ├── templates/        # 分类、模板 metadata/body、排序与版本历史
 ├── archive/          # 归档 metadata、标签、虚拟查询、批量更新与智能集合
 └── settings/         # settings.json 加载、校验与保存
@@ -241,5 +261,4 @@ technicalMessage
 
 ## 后续批次边界
 
-- Batch 7：GDB 图形化调试。
-- Stress 和其他高级能力继续保留到对应批次。
+- Batch 11：快捷键自定义、Session 恢复、确认/Undo、焦点管理与最终 UX 回归。

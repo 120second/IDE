@@ -13,6 +13,7 @@ export interface AppSettings {
   performanceMode: boolean;
   compilerPath: string;
   gdbPath: string;
+  clangdPath: string;
   compilerStandard: string;
   releaseArgs: string[];
   debugArgs: string[];

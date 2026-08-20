@@ -7,6 +7,7 @@ use crate::{
     debugger::DebugManager,
     error::{AppError, AppResult},
     filesystem::WorkspaceRuntime,
+    lsp::ClangdManager,
     paths::AppPaths,
     performance::PerformanceMetrics,
     runner::RunnerManager,
@@ -21,6 +22,7 @@ pub struct AppState {
     pub runner: Arc<RunnerManager>,
     pub debugger: Arc<DebugManager>,
     pub stress: Arc<StressManager>,
+    pub lsp: Arc<ClangdManager>,
     pub performance: Arc<PerformanceMetrics>,
 }
 
@@ -35,6 +37,7 @@ impl AppState {
             runner: Arc::new(RunnerManager::default()),
             debugger: Arc::new(DebugManager::new(debug_data_dir)),
             stress: Arc::new(StressManager::default()),
+            lsp: Arc::new(ClangdManager::default()),
             performance: Arc::new(PerformanceMetrics::default()),
         }
     }

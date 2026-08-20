@@ -1,15 +1,25 @@
 <script lang="ts">
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ShellStore } from "../../stores/shell.svelte";
+  import type { LspStore } from "../../stores/lsp.svelte";
   import Icon from "./Icon.svelte";
 
   interface Props {
     shell: ShellStore;
     workspace: EditorWorkspace;
     backendState: "checking" | "ready" | "error";
+    lsp: LspStore;
   }
 
-  let { shell, workspace, backendState }: Props = $props();
+  let { shell, workspace, backendState, lsp }: Props = $props();
+
+  const lspLabel = () => {
+    if (lsp.state === "ready") return lsp.serverVersion ? `clangd ${lsp.serverVersion}` : "clangd 就绪";
+    if (lsp.state === "starting") return "clangd 连接中";
+    if (lsp.state === "unavailable") return "未找到 clangd";
+    if (lsp.state === "crashed") return "clangd 已退出";
+    return "clangd 未启动";
+  };
 </script>
 
 <footer class="status-bar">
@@ -22,6 +32,17 @@
       <span class:ready={backendState === "ready"} class:error={backendState === "error"} class="status-dot"></span>
       {backendState === "ready" ? "后端就绪" : backendState === "checking" ? "正在连接" : "预览模式"}
     </span>
+    <button
+      class:error={lsp.state === "unavailable" || lsp.state === "crashed"}
+      class:ready={lsp.state === "ready"}
+      class="status-item lsp-status"
+      title={`${lsp.message}${lsp.state === "unavailable" || lsp.state === "crashed" ? " · 点击重新连接" : ""}`}
+      onclick={() => {
+        if (lsp.state === "unavailable" || lsp.state === "crashed") lsp.reconnect();
+      }}
+    >
+      <span class="status-dot"></span>{lspLabel()}
+    </button>
   </div>
   <div class="status-right">
     {#if shell.zenMode}<span class="status-item">禅模式</span>{/if}

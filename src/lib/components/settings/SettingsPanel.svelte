@@ -132,6 +132,17 @@
     </label>
 
     <label class="setting-row vertical">
+      <span class="setting-label">clangd 路径</span>
+      <input
+        class="text-input"
+        value={settings.value.clangdPath}
+        placeholder="自动查找，或 C:\Program Files\LLVM\bin\clangd.exe"
+        oninput={(event) => settings.update({ clangdPath: event.currentTarget.value })}
+      />
+      <span class="setting-hint">留空时从 PATH、LLVM 和 Visual Studio 2022 的标准目录查找；修改后会为当前工作区重新连接。</span>
+    </label>
+
+    <label class="setting-row vertical">
       <span class="setting-label">C++ 标准</span>
       <select
         class="text-input"

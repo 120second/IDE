@@ -10,6 +10,7 @@
   import type { ShellStore } from "../../stores/shell.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
+  import type { LspStore } from "../../stores/lsp.svelte";
   import type { HealthStatus } from "../../types/health";
   import EditorHost from "../editor/EditorHost.svelte";
   import TabBar from "../editor/TabBar.svelte";
@@ -35,11 +36,12 @@
     archiveStore: ArchiveStore;
     debugStore: DebugStore;
     stressStore: StressStore;
+    lspStore: LspStore;
     backendState: "checking" | "ready" | "error";
     health?: HealthStatus;
   }
 
-  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, settings, backendState, health }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
 
   $effect(() => {
@@ -153,7 +155,7 @@
             <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
           </div>
           {#if shell.bottomPanelVisible && !shell.zenMode}
-            <BottomPanel {shell} {workspace} {execution} debug={debugStore} {backendState} {health} />
+            <BottomPanel {shell} {workspace} {execution} debug={debugStore} lsp={lspStore} {backendState} {health} />
           {/if}
         {/if}
       </section>
@@ -164,7 +166,7 @@
       </button>
     {/if}
   </div>
-  <StatusBar {shell} {workspace} {backendState} />
+  <StatusBar {shell} {workspace} lsp={lspStore} {backendState} />
 </div>
 
 {#if quickSearchOpen}

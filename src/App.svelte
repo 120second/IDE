@@ -15,6 +15,7 @@
   import { StressStore } from "./lib/stores/stress.svelte";
   import { TemplateStore } from "./lib/stores/templates.svelte";
   import { WorkspaceStore } from "./lib/stores/workspace.svelte";
+  import { LspStore } from "./lib/stores/lsp.svelte";
   import type { CommandError, HealthStatus } from "./lib/types/health";
   import {
     installPerformanceConsole,
@@ -32,6 +33,7 @@
   let archiveStore = $state<ArchiveStore>();
   let debugStore = $state<DebugStore>();
   let stressStore = $state<StressStore>();
+  let lspStore = $state<LspStore>();
   const generator = new GeneratorStore();
   let backendState = $state<"checking" | "ready" | "error">("checking");
   let health = $state<HealthStatus>();
@@ -41,6 +43,12 @@
     const appearance = settings.value;
     applyDocumentAppearance(appearance);
     untrack(() => workspace?.updateAppearance(appearance));
+  });
+
+  $effect(() => {
+    const root = fileWorkspace?.info?.path;
+    const clangdPath = settings.value.clangdPath;
+    untrack(() => lspStore?.configure(root, clangdPath));
   });
 
   onMount(() => {
@@ -54,6 +62,7 @@
         const editor = new editorModule.EditorWorkspace(settings.value);
         if (disposed) return;
         workspace = editor;
+        lspStore = new LspStore(editor, shell);
         archiveStore = new ArchiveStore(editor);
         fileWorkspace = new WorkspaceStore(editor, archiveStore);
         templateStore = new TemplateStore(editor);
@@ -62,7 +71,11 @@
         stressStore = new StressStore(editor, generator, execution, debugStore, settings, shell);
         registerPerformanceReaders(
           () => execution!.approximateOutputBytes + debugStore!.approximateOutputBytes,
-          () => Number(execution!.running) + Number(debugStore!.active) + Number(stressStore!.running),
+          () =>
+            Number(execution!.running)
+            + Number(debugStore!.active)
+            + Number(stressStore!.running)
+            + Number(lspStore!.state === "starting" || lspStore!.ready),
         );
         void fileWorkspace.initialize();
         void execution.initialize();
@@ -97,6 +110,8 @@
       debugStore?.dispose();
       stressStore?.dispose();
       archiveStore?.dispose();
+      lspStore?.dispose();
+      workspace?.dispose();
       generator.dispose();
       settings.dispose();
     };
@@ -107,8 +122,8 @@
   <title>LightCP</title>
 </svelte:head>
 
-{#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore}
-  <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {generator} {settings} {backendState} {health} />
+{#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
+  <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {backendState} {health} />
 {:else}
   <main class="boot-screen" aria-live="polite">
     <div class="boot-mark">L</div>

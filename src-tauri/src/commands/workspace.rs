@@ -22,6 +22,7 @@ pub fn open_workspace(
     )
     .map_err(CommandError::from)?;
     recent_workspaces::record(&state.paths.database_file, &info).map_err(CommandError::from)?;
+    state.lsp.stop().map_err(CommandError::from)?;
 
     let mut runtime = state.workspace.lock().map_err(|_| {
         CommandError::from(AppError::Internal(

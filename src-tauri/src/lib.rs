@@ -6,6 +6,7 @@ pub mod debugger;
 pub mod error;
 pub mod filesystem;
 pub mod generator;
+pub mod lsp;
 pub mod paths;
 pub mod performance;
 pub mod runner;
@@ -56,6 +57,18 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health::health_check,
             commands::performance::get_performance_snapshot,
+            commands::lsp::start_clangd,
+            commands::lsp::stop_clangd,
+            commands::lsp::lsp_did_open,
+            commands::lsp::lsp_did_change,
+            commands::lsp::lsp_did_save,
+            commands::lsp::lsp_did_close,
+            commands::lsp::lsp_completion,
+            commands::lsp::lsp_hover,
+            commands::lsp::lsp_definition,
+            commands::lsp::lsp_signature_help,
+            commands::lsp::lsp_references,
+            commands::lsp::cancel_lsp_request,
             commands::settings::load_settings,
             commands::settings::save_settings,
             commands::workspace::open_workspace,
