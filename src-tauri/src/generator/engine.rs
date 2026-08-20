@@ -155,6 +155,10 @@ pub fn generate_visual(request: &VisualGenerateRequest) -> VisualGenerateResult 
     }
 }
 
+pub fn next_seed(seed: u64) -> u64 {
+    SplitMix64::new(seed).next_u64()
+}
+
 fn visual_failure(diagnostic: VisualDiagnostic) -> VisualGenerateResult {
     VisualGenerateResult {
         cases: Vec::new(),

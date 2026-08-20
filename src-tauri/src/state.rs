@@ -9,6 +9,7 @@ use crate::{
     filesystem::WorkspaceRuntime,
     paths::AppPaths,
     runner::RunnerManager,
+    stress::StressManager,
 };
 
 pub struct AppState {
@@ -18,6 +19,7 @@ pub struct AppState {
     pub workspace: Mutex<WorkspaceRuntime>,
     pub runner: Arc<RunnerManager>,
     pub debugger: Arc<DebugManager>,
+    pub stress: Arc<StressManager>,
 }
 
 impl AppState {
@@ -30,6 +32,7 @@ impl AppState {
             workspace: Mutex::new(WorkspaceRuntime::default()),
             runner: Arc::new(RunnerManager::default()),
             debugger: Arc::new(DebugManager::new(debug_data_dir)),
+            stress: Arc::new(StressManager::default()),
         }
     }
 

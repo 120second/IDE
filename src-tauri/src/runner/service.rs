@@ -43,6 +43,18 @@ impl RunnerManager {
     where
         F: FnMut(RunnerOutputBatch),
     {
+        self.run_with_stop(request, Arc::new(AtomicBool::new(false)), &mut emit)
+    }
+
+    pub fn run_with_stop<F>(
+        &self,
+        request: &RunRequest,
+        external_stop: Arc<AtomicBool>,
+        mut emit: F,
+    ) -> AppResult<RunResult>
+    where
+        F: FnMut(RunnerOutputBatch),
+    {
         let executable = dunce::canonicalize(&request.executable_path).map_err(|error| {
             AppError::ProcessStart(format!(
                 "executable is unavailable ({}): {error}",
@@ -70,6 +82,7 @@ impl RunnerManager {
             &executable,
             &working_directory,
             stop_requested,
+            external_stop,
             &mut emit,
         );
         self.finish(&request.client_run_id);
@@ -129,6 +142,7 @@ impl RunnerManager {
         executable: &Path,
         working_directory: &Path,
         stop_requested: Arc<AtomicBool>,
+        external_stop: Arc<AtomicBool>,
         emit: &mut F,
     ) -> AppResult<RunResult>
     where
@@ -201,7 +215,7 @@ impl RunnerManager {
                 last_emit = Instant::now();
             }
 
-            if stop_requested.load(Ordering::Acquire) {
+            if stop_requested.load(Ordering::Acquire) || external_stop.load(Ordering::Acquire) {
                 let _ = child.kill();
                 let exit = child.wait()?;
                 break (RunStatus::Stopped, exit.code());
@@ -399,6 +413,9 @@ mod tests {
 
     #[test]
     fn runner_supports_stdin_re_tle_stop_and_large_output() {
+        let _process_guard = crate::PROCESS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if Command::new("g++").arg("--version").output().is_err() {
             eprintln!("skipping runner integration test because g++ is unavailable");
             return;
@@ -466,6 +483,15 @@ int main() {
             .unwrap();
         assert!(large.output_truncated);
         assert_eq!(large.stdout.len(), 64 * 1024);
+
+        let externally_stopped = RunnerManager::default()
+            .run_with_stop(
+                &request(&root, &executable, "loop\n", 5_000),
+                Arc::new(AtomicBool::new(true)),
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(externally_stopped.status, RunStatus::Stopped);
 
         let manager = Arc::new(RunnerManager::default());
         let worker_manager = manager.clone();

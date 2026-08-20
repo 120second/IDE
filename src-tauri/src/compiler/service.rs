@@ -205,6 +205,9 @@ mod tests {
 
     #[test]
     fn compiler_handles_chinese_paths_and_reports_compile_errors() {
+        let _process_guard = crate::PROCESS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if Command::new("g++").arg("--version").output().is_err() {
             eprintln!("skipping compiler integration test because g++ is unavailable");
             return;

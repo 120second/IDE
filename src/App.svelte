@@ -12,6 +12,7 @@
   import { ExecutionStore } from "./lib/stores/execution.svelte";
   import { GeneratorStore } from "./lib/stores/generator.svelte";
   import { DebugStore } from "./lib/stores/debug.svelte";
+  import { StressStore } from "./lib/stores/stress.svelte";
   import { TemplateStore } from "./lib/stores/templates.svelte";
   import { WorkspaceStore } from "./lib/stores/workspace.svelte";
   import type { CommandError, HealthStatus } from "./lib/types/health";
@@ -25,6 +26,7 @@
   let execution = $state<ExecutionStore>();
   let archiveStore = $state<ArchiveStore>();
   let debugStore = $state<DebugStore>();
+  let stressStore = $state<StressStore>();
   const generator = new GeneratorStore();
   let backendState = $state<"checking" | "ready" | "error">("checking");
   let health = $state<HealthStatus>();
@@ -51,10 +53,12 @@
         templateStore = new TemplateStore(editor);
         execution = new ExecutionStore(editor, settings, shell);
         debugStore = new DebugStore(editor, execution, settings, shell);
+        stressStore = new StressStore(editor, generator, execution, debugStore, settings, shell);
         void fileWorkspace.initialize();
         void templateStore.initialize();
         void execution.initialize();
         void debugStore.initialize();
+        void stressStore.initialize();
       })
       .catch((error: unknown) => {
         editorLoadError = error instanceof Error ? error.message : String(error);
@@ -77,6 +81,7 @@
       templateStore?.dispose();
       execution?.dispose();
       debugStore?.dispose();
+      stressStore?.dispose();
       archiveStore?.dispose();
       generator.dispose();
       settings.dispose();
@@ -88,8 +93,8 @@
   <title>LightCP</title>
 </svelte:head>
 
-{#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore}
-  <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {generator} {settings} {backendState} {health} />
+{#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore}
+  <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {generator} {settings} {backendState} {health} />
 {:else}
   <main class="boot-screen" aria-live="polite">
     <div class="boot-mark">L</div>

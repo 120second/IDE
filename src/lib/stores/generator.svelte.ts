@@ -27,6 +27,7 @@ export class GeneratorStore {
   generating = $state(false);
   saving = $state(false);
   error = $state("");
+  editorRequested = $state(false);
 
   private sourceRequest = 0;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -139,6 +140,16 @@ export class GeneratorStore {
     const words = new Uint32Array(2);
     crypto.getRandomValues(words);
     this.setSeed(((BigInt(words[0]) << 32n) | BigInt(words[1])).toString());
+  }
+
+  requestEditor(): void {
+    this.editorRequested = true;
+  }
+
+  consumeEditorRequest(): boolean {
+    const requested = this.editorRequested;
+    this.editorRequested = false;
+    return requested;
   }
 
   clearPreview(): void {

@@ -6,6 +6,7 @@ pub mod generator;
 pub mod health;
 pub mod runner;
 pub mod settings;
+pub mod stress;
 pub mod templates;
 pub mod testcase;
 pub mod workspace;

@@ -4,7 +4,7 @@ mod parser;
 mod profile;
 mod visual;
 
-pub use engine::{generate, generate_visual, validate};
+pub use engine::{generate, generate_visual, next_seed, validate};
 pub use model::{
     GenerateRequest, GenerateResult, GeneratedCase, GeneratorDiagnostic, GeneratorStrategy,
     TreeShape, ValidationResult, ValueExpression, VisualAlphabet, VisualDiagnostic, VisualField,

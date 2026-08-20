@@ -18,6 +18,9 @@ use tauri::Manager;
 
 use crate::{paths::AppPaths, state::AppState};
 
+#[cfg(test)]
+pub(crate) static PROCESS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let application = tauri::Builder::default()
@@ -86,6 +89,8 @@ pub fn run() {
             commands::debugger::fetch_debug_variable_children,
             commands::debugger::set_debug_breakpoint,
             commands::debugger::remove_debug_breakpoint,
+            commands::stress::start_stress_test,
+            commands::stress::stop_stress_test,
             commands::testcase::list_testcases,
             commands::testcase::create_testcase,
             commands::testcase::update_testcase,

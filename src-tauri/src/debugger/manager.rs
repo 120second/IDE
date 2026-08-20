@@ -1006,6 +1006,9 @@ mod tests {
 
     #[test]
     fn gdb_mi_session_supports_breakpoints_stdin_stack_variables_and_watches() {
+        let _process_guard = crate::PROCESS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if Command::new("gdb").arg("--version").output().is_err()
             || Command::new("g++").arg("--version").output().is_err()
         {

@@ -33,7 +33,7 @@
     search: "搜索",
     templates: "模板",
     debug: "运行与调试",
-    judge: "评测",
+    judge: "压力测试",
     settings: "设置",
   };
 
@@ -83,8 +83,8 @@
     {:else if shell.activeActivity === "judge"}
       <div class="empty-state">
         <Icon name="judge" size={30} />
-        <p>本地运行器已就绪</p>
-        <span>按 F5 运行当前文件，按 F6 运行全部已启用测试点。</span>
+        <p>压力测试</p>
+        <span>Generator、Solution 与 Brute 会在独立工作区中配置和运行。</span>
       </div>
     {/if}
   </div>

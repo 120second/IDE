@@ -92,7 +92,11 @@ export class DebugStore {
   }
 
   async startTestcase(testcase: Testcase): Promise<void> {
-    await this.start(testcase.input, testcase.name);
+    await this.startInput(testcase.input, testcase.name);
+  }
+
+  async startInput(input: string, label: string): Promise<void> {
+    await this.start(input, label);
   }
 
   async continueExecution(): Promise<void> {

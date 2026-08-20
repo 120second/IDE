@@ -22,6 +22,14 @@
   let observedSource = "";
 
   $effect(() => {
+    if (!generator.editorRequested) return;
+    untrack(() => {
+      generator.consumeEditorRequest();
+      activeTab = "random";
+    });
+  });
+
+  $effect(() => {
     const sourcePath = workspace.activeTab?.path;
     if ((sourcePath ?? "") === observedSource) return;
     observedSource = sourcePath ?? "";

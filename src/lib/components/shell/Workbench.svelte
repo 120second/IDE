@@ -6,6 +6,7 @@
   import type { ExecutionStore } from "../../stores/execution.svelte";
   import type { GeneratorStore } from "../../stores/generator.svelte";
   import type { DebugStore } from "../../stores/debug.svelte";
+  import type { StressStore } from "../../stores/stress.svelte";
   import type { ShellStore } from "../../stores/shell.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
@@ -15,6 +16,7 @@
   import TemplateCenter from "../templates/TemplateCenter.svelte";
   import TemplateQuickSearch from "../templates/TemplateQuickSearch.svelte";
   import QuickArchiveDialog from "../archive/QuickArchiveDialog.svelte";
+  import StressCenter from "../stress/StressCenter.svelte";
   import ActivityBar from "./ActivityBar.svelte";
   import BottomPanel from "./BottomPanel.svelte";
   import Icon from "./Icon.svelte";
@@ -32,11 +34,12 @@
     generator: GeneratorStore;
     archiveStore: ArchiveStore;
     debugStore: DebugStore;
+    stressStore: StressStore;
     backendState: "checking" | "ready" | "error";
     health?: HealthStatus;
   }
 
-  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, settings, backendState, health }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, settings, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
 
   onMount(() => {
@@ -123,12 +126,14 @@
   <div class="shell-body">
     {#if !shell.zenMode}<ActivityBar {shell} />{/if}
     <div class="workbench">
-      {#if shell.sidebarVisible && !shell.zenMode}
+      {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge"}
         <Sidebar {shell} {workspace} {fileWorkspace} {templateStore} {execution} {generator} {archiveStore} debug={debugStore} {settings} />
       {/if}
       <section class="editor-column" aria-label="编辑器工作台">
         {#if shell.activeActivity === "templates" && !shell.zenMode}
           <TemplateCenter {templateStore} />
+        {:else if shell.activeActivity === "judge" && !shell.zenMode}
+          <StressCenter stress={stressStore} {generator} {workspace} />
         {:else}
           <TabBar
             {workspace}

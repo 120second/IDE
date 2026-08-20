@@ -19,6 +19,11 @@ export class ShellStore {
   bottomPanelHeight = $state(190);
 
   selectActivity(activity: ActivityId): void {
+    if (activity === "judge") {
+      this.activeActivity = activity;
+      this.sidebarVisible = true;
+      return;
+    }
     if (this.activeActivity === activity && this.sidebarVisible) {
       this.sidebarVisible = false;
       return;

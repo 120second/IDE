@@ -1,8 +1,8 @@
 # LightCP
 
-LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 7：GDB 图形化调试**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
+LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 8：Stress Test**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
 
-已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档、确定性随机数据生成器和 GDB/MI 图形化调试器。调试器支持断点、条件断点、继续、暂停、单步、重启、变量懒加载、Watch、调用栈和调试控制台。clangd 与 Stress 尚未实现。
+已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档、确定性随机数据生成器、GDB/MI 图形化调试器和后台并发压力测试。clangd 尚未实现。
 
 ## 环境要求
 
@@ -170,6 +170,15 @@ CodeMirror/C++ 解析器独立为异步 chunk，避免把完整编辑器核心�
 - 数组和复合对象按需展开，每页最多 100 项，不会自动读取大型数组的全部元素。
 - Stop、Restart 和窗口退出都会结束 GDB 及被调试程序，并清理测试点临时输入文件。
 
+## 压力测试
+
+- “压力测试”工作区直接复用当前文件的可视化随机规则，以当前编辑器文件作为待测程序，并选择另一份工作区 C++ 文件作为暴力程序。
+- 两份程序只编译一次；每轮获得同一份 stdin，并通过两套复用的 Runner 在后台并发执行。输出沿用固定测试点比较器的规则。
+- 支持有限迭代和无限模式、uint64 确定性种子、单程序超时、实时总数/通过/失败/耗时/速度统计，以及随时停止。
+- 第一组输出不一致、RE、TLE 或超量输出会立即结束本轮，并保留 seed、输入、双端 stdout、stderr、退出码和执行时间。
+- 失败用例可保存为固定 Hack 测试点、复制输入、继续使用下一 seed 对拍，或直接复用 Debug Testcase 流程启动 GDB 调试。
+- Stop 使用共享取消信号终止当前待测程序和暴力程序；界面日志只保留最近 500 条，不会随无限压力测试持续增长。
+
 ## 下一批
 
-Batch 8 将实现 Stress Test，并复用现有 Compiler、Runner、Random Generator、Testcase 与 Debugger。
+Batch 8 已完成；后续能力按新的批次说明继续开发。
