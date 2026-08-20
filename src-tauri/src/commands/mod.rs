@@ -1,5 +1,6 @@
 pub mod archive;
 pub mod compiler;
+pub mod debugger;
 pub mod filesystem;
 pub mod generator;
 pub mod health;

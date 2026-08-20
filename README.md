@@ -1,8 +1,8 @@
 # LightCP
 
-LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 6：Random Test Generator**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
+LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 7：GDB 图形化调试**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
 
-已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档和确定性随机数据生成器。Batch 6 使用结构化 Rule Tree 搭建输入格式，并提供 11 种数据策略、6 种树形，以及排列、树和无重边图生成。GDB、clangd 与 Stress 尚未实现。
+已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档、确定性随机数据生成器和 GDB/MI 图形化调试器。调试器支持断点、条件断点、继续、暂停、单步、重启、变量懒加载、Watch、调用栈和调试控制台。clangd 与 Stress 尚未实现。
 
 ## 环境要求
 
@@ -12,6 +12,7 @@ LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完�
 - Microsoft Visual Studio C++ Build Tools
 - Microsoft Edge WebView2
 - g++（默认从 `PATH` 查找，也可在 Settings 中指定完整路径）
+- GDB（默认从 `PATH` 查找，也可在 Settings 中指定 `gdb.exe` 完整路径）
 
 Tauri 的 Windows 前置环境参考：[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
 
@@ -160,6 +161,15 @@ CodeMirror/C++ 解析器独立为异步 chunk，避免把完整编辑器核心�
 
 原有 DSL parser 仍保留在 Rust Core，用于兼容和未来的高级导入/导出，但默认界面和结构化生成路径不再拼接或解析 DSL 字符串。
 
+## GDB 图形化调试
+
+- 调试控制通道使用 `--interpreter=mi2`，所有状态、调用栈、变量和断点均来自结构化 GDB/MI record；普通 GDB 控制台文本只显示，不参与解析。
+- Debug Current File 和 Debug Testcase 都复用 Debug 编译配置（默认 `-g -O0`）；调试测试点会自动把对应输入连接到程序 stdin。
+- 点击编辑器行号左侧可添加或删除断点；调试侧栏可启停断点并填写条件，例如 `i == 514`。
+- 程序停止后一次刷新调用栈、当前 frame 的局部变量和全部 Watch；Running 状态不执行表达式求值。
+- 数组和复合对象按需展开，每页最多 100 项，不会自动读取大型数组的全部元素。
+- Stop、Restart 和窗口退出都会结束 GDB 及被调试程序，并清理测试点临时输入文件。
+
 ## 下一批
 
-Batch 7 将实现 GDB 图形化调试；Stress 与其他高级能力仍保持后续边界。
+Batch 8 将实现 Stress Test，并复用现有 Compiler、Runner、Random Generator、Testcase 与 Debugger。

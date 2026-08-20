@@ -3,6 +3,7 @@
   import type { ArchiveStore } from "../../stores/archive.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
   import type { GeneratorStore } from "../../stores/generator.svelte";
+  import type { DebugStore } from "../../stores/debug.svelte";
   import type { SettingsStore } from "../../stores/settings.svelte";
   import type { ActivityId, ShellStore } from "../../stores/shell.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
@@ -12,6 +13,7 @@
   import SettingsPanel from "../settings/SettingsPanel.svelte";
   import TemplateSidebar from "../templates/TemplateSidebar.svelte";
   import Icon from "./Icon.svelte";
+  import DebugPanel from "../debug/DebugPanel.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -22,6 +24,7 @@
     execution: ExecutionStore;
     generator: GeneratorStore;
     archiveStore: ArchiveStore;
+    debug: DebugStore;
   }
 
   const titles: Record<ActivityId, string> = {
@@ -34,7 +37,7 @@
     settings: "设置",
   };
 
-  let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug }: Props = $props();
 
   function beginResize(event: PointerEvent): void {
     event.preventDefault();
@@ -76,11 +79,7 @@
     {:else if shell.activeActivity === "templates"}
       <TemplateSidebar {templateStore} />
     {:else if shell.activeActivity === "debug"}
-      <section class="sidebar-section"><h3>变量</h3></section>
-      <section class="sidebar-section"><h3>监视</h3></section>
-      <section class="sidebar-section"><h3>调用栈</h3></section>
-      <section class="sidebar-section"><h3>断点</h3></section>
-      <div class="empty-state compact"><Icon name="debug" size={26} /><span>尚未启用 GDB/MI 集成。</span></div>
+      <DebugPanel {debug} {execution} {workspace} />
     {:else if shell.activeActivity === "judge"}
       <div class="empty-state">
         <Icon name="judge" size={30} />

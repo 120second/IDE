@@ -121,6 +121,17 @@
     </label>
 
     <label class="setting-row vertical">
+      <span class="setting-label">GDB 路径</span>
+      <input
+        class="text-input"
+        value={settings.value.gdbPath}
+        placeholder="gdb 或 C:\mingw64\bin\gdb.exe"
+        oninput={(event) => settings.update({ gdbPath: event.currentTarget.value })}
+      />
+      <span class="setting-hint">图形化调试使用 GDB/MI。找不到 GDB 时请填写 gdb.exe 的完整路径。</span>
+    </label>
+
+    <label class="setting-row vertical">
       <span class="setting-label">C++ 标准</span>
       <select
         class="text-input"

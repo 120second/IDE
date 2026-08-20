@@ -12,6 +12,7 @@ export interface AppSettings {
   lineHeight: number;
   performanceMode: boolean;
   compilerPath: string;
+  gdbPath: string;
   compilerStandard: string;
   releaseArgs: string[];
   debugArgs: string[];

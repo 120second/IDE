@@ -11,12 +11,22 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState, type Extension, type Transaction } from "@codemirror/state";
+import {
+  Compartment,
+  EditorState,
+  RangeSet,
+  StateEffect,
+  StateField,
+  type Extension,
+  type Transaction,
+} from "@codemirror/state";
 import {
   crosshairCursor,
   drawSelection,
   dropCursor,
   EditorView,
+  gutter,
+  GutterMarker,
   highlightActiveLine,
   highlightActiveLineGutter,
   highlightSpecialChars,
@@ -40,6 +50,38 @@ export interface EditorTab {
   deleted: boolean;
   externalModified: boolean;
 }
+
+export interface EditorBreakpointLocation {
+  file: string;
+  line: number;
+}
+
+class BreakpointGutterMarker extends GutterMarker {
+  elementClass = "cm-breakpoint-marker";
+
+  toDOM(): HTMLElement {
+    const marker = document.createElement("span");
+    marker.setAttribute("aria-hidden", "true");
+    return marker;
+  }
+}
+
+const breakpointMarker = new BreakpointGutterMarker();
+const setBreakpointLines = StateEffect.define<readonly number[]>();
+const breakpointField = StateField.define<RangeSet<GutterMarker>>({
+  create: () => RangeSet.empty,
+  update(markers, transaction) {
+    markers = markers.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (!effect.is(setBreakpointLines)) continue;
+      const ranges = effect.value
+        .filter((line) => line >= 1 && line <= transaction.state.doc.lines)
+        .map((line) => breakpointMarker.range(transaction.state.doc.line(line).from));
+      markers = RangeSet.of(ranges, true);
+    }
+    return markers;
+  },
+});
 
 const STARTER_TABS = [
   {
@@ -113,6 +155,8 @@ export class EditorWorkspace {
   private readonly appearance = new Compartment();
   private nextTabNumber = 1;
   private suppressDirty = false;
+  private breakpointToggleHandler: ((file: string, line: number) => void) | undefined;
+  private breakpointMoveHandler: ((file: string, lines: number[]) => void) | undefined;
 
   constructor(settings: AppSettings) {
     this.tabs = STARTER_TABS.map((tab, index) => ({
@@ -149,6 +193,33 @@ export class EditorWorkspace {
 
   focus(): void {
     this.view?.focus();
+  }
+
+  setBreakpointHandlers(
+    toggle: (file: string, line: number) => void,
+    moved: (file: string, lines: number[]) => void,
+  ): void {
+    this.breakpointToggleHandler = toggle;
+    this.breakpointMoveHandler = moved;
+  }
+
+  setBreakpointLocations(locations: readonly EditorBreakpointLocation[]): void {
+    const linesByPath = new Map<string, number[]>();
+    for (const location of locations) {
+      const key = normalizedPath(location.file);
+      linesByPath.set(key, [...(linesByPath.get(key) ?? []), location.line]);
+    }
+    this.tabs = this.tabs.map((tab) => {
+      if (!tab.path || tab.id === this.activeId && this.view) return tab;
+      const lines = linesByPath.get(normalizedPath(tab.path)) ?? [];
+      return { ...tab, state: tab.state.update({ effects: setBreakpointLines.of(lines) }).state };
+    });
+    const active = this.activeTab;
+    if (active?.path && this.view) {
+      this.view.dispatch({
+        effects: setBreakpointLines.of(linesByPath.get(normalizedPath(active.path)) ?? []),
+      });
+    }
   }
 
   getSelectedText(): string {
@@ -435,6 +506,14 @@ export class EditorWorkspace {
     return EditorState.create({
       doc: document,
       extensions: [
+        createBreakpointGutter((line) => {
+          const path = this.activeTab?.path;
+          if (!path) {
+            this.notice = "请先打开工作区中的 C++ 文件，再设置断点。";
+            return;
+          }
+          this.breakpointToggleHandler?.(path, line);
+        }),
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightSpecialChars(),
@@ -473,6 +552,10 @@ export class EditorWorkspace {
         : tab,
     );
     this.updateCursor(update.state);
+    const path = this.activeTab?.path;
+    if (update.docChanged && path && this.breakpointMoveHandler) {
+      this.breakpointMoveHandler(path, breakpointLines(update.state));
+    }
   }
 
   private captureActiveView(): void {
@@ -527,6 +610,33 @@ export class EditorWorkspace {
     this.cursorLine = line.number;
     this.cursorColumn = head - line.from + 1;
   }
+}
+
+function createBreakpointGutter(toggle: (line: number) => void): Extension {
+  return [
+    breakpointField,
+    gutter({
+      class: "cm-breakpoint-gutter",
+      markers: (view) => view.state.field(breakpointField),
+      initialSpacer: () => breakpointMarker,
+      domEventHandlers: {
+        mousedown(view, line, event) {
+          if (!(event instanceof MouseEvent) || event.button !== 0) return false;
+          event.preventDefault();
+          toggle(view.state.doc.lineAt(line.from).number);
+          return true;
+        },
+      },
+    }),
+  ];
+}
+
+function breakpointLines(state: EditorState): number[] {
+  const lines: number[] = [];
+  state.field(breakpointField).between(0, state.doc.length, (from) => {
+    lines.push(state.doc.lineAt(from).number);
+  });
+  return lines;
 }
 
 function normalizedPath(path: string): string {

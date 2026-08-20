@@ -5,6 +5,7 @@
   import type { SettingsStore } from "../../stores/settings.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
   import type { GeneratorStore } from "../../stores/generator.svelte";
+  import type { DebugStore } from "../../stores/debug.svelte";
   import type { ShellStore } from "../../stores/shell.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
@@ -30,11 +31,12 @@
     execution: ExecutionStore;
     generator: GeneratorStore;
     archiveStore: ArchiveStore;
+    debugStore: DebugStore;
     backendState: "checking" | "ready" | "error";
     health?: HealthStatus;
   }
 
-  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, settings, backendState, health }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, settings, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
 
   onMount(() => {
@@ -122,7 +124,7 @@
     {#if !shell.zenMode}<ActivityBar {shell} />{/if}
     <div class="workbench">
       {#if shell.sidebarVisible && !shell.zenMode}
-        <Sidebar {shell} {workspace} {fileWorkspace} {templateStore} {execution} {generator} {archiveStore} {settings} />
+        <Sidebar {shell} {workspace} {fileWorkspace} {templateStore} {execution} {generator} {archiveStore} debug={debugStore} {settings} />
       {/if}
       <section class="editor-column" aria-label="编辑器工作台">
         {#if shell.activeActivity === "templates" && !shell.zenMode}
@@ -142,7 +144,7 @@
             <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
           </div>
           {#if shell.bottomPanelVisible && !shell.zenMode}
-            <BottomPanel {shell} {workspace} {execution} {backendState} {health} />
+            <BottomPanel {shell} {workspace} {execution} debug={debugStore} {backendState} {health} />
           {/if}
         {/if}
       </section>

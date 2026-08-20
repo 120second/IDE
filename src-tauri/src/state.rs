@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::{
+    debugger::DebugManager,
     error::{AppError, AppResult},
     filesystem::WorkspaceRuntime,
     paths::AppPaths,
@@ -16,16 +17,19 @@ pub struct AppState {
     pub settings_write_lock: Mutex<()>,
     pub workspace: Mutex<WorkspaceRuntime>,
     pub runner: Arc<RunnerManager>,
+    pub debugger: Arc<DebugManager>,
 }
 
 impl AppState {
     pub fn new(paths: AppPaths, database_schema_version: i64) -> Self {
+        let debug_data_dir = paths.data_dir.join("debug");
         Self {
             paths,
             database_schema_version,
             settings_write_lock: Mutex::new(()),
             workspace: Mutex::new(WorkspaceRuntime::default()),
             runner: Arc::new(RunnerManager::default()),
+            debugger: Arc::new(DebugManager::new(debug_data_dir)),
         }
     }
 

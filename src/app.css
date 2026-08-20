@@ -42,6 +42,349 @@
   --editor-line-height: 1.62;
 }
 
+/* Batch 7 · GDB/MI debugger */
+.cm-breakpoint-gutter {
+  width: 17px;
+  cursor: pointer;
+}
+
+.cm-breakpoint-marker {
+  box-sizing: border-box;
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: 6px 3px 0 4px;
+  border: 2px solid color-mix(in srgb, var(--accent, #4b8ee8) 68%, transparent);
+  border-radius: 50%;
+  background: #e34f5f;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.debug-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  color: var(--text-primary);
+}
+
+.debug-launch {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-launch > button,
+.debug-testcase-launch button {
+  min-height: 30px;
+}
+
+.debug-testcase-launch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.debug-testcase-launch select,
+.debug-testcase-launch button,
+.debug-watch-form input,
+.debug-watch-form button,
+.debug-condition {
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text-primary);
+  background: var(--surface-input, rgba(17, 20, 26, 0.65));
+}
+
+.debug-testcase-launch select {
+  padding: 0 7px;
+}
+
+.debug-status {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent, #4b8ee8) 7%, transparent);
+}
+
+.debug-status strong {
+  font-size: 12px;
+}
+
+.debug-status span,
+.debug-section header span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-status.error,
+.debug-error,
+.debug-inline-error {
+  color: #e36a76;
+}
+
+.debug-controls {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 2px;
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-controls button {
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 3px 1px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.debug-controls button:hover:not(:disabled) {
+  background: var(--hover-background);
+}
+
+.debug-controls button.danger {
+  color: #e36a76;
+}
+
+.debug-controls button span {
+  font-size: 9px;
+}
+
+.debug-section {
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 29px;
+  padding: 0 9px;
+  background: var(--hover-background);
+}
+
+.debug-section h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.debug-empty {
+  margin: 0;
+  padding: 10px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.debug-variable-tree,
+.debug-watch-list,
+.debug-frame-list,
+.debug-breakpoint-list {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.debug-variable-row {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding-right: 7px;
+  font-family: var(--editor-font-family);
+  font-size: 10px;
+}
+
+.debug-variable-row:hover,
+.debug-watch-row:hover,
+.debug-breakpoint-row:hover {
+  background: var(--hover-background);
+}
+
+.debug-tree-toggle,
+.debug-tree-spacer {
+  flex: 0 0 16px;
+  width: 16px;
+}
+
+.debug-tree-toggle {
+  height: 20px;
+  padding: 0;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.debug-variable-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: #75aef2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-variable-value {
+  flex: 1 1 auto;
+  overflow: hidden;
+  margin-left: 6px;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-load-more {
+  width: 100%;
+  min-height: 23px;
+  border: 0;
+  color: var(--accent, #4b8ee8);
+  font-size: 10px;
+  text-align: left;
+  background: transparent;
+}
+
+.debug-inline-error {
+  padding-top: 3px;
+  padding-bottom: 5px;
+  font-size: 9px;
+}
+
+.debug-watch-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 4px;
+  padding: 6px 8px;
+}
+
+.debug-watch-form input {
+  height: 27px;
+  padding: 0 7px;
+}
+
+.debug-watch-row {
+  display: grid;
+  grid-template-columns: minmax(65px, 0.8fr) minmax(80px, 1fr) 22px;
+  align-items: center;
+  min-height: 25px;
+  padding-left: 9px;
+  font-size: 10px;
+}
+
+.debug-watch-row > span,
+.debug-watch-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-watch-row code {
+  color: var(--text-secondary);
+}
+
+.debug-watch-row code.error {
+  color: #e36a76;
+}
+
+.debug-watch-row button,
+.debug-breakpoint-row > button {
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.debug-frame-list button {
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  padding: 6px 10px;
+  border: 0;
+  color: var(--text-primary);
+  text-align: left;
+  background: transparent;
+}
+
+.debug-frame-list button.active {
+  background: color-mix(in srgb, var(--accent, #4b8ee8) 17%, transparent);
+}
+
+.debug-frame-list strong,
+.debug-frame-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-frame-list strong {
+  font-size: 10px;
+}
+
+.debug-frame-list small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.debug-breakpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  padding: 5px 7px;
+  border-left: 2px solid transparent;
+}
+
+.debug-breakpoint-row.unverified {
+  border-left-color: #d89a4b;
+}
+
+.debug-breakpoint-row label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+}
+
+.debug-breakpoint-row label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-condition {
+  grid-column: 1 / -1;
+  height: 25px;
+  margin-top: 4px;
+  padding: 0 6px;
+  font-family: var(--editor-font-family);
+  font-size: 10px;
+}
+
+.debug-breakpoint-row small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  padding: 3px 2px 0;
+  color: #d89a4b;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-error {
+  margin: 8px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.debug-console-panel {
+  height: 100%;
+}
+
 :root[data-theme="light"] {
   color: #232832;
   background: #eef1f5;

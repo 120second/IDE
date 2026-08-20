@@ -26,6 +26,7 @@ pub struct AppSettings {
     pub line_height: f64,
     pub performance_mode: bool,
     pub compiler_path: String,
+    pub gdb_path: String,
     pub compiler_standard: String,
     pub release_args: Vec<String>,
     pub debug_args: Vec<String>,
@@ -47,6 +48,7 @@ impl Default for AppSettings {
             line_height: 1.62,
             performance_mode: false,
             compiler_path: "g++".to_owned(),
+            gdb_path: "gdb".to_owned(),
             compiler_standard: "c++20".to_owned(),
             release_args: vec!["-O2".to_owned()],
             debug_args: vec!["-g".to_owned(), "-O0".to_owned()],
@@ -76,6 +78,7 @@ impl AppSettings {
         };
 
         self.compiler_path = bounded_nonempty(&self.compiler_path, "g++", 2048);
+        self.gdb_path = bounded_nonempty(&self.gdb_path, "gdb", 2048);
         self.compiler_standard = bounded_nonempty(&self.compiler_standard, "c++20", 32);
         self.release_args = sanitize_arguments(self.release_args, &["-O2"]);
         self.debug_args = sanitize_arguments(self.debug_args, &["-g", "-O0"]);

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
+  import type { DebugStore } from "../../stores/debug.svelte";
   import type { BottomPanelId, ShellStore } from "../../stores/shell.svelte";
   import type { HealthStatus } from "../../types/health";
   import Icon from "./Icon.svelte";
@@ -11,6 +12,7 @@
     backendState: "checking" | "ready" | "error";
     health?: HealthStatus;
     execution: ExecutionStore;
+    debug: DebugStore;
   }
 
   const panels: { id: BottomPanelId; label: string; badge?: string }[] = [
@@ -21,7 +23,7 @@
     { id: "debugConsole", label: "调试控制台" },
   ];
 
-  let { shell, workspace, backendState, health, execution }: Props = $props();
+  let { shell, workspace, backendState, health, execution, debug }: Props = $props();
   let selectedResultId = $state<number>();
   let selectedResult = $derived(
     execution.results.find((result) => result.testcaseId === selectedResultId)
@@ -104,7 +106,13 @@
     {:else if shell.activeBottomPanel === "terminal"}
       <div class="panel-empty"><Icon name="terminal" size={20} /><span>程序输出会缓冲显示在“输出”面板中。</span></div>
     {:else}
-      <div class="panel-empty"><Icon name="debug" size={20} /><span>启动 GDB/MI 会话后即可使用调试控制台。</span></div>
+      <div class="execution-output debug-console-panel">
+        <div class="execution-toolbar">
+          <button onclick={() => debug.clearConsole()}>清空</button>
+          <span>{debug.state === "idle" ? "调试器未启动" : debug.reason || "GDB/MI 会话已连接"}</span>
+        </div>
+        <pre class="process-output" aria-live="polite">{debug.console || "[调试控制台] 启动调试后将在此显示程序输出和 GDB 消息。\n"}</pre>
+      </div>
     {/if}
   </div>
 </section>
