@@ -7,7 +7,7 @@ export type ActivityId =
   | "judge"
   | "settings";
 
-export type BottomPanelId = "problems" | "output" | "tests" | "terminal" | "debugConsole";
+export type BottomPanelId = "problems" | "output" | "tests" | "debugConsole";
 
 export class ShellStore {
   activeActivity = $state<ActivityId>("explorer");

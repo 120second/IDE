@@ -83,6 +83,60 @@ describe("editor save checkpoint", () => {
     expect(workspace.activeTab?.diskRevision).toBe("disk-2");
   });
 
+  it("saves every dirty file without changing the active tab", async () => {
+    workspaceApi.readTextFile.mockImplementation(async (path: string) => ({
+      path,
+      content: "",
+      revision: `disk-${path.includes("first") ? "first" : "second"}`,
+    }));
+    workspaceApi.writeTextFile.mockImplementation(async (path: string) => ({
+      status: "saved",
+      path,
+      revision: `saved-${path.includes("first") ? "first" : "second"}`,
+    }));
+
+    const workspace = new EditorWorkspace(DEFAULT_SETTINGS);
+    await workspace.openFile("D:\\Code\\first.cpp");
+    workspace.insertSnippet("first edit");
+    await workspace.openFile("D:\\Code\\second.cpp");
+    workspace.insertSnippet("second edit");
+    const activeId = workspace.activeId;
+
+    await expect(workspace.saveAll()).resolves.toEqual({ saved: 2, failed: 0, skipped: 0 });
+
+    expect(workspaceApi.writeTextFile).toHaveBeenCalledTimes(2);
+    expect(workspaceApi.writeTextFile.mock.calls.map((call) => call[0])).toEqual([
+      "D:\\Code\\first.cpp",
+      "D:\\Code\\second.cpp",
+    ]);
+    expect(workspace.tabs.every((tab) => !tab.dirty)).toBe(true);
+    expect(workspace.activeId).toBe(activeId);
+  });
+
+  it("reports dirty untitled editors as skipped when saving all", async () => {
+    workspaceApi.readTextFile.mockResolvedValue({
+      path: "D:\\Code\\main.cpp",
+      content: "",
+      revision: "disk-0",
+    });
+    workspaceApi.writeTextFile.mockResolvedValue({
+      status: "saved",
+      path: "D:\\Code\\main.cpp",
+      revision: "disk-1",
+    });
+
+    const workspace = new EditorWorkspace(DEFAULT_SETTINGS);
+    await workspace.openFile("D:\\Code\\main.cpp");
+    workspace.insertSnippet("saved file");
+    workspace.createTab();
+    workspace.insertSnippet("unsaved buffer");
+
+    await expect(workspace.saveAll()).resolves.toEqual({ saved: 1, failed: 0, skipped: 1 });
+    expect(workspace.tabs[0].dirty).toBe(false);
+    expect(workspace.tabs[1].dirty).toBe(true);
+    expect(workspace.tabs[1].state.sliceDoc()).toBe("unsaved buffer");
+  });
+
   it("requires explicit confirmation and rechecks the external revision before overwrite", async () => {
     workspaceApi.readTextFile.mockResolvedValue({
       path: "D:\\Code\\main.cpp",
@@ -153,6 +207,44 @@ describe("editor save checkpoint", () => {
     expect(workspace.activeTab?.state.doc.toString()).toContain("editor");
     expect(workspace.activeTab?.externalModified).toBe(true);
     expect(workspace.activeTab?.externalRevision).toBe("disk-2");
+  });
+
+  it("reopens a recreated clean file and preserves a dirty deleted buffer as a conflict", async () => {
+    workspaceApi.readTextFile
+      .mockResolvedValueOnce({
+        path: "D:\\Code\\main.cpp",
+        content: "initial",
+        revision: "disk-0",
+      })
+      .mockResolvedValueOnce({
+        path: "D:\\Code\\main.cpp",
+        content: "recreated",
+        revision: "disk-1",
+      })
+      .mockResolvedValueOnce({
+        path: "D:\\Code\\main.cpp",
+        content: "recreated again",
+        revision: "disk-2",
+      });
+
+    const workspace = new EditorWorkspace(DEFAULT_SETTINGS);
+    await workspace.openFile("D:\\Code\\main.cpp");
+    workspace.handlePathDeleted("D:\\Code\\main.cpp");
+    await workspace.handleExternalChange({ kind: "created", paths: ["D:\\Code\\main.cpp"] });
+
+    expect(workspace.activeTab?.deleted).toBe(false);
+    expect(workspace.activeTab?.dirty).toBe(false);
+    expect(workspace.activeTab?.state.doc.toString()).toBe("recreated");
+
+    workspace.insertSnippet("editor ");
+    workspace.handlePathDeleted("D:\\Code\\main.cpp");
+    await workspace.handleExternalChange({ kind: "created", paths: ["D:\\Code\\main.cpp"] });
+
+    expect(workspace.activeTab?.deleted).toBe(false);
+    expect(workspace.activeTab?.dirty).toBe(true);
+    expect(workspace.activeTab?.externalModified).toBe(true);
+    expect(workspace.activeTab?.externalRevision).toBe("disk-2");
+    expect(workspace.activeTab?.state.doc.toString()).toContain("editor");
   });
 
   it("round-trips CRLF and the final line ending through a save", async () => {

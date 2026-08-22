@@ -15,7 +15,7 @@ import type { WorkspaceStore } from "./workspace.svelte";
 
 const STORAGE_KEY = "lightcp.session.v1";
 const ACTIVITIES = new Set<ActivityId>(["explorer", "testcases", "search", "templates", "debug", "judge", "settings"]);
-const PANELS = new Set<BottomPanelId>(["problems", "output", "tests", "terminal", "debugConsole"]);
+const PANELS = new Set<BottomPanelId>(["problems", "output", "tests", "debugConsole"]);
 
 interface WindowGeometry {
   x: number;
@@ -284,8 +284,11 @@ function readSnapshot(): SessionSnapshot | undefined {
     const activeActivity = ACTIVITIES.has(parsed.activeActivity as ActivityId)
       ? parsed.activeActivity as ActivityId
       : "explorer";
-    const activeBottomPanel = PANELS.has(parsed.activeBottomPanel as BottomPanelId)
-      ? parsed.activeBottomPanel as BottomPanelId
+    const persistedPanel = parsed.activeBottomPanel as string | undefined;
+    const activeBottomPanel = persistedPanel === "terminal"
+      ? "output"
+      : PANELS.has(persistedPanel as BottomPanelId)
+      ? persistedPanel as BottomPanelId
       : "output";
     return {
       version: 1,

@@ -4,6 +4,13 @@ export type ShortcutId =
   | "toggleSidebar"
   | "togglePanel"
   | "save"
+  | "newFile"
+  | "quickOpen"
+  | "commandPalette"
+  | "searchWorkspace"
+  | "closeEditor"
+  | "nextEditor"
+  | "previousEditor"
   | "runCurrent"
   | "runAll"
   | "stress"
@@ -36,6 +43,13 @@ const NAMED_KEYS = [
 
 export const DEFAULT_KEYBINDINGS: KeybindingMap = {
   save: "Ctrl+S",
+  newFile: "Ctrl+N",
+  quickOpen: "Ctrl+P",
+  commandPalette: "Ctrl+Shift+P",
+  searchWorkspace: "Ctrl+Shift+F",
+  closeEditor: "Ctrl+W",
+  nextEditor: "Ctrl+Tab",
+  previousEditor: "Ctrl+Shift+Tab",
   toggleSidebar: "Ctrl+B",
   quickTemplate: "Ctrl+Alt+T",
   quickArchive: "Ctrl+Shift+A",
@@ -48,6 +62,13 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
 
 export const SHORTCUT_LABELS: Record<ShortcutId, string> = {
   save: "保存",
+  newFile: "新建 C++ 文件",
+  quickOpen: "快速打开文件",
+  commandPalette: "显示命令面板",
+  searchWorkspace: "搜索工作区",
+  closeEditor: "关闭当前编辑器",
+  nextEditor: "下一个编辑器",
+  previousEditor: "上一个编辑器",
   toggleSidebar: "切换侧栏",
   quickTemplate: "搜索模板",
   quickArchive: "快速归档",

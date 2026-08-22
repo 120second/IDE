@@ -12,6 +12,8 @@ export interface ConfirmationRequest {
   message: string;
   confirmLabel: string;
   danger: boolean;
+  secondaryLabel?: string;
+  secondaryDanger: boolean;
 }
 
 interface ConfirmOptions {
@@ -19,19 +21,27 @@ interface ConfirmOptions {
   message: string;
   confirmLabel?: string;
   danger?: boolean;
+  secondaryLabel?: string;
+  secondaryDanger?: boolean;
 }
+
+export type ConfirmationChoice = "confirm" | "secondary" | "cancel";
 
 export class UxStore {
   toasts = $state.raw<ToastMessage[]>([]);
   confirmation = $state<ConfirmationRequest>();
 
   private nextId = 1;
-  private confirmResolver: ((accepted: boolean) => void) | undefined;
+  private confirmResolver: ((choice: ConfirmationChoice) => void) | undefined;
   private readonly timers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly recentMessages = new Map<string, number>();
 
   confirm(options: ConfirmOptions): Promise<boolean> {
-    this.resolveConfirmation(false);
+    return this.choose(options).then((choice) => choice === "confirm");
+  }
+
+  choose(options: ConfirmOptions): Promise<ConfirmationChoice> {
+    this.resolveConfirmation("cancel");
     const id = this.nextId++;
     this.confirmation = {
       id,
@@ -39,6 +49,8 @@ export class UxStore {
       message: options.message,
       confirmLabel: options.confirmLabel ?? "确定",
       danger: options.danger ?? false,
+      secondaryLabel: options.secondaryLabel,
+      secondaryDanger: options.secondaryDanger ?? false,
     };
     return new Promise((resolve) => {
       this.confirmResolver = resolve;
@@ -46,11 +58,15 @@ export class UxStore {
   }
 
   acceptConfirmation(): void {
-    this.resolveConfirmation(true);
+    this.resolveConfirmation("confirm");
+  }
+
+  acceptSecondaryConfirmation(): void {
+    this.resolveConfirmation("secondary");
   }
 
   cancelConfirmation(): void {
-    this.resolveConfirmation(false);
+    this.resolveConfirmation("cancel");
   }
 
   success(message: string): void {
@@ -73,7 +89,7 @@ export class UxStore {
   }
 
   dispose(): void {
-    this.resolveConfirmation(false);
+    this.resolveConfirmation("cancel");
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.toasts = [];
@@ -91,10 +107,10 @@ export class UxStore {
     this.timers.set(id, setTimeout(() => this.dismissToast(id), duration));
   }
 
-  private resolveConfirmation(accepted: boolean): void {
+  private resolveConfirmation(choice: ConfirmationChoice): void {
     const resolve = this.confirmResolver;
     this.confirmResolver = undefined;
     this.confirmation = undefined;
-    resolve?.(accepted);
+    resolve?.(choice);
   }
 }

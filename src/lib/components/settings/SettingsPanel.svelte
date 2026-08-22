@@ -6,6 +6,8 @@
     type AppearancePresetId,
   } from "../../stores/settings.svelte";
   import { chooseBackgroundImage } from "../../api/appearance";
+  import { diagnoseToolchain } from "../../api/health";
+  import type { ToolStatus, ToolchainStatus } from "../../types/health";
   import {
     DEFAULT_KEYBINDINGS,
     SHORTCUT_IDS,
@@ -29,6 +31,15 @@
   let failedBackground = $state("");
   let backgroundPickerError = $state("");
   let previewUrl = $derived(backgroundImageUrl(settings.value.backgroundImage));
+  let toolchain = $state<ToolchainStatus>();
+  let checkingToolchain = $state(false);
+  let toolchainError = $state("");
+  let diagnosticRequest = 0;
+  let toolRows = $derived<{ label: string; tool: ToolStatus | undefined }[]>([
+    { label: "编译", tool: toolchain?.compiler },
+    { label: "调试", tool: toolchain?.debugger },
+    { label: "智能提示", tool: toolchain?.languageServer },
+  ]);
 
   const appearancePresets: { id: AppearancePresetId; label: string }[] = [
     { id: "solid", label: "不透明" },
@@ -74,6 +85,39 @@
   function updateShortcut(id: ShortcutId, value: string): void {
     settings.update({ keybindings: { ...settings.value.keybindings, [id]: value } });
   }
+
+  async function refreshToolchain(): Promise<void> {
+    const request = ++diagnosticRequest;
+    checkingToolchain = true;
+    toolchainError = "";
+    try {
+      const result = await diagnoseToolchain(
+        settings.value.compilerPath,
+        settings.value.gdbPath,
+        settings.value.clangdPath,
+      );
+      if (request === diagnosticRequest) toolchain = result;
+    } catch (error) {
+      if (request === diagnosticRequest) {
+        toolchainError = error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (request === diagnosticRequest) checkingToolchain = false;
+    }
+  }
+
+  function toolLabel(tool: ToolStatus | undefined): string {
+    if (!tool) return "尚未检查";
+    return tool.available ? "可用" : "未找到";
+  }
+
+  $effect(() => {
+    settings.value.compilerPath;
+    settings.value.gdbPath;
+    settings.value.clangdPath;
+    const timer = window.setTimeout(() => void refreshToolchain(), 350);
+    return () => window.clearTimeout(timer);
+  });
 </script>
 
 <div class="settings-panel">
@@ -294,9 +338,24 @@
     <div class="section-heading">
       <div>
         <h3>C++ 工具链</h3>
-        <p>用于编译当前文件和运行测试点。</p>
+        <p>用于编译、调试和代码智能功能。</p>
       </div>
+      <button class="secondary-button compact-button" disabled={checkingToolchain} onclick={() => void refreshToolchain()}>
+        {checkingToolchain ? "检查中…" : "重新检查"}
+      </button>
     </div>
+
+    <div class="toolchain-status" aria-label="C++ 工具链状态">
+      {#each toolRows as row}
+        <div class:available={row.tool?.available} class:missing={row.tool && !row.tool.available} class="tool-status-item">
+          <span class="tool-status-dot" aria-hidden="true"></span>
+          <strong>{row.label}</strong>
+          <span>{toolLabel(row.tool)}</span>
+          {#if row.tool?.resolvedPath}<small title={row.tool.resolvedPath}>{row.tool.resolvedPath}</small>{/if}
+        </div>
+      {/each}
+    </div>
+    {#if toolchainError}<p class="settings-error">工具链检查失败：{toolchainError}</p>{/if}
 
     <label class="setting-row vertical">
       <span class="setting-label">编译器路径</span>
