@@ -24,9 +24,14 @@ describe("workspace session persistence", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reopens the last folder without persisting open files", async () => {
+  it("reopens the last folder while keeping editor data out of localStorage", async () => {
     const firstWorkspace = workspaceStub("D:\\Recent");
-    const first = new SessionStore(firstWorkspace as never, new ShellStore(), { error: vi.fn() } as never);
+    const first = new SessionStore(
+      firstWorkspace as never,
+      editorStub() as never,
+      new ShellStore(),
+      { error: vi.fn() } as never,
+    );
 
     await first.initialize();
     expect(firstWorkspace.openPath).toHaveBeenCalledWith("D:\\Recent");
@@ -42,7 +47,12 @@ describe("workspace session persistence", () => {
     expect(persisted).not.toHaveProperty("activeFile");
 
     const reopenedWorkspace = workspaceStub("D:\\Recent");
-    const reopened = new SessionStore(reopenedWorkspace as never, new ShellStore(), { error: vi.fn() } as never);
+    const reopened = new SessionStore(
+      reopenedWorkspace as never,
+      editorStub() as never,
+      new ShellStore(),
+      { error: vi.fn() } as never,
+    );
     await reopened.initialize();
 
     expect(reopenedWorkspace.openPath).toHaveBeenCalledWith("D:\\Problem Set");
@@ -81,4 +91,12 @@ function workspaceStub(recentPath: string) {
     }),
   };
   return workspace;
+}
+
+function editorStub() {
+  return {
+    setSessionChangeHandler: vi.fn(),
+    recoverySnapshot: vi.fn(() => ({ version: 1, tabs: [] })),
+    restoreRecoverySnapshot: vi.fn(async () => undefined),
+  };
 }

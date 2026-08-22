@@ -246,6 +246,7 @@ export class DebugStore {
     const existing = this.breakpoints.find((breakpoint) => breakpoint.id === id);
     if (!existing) return;
     const next = { ...existing, ...patch, verified: false, message: "" };
+    if (sameBreakpoint(existing, next)) return;
     this.breakpoints = this.breakpoints.map((breakpoint) => breakpoint.id === id ? next : breakpoint);
     this.syncGutter();
     if (this.active) await this.pushBreakpoint(next);
@@ -362,12 +363,22 @@ export class DebugStore {
   private mergeBreakpoints(incoming: DebugBreakpoint[]): void {
     if (!incoming.length) return;
     const byId = new Map(incoming.map((breakpoint) => [breakpoint.id, breakpoint]));
-    this.breakpoints = this.breakpoints.map((breakpoint) => byId.get(breakpoint.id) ?? breakpoint);
+    let changed = false;
+    const existingIds = new Set(this.breakpoints.map((breakpoint) => breakpoint.id));
+    const next = this.breakpoints.map((breakpoint) => {
+      const replacement = byId.get(breakpoint.id);
+      if (!replacement || sameBreakpoint(breakpoint, replacement)) return breakpoint;
+      changed = true;
+      return replacement;
+    });
     for (const breakpoint of incoming) {
-      if (!this.breakpoints.some((candidate) => candidate.id === breakpoint.id)) {
-        this.breakpoints = [...this.breakpoints, breakpoint];
-      }
+      if (existingIds.has(breakpoint.id)) continue;
+      existingIds.add(breakpoint.id);
+      next.push(breakpoint);
+      changed = true;
     }
+    if (!changed) return;
+    this.breakpoints = next;
     this.syncGutter();
   }
 
@@ -378,10 +389,14 @@ export class DebugStore {
     if (existing.length === 0) return;
     if (existing.length !== lines.length) return;
     const replacements = new Map(existing.map((breakpoint, index) => [breakpoint.id, lines[index]]));
-    this.breakpoints = this.breakpoints.map((breakpoint) => ({
-      ...breakpoint,
-      line: replacements.get(breakpoint.id) ?? breakpoint.line,
-    }));
+    let changed = false;
+    const next = this.breakpoints.map((breakpoint) => {
+      const line = replacements.get(breakpoint.id) ?? breakpoint.line;
+      if (line === breakpoint.line) return breakpoint;
+      changed = true;
+      return { ...breakpoint, line };
+    });
+    if (changed) this.breakpoints = next;
   }
 
   private syncGutter(): void {
@@ -409,6 +424,17 @@ function parentDirectory(path: string): string {
 function samePath(left: string, right: string): boolean {
   return left.replaceAll("/", "\\").toLocaleLowerCase()
     === right.replaceAll("/", "\\").toLocaleLowerCase();
+}
+
+function sameBreakpoint(left: DebugBreakpoint, right: DebugBreakpoint): boolean {
+  return left.id === right.id
+    && samePath(left.file, right.file)
+    && left.line === right.line
+    && left.enabled === right.enabled
+    && left.condition === right.condition
+    && left.verified === right.verified
+    && left.message === right.message
+    && left.gdbNumber === right.gdbNumber;
 }
 
 function errorMessage(error: unknown): string {

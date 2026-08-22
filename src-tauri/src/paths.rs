@@ -52,6 +52,7 @@ pub struct AppPaths {
     pub data_dir: PathBuf,
     pub database_file: PathBuf,
     pub settings_file: PathBuf,
+    pub editor_recovery_file: PathBuf,
 }
 
 impl AppPaths {
@@ -66,6 +67,7 @@ impl AppPaths {
         Ok(Self {
             database_file: data_dir.join("lightcp.db"),
             settings_file: data_dir.join("settings.json"),
+            editor_recovery_file: data_dir.join("editor-session.json"),
             data_dir,
         })
     }

@@ -6,7 +6,9 @@ use tauri::State;
 use crate::{
     archive,
     error::{AppError, CommandError},
-    filesystem::{self as fs_core, FileContent, FileEntry, PathResult},
+    filesystem::{
+        self as fs_core, FileContent, FileEntry, FileRevision, PathResult, WriteTextResult,
+    },
     state::AppState,
 };
 
@@ -31,25 +33,50 @@ pub fn list_directory(
     Ok(entries)
 }
 
-#[tauri::command(async)]
-pub fn read_text_file(
+#[tauri::command]
+pub async fn read_text_file(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<FileContent, CommandError> {
     let root = active_root(&state)?;
-    let content = fs_core::read_text_file(&root, &path).map_err(CommandError::from)?;
-    archive::record_opened(&state.paths.database_file, &root, &content.path)
-        .map_err(CommandError::from)?;
+    let read_root = root.clone();
+    let content =
+        tauri::async_runtime::spawn_blocking(move || fs_core::read_text_file(&read_root, &path))
+            .await
+            .map_err(|error| {
+                CommandError::from(AppError::Internal(format!(
+                    "file read task could not be joined: {error}"
+                )))
+            })?
+            .map_err(CommandError::from)?;
+
+    let database_file = state.paths.database_file.clone();
+    let opened_path = content.path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(error) = archive::record_opened(&database_file, &root, &opened_path) {
+            log::warn!("failed to record opened file {opened_path}: {error}");
+        }
+    });
     Ok(content)
+}
+
+#[tauri::command(async)]
+pub fn get_text_file_revision(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<FileRevision, CommandError> {
+    fs_core::get_text_file_revision(&active_root(&state)?, &path).map_err(CommandError::from)
 }
 
 #[tauri::command(async)]
 pub fn write_text_file(
     path: String,
     content: String,
+    expected_revision: String,
     state: State<'_, AppState>,
-) -> Result<PathResult, CommandError> {
-    fs_core::write_text_file(&active_root(&state)?, &path, &content).map_err(CommandError::from)
+) -> Result<WriteTextResult, CommandError> {
+    fs_core::write_text_file(&active_root(&state)?, &path, &content, &expected_revision)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command(async)]

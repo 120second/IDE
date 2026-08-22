@@ -26,6 +26,9 @@ tauri-plugin-log = "2"
 thiserror = "2"
 url = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
 # The Tauri context embeds the complete frontend in this crate. On the current
 # Windows MSVC toolchain, LLVM opt-level 3 can overflow/crash while optimizing
 # that generated static data. Dependencies keep the normal release profile;

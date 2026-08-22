@@ -6,6 +6,9 @@ import {
   PhysicalSize,
 } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { loadEditorRecovery, saveEditorRecovery } from "../api/session";
+import type { EditorWorkspace } from "../editor/workspace.svelte";
+import type { EditorRecoverySnapshot } from "../types/session";
 import type { ActivityId, BottomPanelId, ShellStore } from "./shell.svelte";
 import type { UxStore } from "./ux.svelte";
 import type { WorkspaceStore } from "./workspace.svelte";
@@ -38,27 +41,43 @@ export class SessionStore {
   ready = false;
 
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
+  private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private recoveryWrite: Promise<void> = Promise.resolve();
   private unlistenWindow: UnlistenFn[] = [];
   private geometry: WindowGeometry | undefined;
   private lastWorkspacePath: string | undefined;
   private disposed = false;
+  private closing = false;
+  private allowClose = false;
+  private recoveryWriteBlocked = false;
   private readonly beforeUnload = () => this.persistNow();
 
   constructor(
     private readonly workspace: WorkspaceStore,
+    private readonly editor: EditorWorkspace,
     private readonly shell: ShellStore,
     private readonly ux: UxStore,
   ) {}
 
   async initialize(): Promise<void> {
     const snapshot = readSnapshot();
+    let editorRecovery: EditorRecoverySnapshot | undefined;
+    if (isTauri()) {
+      try {
+        editorRecovery = await loadEditorRecovery() ?? undefined;
+      } catch (error) {
+        this.ux.error(`无法读取编辑器恢复数据：${errorMessage(error)}`);
+      }
+    }
     if (snapshot) {
       this.restoreShell(snapshot);
       await this.restoreWindow(snapshot.window);
     }
 
     const recentPath = this.workspace.recent[0]?.path;
-    const workspacePath = snapshot?.workspacePath ?? recentPath;
+    const workspacePath = editorRecovery
+      ? editorRecovery.workspacePath
+      : snapshot?.workspacePath ?? recentPath;
     this.lastWorkspacePath = workspacePath;
     if (workspacePath) {
       await this.workspace.openPath(workspacePath);
@@ -70,10 +89,27 @@ export class SessionStore {
         this.ux.error(`无法恢复上次工作区：${this.workspace.error}`);
       }
     }
+    const activeWorkspace = this.workspace.info?.path;
+    if (editorRecovery && (
+      editorRecovery.workspacePath && activeWorkspace && samePath(editorRecovery.workspacePath, activeWorkspace)
+      || !editorRecovery.workspacePath && !activeWorkspace
+    )) {
+      try {
+        await this.editor.restoreRecoverySnapshot(editorRecovery);
+      } catch (error) {
+        this.recoveryWriteBlocked = true;
+        this.ux.error(`无法恢复上次编辑内容：${errorMessage(error)}。原恢复快照已保留。`);
+      }
+    } else if (editorRecovery) {
+      this.recoveryWriteBlocked = true;
+      this.ux.error("上次编辑器恢复数据所属的工作区无法打开；原恢复快照已保留，未被覆盖。");
+    }
     await this.watchWindow();
     window.addEventListener("beforeunload", this.beforeUnload);
     this.ready = true;
+    this.editor.setSessionChangeHandler(() => this.scheduleRecovery());
     this.schedulePersist();
+    this.scheduleRecovery();
   }
 
   schedulePersist(): void {
@@ -85,11 +121,44 @@ export class SessionStore {
     }, 350);
   }
 
+  scheduleRecovery(): void {
+    if (!this.ready || this.disposed || this.recoveryWriteBlocked) return;
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = undefined;
+      void this.flushRecovery();
+    }, 750);
+  }
+
+  async flushRecovery(): Promise<boolean> {
+    if (!this.ready || !isTauri() || this.recoveryWriteBlocked) return true;
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
+    const snapshot = this.editor.recoverySnapshot(
+      this.workspace.info?.path ?? this.lastWorkspacePath,
+    );
+    const write = this.recoveryWrite
+      .catch(() => undefined)
+      .then(() => saveEditorRecovery(snapshot));
+    this.recoveryWrite = write;
+    try {
+      await write;
+      return true;
+    } catch (error) {
+      this.ux.error(`无法保存编辑器恢复数据：${errorMessage(error)}`);
+      return false;
+    }
+  }
+
   dispose(): void {
     this.disposed = true;
+    this.editor.setSessionChangeHandler(undefined);
     if (this.saveTimer) clearTimeout(this.saveTimer);
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
     this.saveTimer = undefined;
+    this.recoveryTimer = undefined;
     this.persistNow();
+    if (!this.allowClose) void this.flushRecovery();
     window.removeEventListener("beforeunload", this.beforeUnload);
     for (const unlisten of this.unlistenWindow) unlisten();
     this.unlistenWindow = [];
@@ -179,6 +248,28 @@ export class SessionStore {
           };
           this.schedulePersist();
         }),
+        appWindow.onCloseRequested(async (event) => {
+          if (this.allowClose) return;
+          event.preventDefault();
+          if (this.closing) return;
+          this.closing = true;
+          this.persistNow();
+          const saved = await this.flushRecovery();
+          if (!saved) {
+            const discard = await this.ux.confirm({
+              title: "无法保存恢复数据",
+              message: "LightCP 无法保存未保存的编辑内容。仍然退出可能导致数据丢失。",
+              confirmLabel: "仍然退出",
+              danger: true,
+            });
+            if (!discard) {
+              this.closing = false;
+              return;
+            }
+          }
+          this.allowClose = true;
+          await appWindow.destroy();
+        }),
       ]);
     } catch {
       // Browser preview and restricted platforms continue without geometry restore.
@@ -251,4 +342,13 @@ export function windowIntersectsMonitor(
 function samePath(left: string, right: string): boolean {
   return left.replaceAll("/", "\\").replace(/\\+$/, "").toLocaleLowerCase()
     === right.replaceAll("/", "\\").replace(/\\+$/, "").toLocaleLowerCase();
+}
+
+function errorMessage(error: unknown): string {
+  if (typeof error === "object" && error) {
+    const commandError = error as { technicalMessage?: unknown; userMessage?: unknown };
+    if (typeof commandError.userMessage === "string") return commandError.userMessage;
+    if (typeof commandError.technicalMessage === "string") return commandError.technicalMessage;
+  }
+  return error instanceof Error ? error.message : String(error);
 }

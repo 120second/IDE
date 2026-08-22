@@ -9,6 +9,7 @@ pub mod generator;
 pub mod lsp;
 pub mod paths;
 pub mod performance;
+pub mod recovery;
 pub mod runner;
 pub mod settings;
 pub mod state;
@@ -71,10 +72,13 @@ pub fn run() {
             commands::lsp::cancel_lsp_request,
             commands::settings::load_settings,
             commands::settings::save_settings,
+            commands::recovery::load_editor_recovery,
+            commands::recovery::save_editor_recovery,
             commands::workspace::open_workspace,
             commands::workspace::list_recent_workspaces,
             commands::filesystem::list_directory,
             commands::filesystem::read_text_file,
+            commands::filesystem::get_text_file_revision,
             commands::filesystem::write_text_file,
             commands::filesystem::create_file,
             commands::filesystem::create_directory,

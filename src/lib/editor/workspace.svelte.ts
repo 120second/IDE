@@ -25,8 +25,9 @@ import {
   RangeSet,
   StateEffect,
   StateField,
+  Transaction,
   type Extension,
-  type Transaction,
+  type Text,
 } from "@codemirror/state";
 import {
   crosshairCursor,
@@ -45,7 +46,7 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
-import { readTextFile, writeTextFile } from "../api/workspace";
+import { getTextFileRevision, readTextFile, writeTextFile } from "../api/workspace";
 import type { AppSettings } from "../types/settings";
 import type { LspClient } from "../lsp/client";
 import type { TemplateDetail } from "../types/templates";
@@ -55,12 +56,26 @@ import type {
   LspPosition,
 } from "../types/lsp";
 import type { WorkspaceChange } from "../types/workspace";
+import type {
+  EditorRecoverySelection,
+  EditorRecoverySnapshot,
+  EditorRecoveryTab,
+} from "../types/session";
+import { documentRevision, documentRevisionExtension } from "./documentRevision";
+import {
+  detectLineEnding,
+  editorDocument,
+  editorText,
+  lineEndingText,
+  type LineEnding,
+} from "./lineEndings";
+import { usesLanguageServices } from "./languageServicePolicy";
 import { normalizeSnippetTemplate } from "./snippets";
 import {
   completionType,
   createLspExtensions,
   createTextTooltip,
-  incrementalChange,
+  incrementalChanges,
   offsetAt,
   positionAt,
   showSignatureTooltip,
@@ -73,15 +88,18 @@ export interface EditorTab {
   title: string;
   path?: string;
   state: EditorState;
+  savedRevision: number;
+  diskRevision?: string;
+  eol: LineEnding;
   scrollTop: number;
   dirty: boolean;
   deleted: boolean;
   externalModified: boolean;
+  externalRevision?: string;
+  deferredSelection?: EditorRecoverySelection;
   deferred?: boolean;
   loading?: boolean;
 }
-
-const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024;
 
 export interface EditorBreakpointLocation {
   file: string;
@@ -92,6 +110,22 @@ type TemplateCompletionProvider = (
   query: string,
   signal: AbortSignal,
 ) => Promise<readonly TemplateDetail[]>;
+
+interface SaveSnapshot {
+  tabId: string;
+  title: string;
+  path: string;
+  content: string;
+  revision: number;
+  expectedDiskRevision: string;
+}
+
+export interface ExternalConflict {
+  path: string;
+  title: string;
+}
+
+type ExternalConflictResolver = (conflict: ExternalConflict) => Promise<boolean>;
 
 class BreakpointGutterMarker extends GutterMarker {
   elementClass = "cm-breakpoint-marker";
@@ -130,18 +164,24 @@ export class EditorWorkspace {
 
   private view: EditorView | undefined;
   private readonly appearance = new Compartment();
+  private readonly lineEnding = new Compartment();
   private currentAppearance: Extension;
   private nextTabNumber = 1;
   private suppressDirty = false;
   private breakpointToggleHandler: ((file: string, line: number) => void) | undefined;
   private breakpointMoveHandler: ((file: string, lines: number[]) => void) | undefined;
+  private readonly breakpointLinesByPath = new Map<string, readonly number[]>();
   private lspClient: LspClient | undefined;
   private templateCompletionProvider: TemplateCompletionProvider | undefined;
   private templateCompletionPickedHandler: ((id: number) => void) | undefined;
   private signatureTimer: ReturnType<typeof setTimeout> | undefined;
   private openSequence = 0;
-  private readonly recentWrites = new Map<string, number>();
   private readonly hydrationRequests = new Map<string, Promise<void>>();
+  private readonly saveQueues = new Map<string, Promise<boolean>>();
+  private readonly pendingSaveRevisions = new Map<string, { revision: number; promise: Promise<boolean> }>();
+  private saveOperationSequence = 0;
+  private externalConflictResolver: ExternalConflictResolver | undefined;
+  private sessionChangeHandler: (() => void) | undefined;
 
   constructor(settings: AppSettings) {
     this.currentAppearance = createAppearanceExtension(settings);
@@ -176,10 +216,19 @@ export class EditorWorkspace {
     this.signatureTimer = undefined;
     this.detach();
     this.lspClient = undefined;
+    this.sessionChangeHandler = undefined;
   }
 
   setLspClient(client: LspClient | undefined): void {
     this.lspClient = client;
+  }
+
+  setExternalConflictResolver(resolver: ExternalConflictResolver | undefined): void {
+    this.externalConflictResolver = resolver;
+  }
+
+  setSessionChangeHandler(handler: (() => void) | undefined): void {
+    this.sessionChangeHandler = handler;
   }
 
   setTemplateCompletionProvider(
@@ -194,6 +243,7 @@ export class EditorWorkspace {
     this.captureActiveView();
     return this.tabs.flatMap((tab) =>
       tab.path && !tab.deleted && !tab.deferred
+        && usesLanguageServices(tab.state.doc)
         ? [{ path: tab.path, text: tab.state.doc.toString() }]
         : [],
     );
@@ -230,19 +280,37 @@ export class EditorWorkspace {
   setBreakpointLocations(locations: readonly EditorBreakpointLocation[]): void {
     const linesByPath = new Map<string, number[]>();
     for (const location of locations) {
+      if (!Number.isSafeInteger(location.line) || location.line < 1) continue;
       const key = normalizedPath(location.file);
-      linesByPath.set(key, [...(linesByPath.get(key) ?? []), location.line]);
+      const lines = linesByPath.get(key);
+      if (lines) lines.push(location.line);
+      else linesByPath.set(key, [location.line]);
     }
-    this.tabs = this.tabs.map((tab) => {
+    for (const [key, lines] of linesByPath) {
+      linesByPath.set(key, lines.sort((left, right) => left - right));
+    }
+
+    let tabsChanged = false;
+    const nextTabs = this.tabs.map((tab) => {
       if (!tab.path || tab.id === this.activeId && this.view) return tab;
+      const key = normalizedPath(tab.path);
       const lines = linesByPath.get(normalizedPath(tab.path)) ?? [];
+      if (sameLineNumbers(this.breakpointLinesByPath.get(key) ?? [], lines)) return tab;
+      tabsChanged = true;
       return { ...tab, state: tab.state.update({ effects: setBreakpointLines.of(lines) }).state };
     });
+    if (tabsChanged) this.tabs = nextTabs;
     const active = this.activeTab;
     if (active?.path && this.view) {
-      this.view.dispatch({
-        effects: setBreakpointLines.of(linesByPath.get(normalizedPath(active.path)) ?? []),
-      });
+      const key = normalizedPath(active.path);
+      const lines = linesByPath.get(key) ?? [];
+      if (!sameLineNumbers(this.breakpointLinesByPath.get(key) ?? [], lines)) {
+        this.view.dispatch({ effects: setBreakpointLines.of(lines) });
+      }
+    }
+    this.breakpointLinesByPath.clear();
+    for (const [key, lines] of linesByPath) {
+      this.breakpointLinesByPath.set(key, lines);
     }
   }
 
@@ -310,16 +378,21 @@ export class EditorWorkspace {
       this.view.focus();
     }
     if (activeTab?.deferred) void this.hydrateTab(id);
+    this.notifySessionChange();
   }
 
   createTab(): void {
     this.captureActiveView();
     const id = `untitled-${Date.now()}-${this.nextTabNumber}`;
     const title = `未命名-${this.nextTabNumber++}.cpp`;
+    const eol: LineEnding = "lf";
+    const state = this.createState("", undefined, this.currentAppearance, eol);
     const tab: EditorTab = {
       id,
       title,
-      state: this.createState("", undefined, this.currentAppearance),
+      state,
+      savedRevision: documentRevision(state),
+      eol,
       scrollTop: 0,
       dirty: false,
       deleted: false,
@@ -330,6 +403,7 @@ export class EditorWorkspace {
     this.view?.setState(tab.state);
     this.restoreScroll(0);
     this.view?.focus();
+    this.notifySessionChange();
   }
 
   async openFile(path: string): Promise<void> {
@@ -353,18 +427,29 @@ export class EditorWorkspace {
       }
 
       this.captureActiveView();
+      const document = editorDocument(file.content);
+      const { eol } = document;
+      const state = this.withBreakpointLines(
+        this.createState(document.text, undefined, this.currentAppearance, eol),
+        file.path,
+      );
       const tab: EditorTab = {
         id: `file-${Date.now()}-${this.nextTabNumber++}`,
         title: fileName(file.path),
         path: file.path,
-        state: this.createState(file.content, undefined, this.currentAppearance),
+        state,
+        savedRevision: documentRevision(state),
+        diskRevision: file.revision,
+        eol,
         scrollTop: 0,
         dirty: false,
         deleted: false,
         externalModified: false,
       };
       this.tabs = [...this.tabs, tab];
-      this.lspClient?.didOpen(file.path, file.content);
+      if (usesLanguageServices(state.doc)) {
+        this.lspClient?.didOpen(file.path, state.doc.toString());
+      }
       if (request === this.openSequence) {
         this.activeId = tab.id;
         this.view?.setState(tab.state);
@@ -372,6 +457,7 @@ export class EditorWorkspace {
         this.view?.focus();
         this.notice = `已打开 ${tab.title}`;
       }
+      this.notifySessionChange();
     } catch (error) {
       this.saveState = "error";
       this.notice = errorMessage(error);
@@ -392,29 +478,95 @@ export class EditorWorkspace {
       this.notice = `${active.title} 已在 LightCP 外部被删除。`;
       return false;
     }
+    if (!active.diskRevision) {
+      this.saveState = "error";
+      this.notice = `无法确认 ${active.title} 的磁盘版本，请重新打开文件后再保存。`;
+      return false;
+    }
 
-    const content = active.state.doc.toString();
+    const revision = documentRevision(active.state);
+    const pending = this.pendingSaveRevisions.get(active.id);
+    if (pending?.revision === revision) return pending.promise;
+    const snapshot: SaveSnapshot = {
+      tabId: active.id,
+      title: active.title,
+      path: active.path,
+      content: active.state.sliceDoc(),
+      revision,
+      expectedDiskRevision: active.diskRevision,
+    };
     this.saveState = "saving";
     this.notice = `正在保存 ${active.title}…`;
+    const previous = this.saveQueues.get(active.id) ?? Promise.resolve(true);
+    let request: Promise<boolean>;
+    request = previous
+      .catch(() => false)
+      .then(() => this.performSave(snapshot))
+      .finally(() => {
+        if (this.saveQueues.get(active.id) === request) this.saveQueues.delete(active.id);
+        if (this.pendingSaveRevisions.get(active.id)?.promise === request) {
+          this.pendingSaveRevisions.delete(active.id);
+        }
+      });
+    this.saveQueues.set(active.id, request);
+    this.pendingSaveRevisions.set(active.id, { revision, promise: request });
+    return request;
+  }
+
+  private async performSave(snapshot: SaveSnapshot): Promise<boolean> {
+    const operation = ++this.saveOperationSequence;
+    const current = this.tabs.find((tab) => tab.id === snapshot.tabId);
+    const expectedRevision = current?.path && samePath(current.path, snapshot.path)
+      ? current.diskRevision ?? snapshot.expectedDiskRevision
+      : snapshot.expectedDiskRevision;
     try {
-      await writeTextFile(active.path, content);
-      this.recentWrites.set(normalizedPath(active.path), performance.now());
-      this.tabs = this.tabs.map((tab) =>
-        tab.id === active.id
-          ? {
-              ...tab,
-              dirty: tab.state.doc.toString() !== content,
-              externalModified: false,
-            }
-          : tab,
-      );
-      this.saveState = "saved";
-      this.notice = `已保存 ${active.title}`;
-      this.lspClient?.didSave(active.path);
+      let result = await writeTextFile(snapshot.path, snapshot.content, expectedRevision);
+      if (result.status === "conflict") {
+        this.markExternalConflict(snapshot.tabId, result.revision);
+        if (operation === this.saveOperationSequence) {
+          this.saveState = "error";
+          this.notice = `${snapshot.title} 的磁盘内容已更改，未覆盖外部版本。`;
+        }
+        const overwrite = await this.externalConflictResolver?.({
+          path: snapshot.path,
+          title: snapshot.title,
+        }) ?? false;
+        if (!overwrite) return false;
+        result = await writeTextFile(snapshot.path, snapshot.content, result.revision);
+        if (result.status === "conflict") {
+          this.markExternalConflict(snapshot.tabId, result.revision);
+          if (operation === this.saveOperationSequence) {
+            this.saveState = "error";
+            this.notice = `${snapshot.title} 在确认期间再次被修改，保存已取消。`;
+          }
+          return false;
+        }
+      }
+      this.tabs = this.tabs.map((tab) => {
+        if (tab.id !== snapshot.tabId) return tab;
+        const state = tab.id === this.activeId && this.view ? this.view.state : tab.state;
+        return {
+          ...tab,
+          state,
+          savedRevision: snapshot.revision,
+          diskRevision: result.revision,
+          dirty: documentRevision(state) !== snapshot.revision,
+          externalModified: false,
+          externalRevision: undefined,
+        };
+      });
+      this.notifySessionChange();
+      if (operation === this.saveOperationSequence) {
+        this.saveState = "saved";
+        this.notice = `已保存 ${snapshot.title}`;
+      }
+      this.lspClient?.didSave(snapshot.path);
       return true;
     } catch (error) {
-      this.saveState = "error";
-      this.notice = errorMessage(error);
+      if (operation === this.saveOperationSequence) {
+        this.saveState = "error";
+        this.notice = errorMessage(error);
+      }
       return false;
     }
   }
@@ -431,35 +583,32 @@ export class EditorWorkspace {
     if (change.kind !== "changed") return;
 
     for (const path of change.paths) {
-      const key = normalizedPath(path);
-      const writtenAt = this.recentWrites.get(key);
-      if (writtenAt !== undefined) {
-        this.recentWrites.delete(key);
-        if (performance.now() - writtenAt < 1_000) continue;
-      }
       const tab = this.tabs.find((candidate) => candidate.path && samePath(candidate.path, path));
       if (!tab) continue;
-      if (tab.dirty) {
-        this.tabs = this.tabs.map((candidate) =>
-          candidate.id === tab.id ? { ...candidate, externalModified: true } : candidate,
-        );
-        this.notice = `${tab.title} 在磁盘上已更改，但编辑器中仍有未保存内容。`;
-        continue;
-      }
 
       try {
-        const file = await readTextFile(path);
+        const observed = await getTextFileRevision(path);
         const current = this.tabs.find((candidate) => candidate.id === tab.id);
-        if (!current || current.dirty || current.deleted) {
-          if (current?.dirty) {
-            this.tabs = this.tabs.map((candidate) =>
-              candidate.id === tab.id ? { ...candidate, externalModified: true } : candidate,
-            );
+        if (!current || current.deleted || !current.path || !samePath(current.path, path)) continue;
+        if (current.diskRevision === observed.revision) continue;
+        if (current.dirty) {
+          this.markExternalConflict(current.id, observed.revision);
+          this.notice = `${current.title} 在磁盘上已更改，但编辑器中仍有未保存内容。`;
+          continue;
+        }
+
+        const file = await readTextFile(path);
+        const latest = this.tabs.find((candidate) => candidate.id === tab.id);
+        if (!latest || latest.deleted || !latest.path || !samePath(latest.path, path)) continue;
+        if (latest.dirty) {
+          if (latest.diskRevision !== file.revision) {
+            this.markExternalConflict(latest.id, file.revision);
           }
           continue;
         }
-        this.replaceDocument(tab.id, file.content);
-        this.notice = `检测到外部更改，已重新加载 ${tab.title}。`;
+        if (latest.diskRevision === file.revision) continue;
+        this.replaceDocument(tab.id, file.content, file.revision);
+        this.notice = `检测到外部更改，已重新加载 ${latest.title}。`;
       } catch {
         // A remove/rename notification can race a preceding modify notification.
       }
@@ -468,12 +617,16 @@ export class EditorWorkspace {
 
   handlePathRenamed(previousPath: string, nextPath: string): void {
     this.captureActiveView();
-    const renamed: { previous: string; next: string; text: string }[] = [];
+    const renamed: { previous: string; next: string; text?: string }[] = [];
     this.tabs = this.tabs.map((tab) => {
       if (!tab.path || !sameOrChildPath(tab.path, previousPath)) return tab;
       const suffix = tab.path.slice(previousPath.length);
       const path = `${nextPath}${suffix}`;
-      renamed.push({ previous: tab.path, next: path, text: tab.state.doc.toString() });
+      renamed.push({
+        previous: tab.path,
+        next: path,
+        text: usesLanguageServices(tab.state.doc) ? tab.state.doc.toString() : undefined,
+      });
       return {
         ...tab,
         path,
@@ -483,8 +636,9 @@ export class EditorWorkspace {
     });
     for (const document of renamed) {
       this.lspClient?.didClose(document.previous);
-      this.lspClient?.didOpen(document.next, document.text);
+      if (document.text !== undefined) this.lspClient?.didOpen(document.next, document.text);
     }
+    if (renamed.length) this.notifySessionChange();
   }
 
   handlePathDeleted(path: string): void {
@@ -496,6 +650,7 @@ export class EditorWorkspace {
       return { ...tab, deleted: true };
     });
     if (affected) this.notice = `${fileName(path)} 已在当前编辑器外部被删除。`;
+    if (affected) this.notifySessionChange();
   }
 
   closeTab(id: string): void {
@@ -510,6 +665,7 @@ export class EditorWorkspace {
     if (remaining.length === 0) {
       this.tabs = [];
       this.activeId = "";
+      this.notifySessionChange();
       return;
     }
 
@@ -529,6 +685,7 @@ export class EditorWorkspace {
       this.updateCursor(next.state);
       this.view?.focus();
     }
+    this.notifySessionChange();
   }
 
   updateAppearance(settings: AppSettings): void {
@@ -620,18 +777,24 @@ export class EditorWorkspace {
     for (const tab of this.tabs) {
       if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
     }
-    this.tabs = uniquePaths.map((path, index) => ({
-      id: `restored-${Date.now()}-${index}`,
-      title: fileName(path),
-      path,
-      state: this.createState("", undefined, this.currentAppearance),
-      scrollTop: 0,
-      dirty: false,
-      deleted: false,
-      externalModified: false,
-      deferred: true,
-      loading: false,
-    }));
+    this.tabs = uniquePaths.map((path, index) => {
+      const eol: LineEnding = "lf";
+      const state = this.createState("", undefined, this.currentAppearance, eol);
+      return {
+        id: `restored-${Date.now()}-${index}`,
+        title: fileName(path),
+        path,
+        state,
+        savedRevision: documentRevision(state),
+        eol,
+        scrollTop: 0,
+        dirty: false,
+        deleted: false,
+        externalModified: false,
+        deferred: true,
+        loading: false,
+      };
+    });
     const active = this.tabs.find((tab) => activePath && samePath(tab.path ?? "", activePath))
       ?? this.tabs[0];
     this.activeId = active.id;
@@ -647,6 +810,136 @@ export class EditorWorkspace {
       openFiles: this.tabs.flatMap((tab) => tab.path && !tab.deleted ? [tab.path] : []),
       activeFile: this.activeTab?.path,
     };
+  }
+
+  recoverySnapshot(workspacePath?: string): EditorRecoverySnapshot {
+    this.captureActiveView();
+    return {
+      version: 1,
+      workspacePath,
+      activeTabId: this.activeId || undefined,
+      tabs: this.tabs.slice(0, 64).map((tab): EditorRecoveryTab => {
+        const selection = tab.state.selection.main;
+        const preserveContent = tab.dirty || !tab.path || tab.deleted;
+        return {
+          id: tab.id,
+          title: tab.title,
+          path: tab.path,
+          dirty: tab.dirty,
+          deleted: tab.deleted,
+          externalModified: tab.externalModified,
+          diskRevision: tab.diskRevision,
+          externalRevision: tab.externalRevision,
+          eol: tab.eol,
+          content: preserveContent ? tab.state.sliceDoc() : undefined,
+          selection: { anchor: selection.anchor, head: selection.head },
+          scrollTop: Math.max(0, tab.scrollTop),
+        };
+      }),
+    };
+  }
+
+  async restoreRecoverySnapshot(snapshot: EditorRecoverySnapshot): Promise<void> {
+    this.captureActiveView();
+    for (const tab of this.tabs) {
+      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
+    }
+
+    const restored: EditorTab[] = [];
+    for (const record of snapshot.tabs.slice(0, 64)) {
+      if (!record.id || !record.title) continue;
+      if (record.content === undefined) {
+        if (!record.path) continue;
+        const state = this.createState("", undefined, this.currentAppearance, record.eol);
+        restored.push({
+          id: record.id,
+          title: record.title,
+          path: record.path,
+          state,
+          savedRevision: documentRevision(state),
+          diskRevision: record.diskRevision,
+          eol: record.eol,
+          scrollTop: record.scrollTop,
+          dirty: false,
+          deleted: false,
+          externalModified: false,
+          deferredSelection: record.selection,
+          deferred: true,
+          loading: false,
+        });
+        continue;
+      }
+
+      let eol = record.eol;
+      let state = this.withBreakpointLines(
+        this.createState(record.content, undefined, this.currentAppearance, eol),
+        record.path,
+      );
+      state = restoreSelection(state, record.selection);
+      let dirty = record.dirty;
+      let deleted = record.deleted;
+      let diskRevision = record.diskRevision;
+      let externalModified = record.externalModified;
+      let externalRevision = record.externalRevision;
+
+      if (record.path) {
+        try {
+          const disk = await readTextFile(record.path);
+          const diskDocument = editorDocument(disk.content);
+          const diskEol = diskDocument.eol;
+          const matchesDisk = state.doc.eq(diskDocument.text) && eol === diskEol;
+          deleted = false;
+          if (matchesDisk) {
+            eol = diskEol;
+            diskRevision = disk.revision;
+            dirty = false;
+            externalModified = false;
+            externalRevision = undefined;
+          } else {
+            diskRevision ??= "recovery-unknown";
+            externalModified ||= diskRevision !== disk.revision;
+            if (externalModified) externalRevision = disk.revision;
+          }
+        } catch {
+          deleted = true;
+          externalModified = false;
+          externalRevision = undefined;
+        }
+      }
+
+      const savedRevision = dirty || deleted ? 0 : documentRevision(state);
+      const tab: EditorTab = {
+        id: record.id,
+        title: record.title,
+        path: record.path,
+        state,
+        savedRevision,
+        diskRevision,
+        eol,
+        scrollTop: record.scrollTop,
+        dirty: dirty || deleted,
+        deleted,
+        externalModified,
+        externalRevision,
+        deferred: false,
+        loading: false,
+      };
+      restored.push(tab);
+      if (tab.path && !tab.deleted && usesLanguageServices(tab.state.doc)) {
+        this.lspClient?.didOpen(tab.path, tab.state.doc.toString());
+      }
+    }
+
+    this.tabs = restored;
+    const active = restored.find((tab) => tab.id === snapshot.activeTabId) ?? restored[0];
+    this.activeId = active?.id ?? "";
+    if (active) {
+      this.view?.setState(active.state);
+      this.restoreScroll(active.scrollTop);
+      this.updateCursor(active.state);
+      if (active.deferred) await this.hydrateTab(active.id);
+    }
+    this.notifySessionChange();
   }
 
   private hydrateTab(id: string): Promise<void> {
@@ -665,23 +958,38 @@ export class EditorWorkspace {
       const file = await readTextFile(pending.path);
       const current = this.tabs.find((tab) => tab.id === id);
       if (!current?.deferred) return;
+      const document = editorDocument(file.content);
+      const { eol } = document;
+      let state = this.withBreakpointLines(
+        this.createState(document.text, undefined, this.currentAppearance, eol),
+        file.path,
+      );
+      state = restoreSelection(state, current.deferredSelection ?? current.state.selection.main);
       const hydrated: EditorTab = {
         ...current,
         title: fileName(file.path),
         path: file.path,
-        state: this.createState(file.content, undefined, this.currentAppearance),
+        state,
+        savedRevision: documentRevision(state),
+        diskRevision: file.revision,
+        eol,
+        dirty: false,
+        deferredSelection: undefined,
         deferred: false,
         loading: false,
         deleted: false,
       };
       this.replaceTab(id, hydrated);
-      this.lspClient?.didOpen(file.path, file.content);
+      if (usesLanguageServices(state.doc)) {
+        this.lspClient?.didOpen(file.path, state.doc.toString());
+      }
       if (this.activeId === id) {
         this.view?.setState(hydrated.state);
         this.restoreScroll(hydrated.scrollTop);
         this.updateCursor(hydrated.state);
         this.notice = `已恢复 ${hydrated.title}`;
       }
+      this.notifySessionChange();
     } catch (error) {
       const current = this.tabs.find((tab) => tab.id === id);
       if (!current) return;
@@ -691,15 +999,17 @@ export class EditorWorkspace {
   }
 
   private createState(
-    document: string,
+    document: string | Text,
     settings?: AppSettings,
     appearanceExtension?: Extension,
+    preferredLineEnding?: LineEnding,
   ): EditorState {
     const appearance =
       appearanceExtension ??
       (settings ? createAppearanceExtension(settings) : createAppearanceExtension({}));
 
-    const largeFile = document.length >= LARGE_FILE_THRESHOLD;
+    const text = typeof document === "string" ? editorText(document) : document;
+    const largeFile = !usesLanguageServices(text);
     const editingExtensions: Extension[] = largeFile
       ? []
       : [
@@ -713,8 +1023,10 @@ export class EditorWorkspace {
           EditorView.lineWrapping,
         ];
 
+    const eol = preferredLineEnding
+      ?? (typeof document === "string" ? detectLineEnding(document) : "lf");
     return EditorState.create({
-      doc: document,
+      doc: text,
       extensions: [
         createBreakpointGutter((line) => {
           const path = this.activeTab?.path;
@@ -728,6 +1040,7 @@ export class EditorWorkspace {
         highlightActiveLineGutter(),
         highlightSpecialChars(),
         history(),
+        documentRevisionExtension,
         drawSelection(),
         dropCursor(),
         rectangularSelection(),
@@ -753,6 +1066,7 @@ export class EditorWorkspace {
         EditorState.tabSize.of(4),
         indentUnit.of("    "),
         keymap.of([indentWithTab]),
+        this.lineEnding.of(EditorState.lineSeparator.of(lineEndingText(eol))),
         this.appearance.of(appearance),
         EditorView.updateListener.of((update) => this.handleViewUpdate(update)),
       ],
@@ -762,15 +1076,29 @@ export class EditorWorkspace {
   private handleViewUpdate(update: ViewUpdate): void {
     const id = this.activeId;
     const tab = this.activeTab;
-    if (tab && update.docChanged && !this.suppressDirty && !tab.dirty) {
-      this.replaceTab(id, { ...tab, dirty: true });
+    if (tab && update.docChanged && !this.suppressDirty) {
+      const dirty = documentRevision(update.state) !== tab.savedRevision;
+      if (dirty !== tab.dirty) this.replaceTab(id, { ...tab, dirty });
     }
     this.updateCursor(update.state);
     const path = this.activeTab?.path;
     if (update.docChanged && path && this.lspClient?.ready) {
-      const change = incrementalChange(update);
-      if (change) this.lspClient.didChange(path, [change]);
-      if (update.state.doc.length < LARGE_FILE_THRESHOLD && change && /[(,]$/.test(change.text)) {
+      const wasEnabled = usesLanguageServices(update.startState.doc);
+      const isEnabled = usesLanguageServices(update.state.doc);
+      const changes = isEnabled ? incrementalChanges(update) : [];
+      if (wasEnabled && !isEnabled) {
+        this.lspClient.didClose(path);
+      } else if (!wasEnabled && isEnabled) {
+        this.lspClient.didOpen(path, update.state.doc.toString());
+      } else if (isEnabled && changes.length) {
+        this.lspClient.didChange(path, changes);
+      }
+      const signatureTrigger = changes.some((change) => /[(,]$/.test(change.text));
+      if (!isEnabled && this.signatureTimer) {
+        clearTimeout(this.signatureTimer);
+        this.signatureTimer = undefined;
+      }
+      if (isEnabled && signatureTrigger) {
         if (this.signatureTimer) clearTimeout(this.signatureTimer);
         this.signatureTimer = setTimeout(() => {
           this.signatureTimer = undefined;
@@ -778,9 +1106,18 @@ export class EditorWorkspace {
         }, 140);
       }
     }
-    if (update.docChanged && path && this.breakpointMoveHandler) {
-      this.breakpointMoveHandler(path, breakpointLines(update.state));
+    if (update.docChanged && path) {
+      const key = normalizedPath(path);
+      const previousLines = this.breakpointLinesByPath.get(key) ?? [];
+      if (previousLines.length) {
+        const lines = breakpointLines(update.state);
+        if (!sameLineNumbers(previousLines, lines)) {
+          this.breakpointLinesByPath.set(key, lines);
+          this.breakpointMoveHandler?.(path, lines);
+        }
+      }
     }
+    if (update.docChanged) this.notifySessionChange();
   }
 
   private captureActiveView(): void {
@@ -798,61 +1135,119 @@ export class EditorWorkspace {
     });
   }
 
-  private replaceDocument(id: string, content: string): void {
+  private markExternalConflict(id: string, revision: string): void {
+    this.tabs = this.tabs.map((tab) =>
+      tab.id === id
+        ? { ...tab, externalModified: true, externalRevision: revision }
+        : tab
+    );
+    this.notifySessionChange();
+  }
+
+  private replaceDocument(id: string, content: string, diskRevision: string): void {
     const tab = this.tabs.find((candidate) => candidate.id === id);
-    if (!tab || tab.state.doc.toString() === content) return;
+    if (!tab) return;
+    const document = editorDocument(content);
+    const { eol, text: replacement } = document;
+    const currentState = id === this.activeId && this.view ? this.view.state : tab.state;
+    if (currentState.doc.eq(replacement) && tab.eol === eol) {
+      this.replaceTab(id, {
+        ...tab,
+        state: currentState,
+        savedRevision: documentRevision(currentState),
+        diskRevision,
+        eol,
+        dirty: false,
+        externalModified: false,
+        externalRevision: undefined,
+        deleted: false,
+      });
+      this.notifySessionChange();
+      return;
+    }
 
     if (id === this.activeId && this.view) {
       this.suppressDirty = true;
-      this.view.dispatch({
-        changes: { from: 0, to: this.view.state.doc.length, insert: content },
-      });
-      this.suppressDirty = false;
+      try {
+        this.view.dispatch({
+          changes: { from: 0, to: this.view.state.doc.length, insert: replacement },
+          effects: this.lineEnding.reconfigure(EditorState.lineSeparator.of(lineEndingText(eol))),
+          annotations: Transaction.addToHistory.of(false),
+        });
+      } finally {
+        this.suppressDirty = false;
+      }
       const current = this.tabs.find((candidate) => candidate.id === id);
       if (current) {
         this.replaceTab(id, {
           ...current,
           state: this.view.state,
+          savedRevision: documentRevision(this.view.state),
+          diskRevision,
+          eol,
           dirty: false,
           externalModified: false,
+          externalRevision: undefined,
           deleted: false,
         });
       }
+      this.notifySessionChange();
       return;
     }
 
     const previousState = tab.state;
-    this.suppressDirty = true;
     const state = tab.state.update({
-      changes: { from: 0, to: tab.state.doc.length, insert: content },
+      changes: { from: 0, to: tab.state.doc.length, insert: replacement },
+      effects: this.lineEnding.reconfigure(EditorState.lineSeparator.of(lineEndingText(eol))),
+      annotations: Transaction.addToHistory.of(false),
     }).state;
-    this.suppressDirty = false;
     this.tabs = this.tabs.map((candidate) =>
       candidate.id === id
-        ? { ...candidate, state, dirty: false, externalModified: false, deleted: false }
+        ? {
+            ...candidate,
+            state,
+            savedRevision: documentRevision(state),
+            diskRevision,
+            eol,
+            dirty: false,
+            externalModified: false,
+            externalRevision: undefined,
+            deleted: false,
+          }
         : candidate,
     );
     if (tab.path && this.lspClient?.ready) {
-      this.lspClient.didChange(tab.path, [{
-        range: {
-          start: { line: 0, character: 0 },
-          end: positionAt(previousState, previousState.doc.length),
-        },
-        text: content,
-      }]);
+      const wasEnabled = usesLanguageServices(previousState.doc);
+      const isEnabled = usesLanguageServices(state.doc);
+      if (wasEnabled && !isEnabled) {
+        this.lspClient.didClose(tab.path);
+      } else if (!wasEnabled && isEnabled) {
+        this.lspClient.didOpen(tab.path, state.doc.toString());
+      } else if (isEnabled) {
+        this.lspClient.didChange(tab.path, [{
+          range: {
+            start: { line: 0, character: 0 },
+            end: positionAt(previousState, previousState.doc.length),
+          },
+          text: state.doc.toString(),
+        }]);
+      }
     }
+    this.notifySessionChange();
   }
 
   private lspPosition(): { path: string; position: LspPosition } | undefined {
     const tab = this.activeTab;
     const state = this.view?.state ?? tab?.state;
-    if (!tab?.path || !state || !this.lspClient?.ready) return undefined;
+    if (!tab?.path || !state || !this.lspClient?.ready || !usesLanguageServices(state.doc)) {
+      return undefined;
+    }
     return { path: tab.path, position: positionAt(state, state.selection.main.head) };
   }
 
   private async lspCompletion(context: CompletionContext): Promise<CompletionResult | null> {
     const tab = this.activeTab;
-    if (!tab?.path || !this.lspClient?.ready || context.state.doc.length >= LARGE_FILE_THRESHOLD) {
+    if (!tab?.path || !this.lspClient?.ready || !usesLanguageServices(context.state.doc)) {
       return null;
     }
     const word = context.matchBefore(/[\w:]*$/);
@@ -893,7 +1288,7 @@ export class EditorWorkspace {
   }
 
   private async templateCompletion(context: CompletionContext): Promise<CompletionResult | null> {
-    if (!this.templateCompletionProvider || context.state.doc.length >= LARGE_FILE_THRESHOLD) {
+    if (!this.templateCompletionProvider || !usesLanguageServices(context.state.doc)) {
       return null;
     }
     const word = context.matchBefore(/[\w\u3400-\u9fff]*$/);
@@ -912,7 +1307,7 @@ export class EditorWorkspace {
 
   private async lspHoverTooltip(view: EditorView, position: number): Promise<Tooltip | null> {
     const tab = this.activeTab;
-    if (!tab?.path || !this.lspClient?.ready || view.state.doc.length >= LARGE_FILE_THRESHOLD) {
+    if (!tab?.path || !this.lspClient?.ready || !usesLanguageServices(view.state.doc)) {
       return null;
     }
     const initialState = view.state;
@@ -935,6 +1330,18 @@ export class EditorWorkspace {
     const tabs = this.tabs.slice();
     tabs[index] = replacement;
     this.tabs = tabs;
+  }
+
+  private withBreakpointLines(state: EditorState, path?: string): EditorState {
+    if (!path) return state;
+    const lines = this.breakpointLinesByPath.get(normalizedPath(path));
+    return lines?.length
+      ? state.update({ effects: setBreakpointLines.of(lines) }).state
+      : state;
+  }
+
+  private notifySessionChange(): void {
+    this.sessionChangeHandler?.();
   }
 }
 
@@ -963,6 +1370,19 @@ function breakpointLines(state: EditorState): number[] {
     lines.push(state.doc.lineAt(from).number);
   });
   return lines;
+}
+
+function sameLineNumbers(left: readonly number[], right: readonly number[]): boolean {
+  return left.length === right.length && left.every((line, index) => line === right[index]);
+}
+
+function restoreSelection(
+  state: EditorState,
+  selection: EditorRecoverySelection,
+): EditorState {
+  const anchor = Math.max(0, Math.min(state.doc.length, selection.anchor));
+  const head = Math.max(0, Math.min(state.doc.length, selection.head));
+  return state.update({ selection: { anchor, head } }).state;
 }
 
 function normalizedPath(path: string): string {

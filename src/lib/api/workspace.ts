@@ -3,7 +3,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   FileContent,
   FileEntry,
+  FileRevision,
   PathResult,
+  WriteTextResult,
   WorkspaceInfo,
 } from "../types/workspace";
 
@@ -33,8 +35,16 @@ export function readTextFile(path: string): Promise<FileContent> {
   return invoke<FileContent>("read_text_file", { path });
 }
 
-export function writeTextFile(path: string, content: string): Promise<PathResult> {
-  return invoke<PathResult>("write_text_file", { path, content });
+export function getTextFileRevision(path: string): Promise<FileRevision> {
+  return invoke<FileRevision>("get_text_file_revision", { path });
+}
+
+export function writeTextFile(
+  path: string,
+  content: string,
+  expectedRevision: string,
+): Promise<WriteTextResult> {
+  return invoke<WriteTextResult>("write_text_file", { path, content, expectedRevision });
 }
 
 export function createFile(parent: string, name: string, content = ""): Promise<PathResult> {

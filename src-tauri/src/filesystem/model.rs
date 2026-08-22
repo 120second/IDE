@@ -24,6 +24,22 @@ pub struct FileContent {
     pub path: String,
     pub content: String,
     pub modified_at: Option<u64>,
+    pub revision: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteTextResult {
+    pub status: &'static str,
+    pub path: String,
+    pub revision: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileRevision {
+    pub path: String,
+    pub revision: String,
 }
 
 #[derive(Debug, Serialize)]

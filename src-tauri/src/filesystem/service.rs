@@ -1,14 +1,17 @@
 use std::{
     cmp::Ordering,
     fs,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
-    time::UNIX_EPOCH,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::error::{AppError, AppResult};
 use crate::paths::is_within;
 
-use super::{EntryKind, FileContent, FileEntry, PathResult, WorkspaceInfo};
+use super::{
+    EntryKind, FileContent, FileEntry, FileRevision, PathResult, WorkspaceInfo, WriteTextResult,
+};
 
 const MAX_TEXT_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -101,31 +104,57 @@ pub fn read_text_file(root: &Path, path: &str) -> AppResult<FileContent> {
             file.display()
         )));
     }
-    let metadata = fs::metadata(&file)?;
-    if metadata.len() > MAX_TEXT_FILE_BYTES {
-        return Err(operation_error(format!(
-            "text file exceeds the {} MiB limit: {}",
-            MAX_TEXT_FILE_BYTES / 1024 / 1024,
-            file.display()
-        )));
+    for _ in 0..3 {
+        let path_metadata_before = fs::metadata(&file)?;
+        ensure_text_size(&file, &path_metadata_before)?;
+        let mut handle = fs::File::open(&file)?;
+        let opened_metadata = handle.metadata()?;
+        if file_revision(&path_metadata_before)? != file_revision(&opened_metadata)? {
+            continue;
+        }
+
+        let mut bytes = Vec::with_capacity(opened_metadata.len() as usize);
+        Read::by_ref(&mut handle)
+            .take(MAX_TEXT_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_TEXT_FILE_BYTES {
+            return Err(operation_error(format!(
+                "text file exceeds the {} MiB limit while being read: {}",
+                MAX_TEXT_FILE_BYTES / 1024 / 1024,
+                file.display()
+            )));
+        }
+        let handle_metadata_after = handle.metadata()?;
+        let path_metadata_after = fs::metadata(&file)?;
+        let revision = file_revision(&path_metadata_after)?;
+        if revision != file_revision(&opened_metadata)?
+            || revision != file_revision(&handle_metadata_after)?
+        {
+            continue;
+        }
+        ensure_text_size(&file, &path_metadata_after)?;
+        let content = String::from_utf8(bytes).map_err(|error| {
+            operation_error(format!(
+                "file is not valid UTF-8 ({}): {error}",
+                file.display()
+            ))
+        })?;
+
+        return Ok(FileContent {
+            path: path_text(&file),
+            content,
+            modified_at: modified_millis(&path_metadata_after),
+            revision,
+        });
     }
 
-    let bytes = fs::read(&file)?;
-    let content = String::from_utf8(bytes).map_err(|error| {
-        operation_error(format!(
-            "file is not valid UTF-8 ({}): {error}",
-            file.display()
-        ))
-    })?;
-
-    Ok(FileContent {
-        path: path_text(&file),
-        content,
-        modified_at: modified_millis(&metadata),
-    })
+    Err(operation_error(format!(
+        "file changed repeatedly while being read: {}",
+        file.display()
+    )))
 }
 
-pub fn write_text_file(root: &Path, path: &str, content: &str) -> AppResult<PathResult> {
+pub fn get_text_file_revision(root: &Path, path: &str) -> AppResult<FileRevision> {
     let file = checked_existing(root, path)?;
     if !file.is_file() {
         return Err(operation_error(format!(
@@ -133,10 +162,168 @@ pub fn write_text_file(root: &Path, path: &str, content: &str) -> AppResult<Path
             file.display()
         )));
     }
-    fs::write(&file, content.as_bytes())?;
-    Ok(PathResult {
+    Ok(FileRevision {
         path: path_text(&file),
+        revision: file_revision(&fs::metadata(&file)?)?,
     })
+}
+
+pub fn write_text_file(
+    root: &Path,
+    path: &str,
+    content: &str,
+    expected_revision: &str,
+) -> AppResult<WriteTextResult> {
+    let file = checked_existing(root, path)?;
+    if !file.is_file() {
+        return Err(operation_error(format!(
+            "path is not a file: {}",
+            file.display()
+        )));
+    }
+    let original_metadata = fs::metadata(&file)?;
+    let current_revision = file_revision(&original_metadata)?;
+    if current_revision != expected_revision {
+        return Ok(WriteTextResult {
+            status: "conflict",
+            path: path_text(&file),
+            revision: current_revision,
+        });
+    }
+
+    let (temporary_path, mut temporary_file) = create_save_temporary(&file)?;
+    let result = (|| -> AppResult<WriteTextResult> {
+        temporary_file.set_permissions(original_metadata.permissions())?;
+        temporary_file.write_all(content.as_bytes())?;
+        temporary_file.sync_all()?;
+        drop(temporary_file);
+
+        let revision_before_replace = file_revision(&fs::metadata(&file)?)?;
+        if revision_before_replace != expected_revision {
+            return Ok(WriteTextResult {
+                status: "conflict",
+                path: path_text(&file),
+                revision: revision_before_replace,
+            });
+        }
+
+        atomic_replace(&temporary_path, &file)?;
+        sync_parent_directory(&file)?;
+        let revision = file_revision(&fs::metadata(&file)?)?;
+        Ok(WriteTextResult {
+            status: "saved",
+            path: path_text(&file),
+            revision,
+        })
+    })();
+    if temporary_path.exists() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    result
+}
+
+fn ensure_text_size(file: &Path, metadata: &fs::Metadata) -> AppResult<()> {
+    if metadata.len() > MAX_TEXT_FILE_BYTES {
+        return Err(operation_error(format!(
+            "text file exceeds the {} MiB limit: {}",
+            MAX_TEXT_FILE_BYTES / 1024 / 1024,
+            file.display()
+        )));
+    }
+    Ok(())
+}
+
+fn file_revision(metadata: &fs::Metadata) -> AppResult<String> {
+    let modified = metadata
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| operation_error(format!("file modification time is invalid: {error}")))?;
+    Ok(format!("{}:{}", modified.as_nanos(), metadata.len()))
+}
+
+fn create_save_temporary(target: &Path) -> AppResult<(PathBuf, fs::File)> {
+    let parent = target.parent().ok_or_else(|| {
+        operation_error(format!(
+            "file has no parent directory: {}",
+            target.display()
+        ))
+    })?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| operation_error(format!("system clock is invalid: {error}")))?
+        .as_nanos();
+    for attempt in 0..100_u32 {
+        let temporary = parent.join(format!(
+            ".lightcp-save-{}-{nonce}-{attempt}.tmp",
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(operation_error(format!(
+        "could not allocate a temporary save file beside {}",
+        target.display()
+    )))
+}
+
+#[cfg(windows)]
+fn atomic_replace(source: &Path, target: &Path) -> AppResult<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let target = target
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            target.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn atomic_replace(source: &Path, target: &Path) -> AppResult<()> {
+    fs::rename(source, target)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(target: &Path) -> AppResult<()> {
+    let parent = target.parent().ok_or_else(|| {
+        operation_error(format!(
+            "file has no parent directory: {}",
+            target.display()
+        ))
+    })?;
+    fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_target: &Path) -> AppResult<()> {
+    Ok(())
 }
 
 pub fn create_file(root: &Path, parent: &str, name: &str, content: &str) -> AppResult<PathResult> {
@@ -323,8 +510,15 @@ mod tests {
 
         let created = create_file(&workspace, &workspace_text, "解法 1.cpp", "")
             .expect("unicode file should be created");
-        write_text_file(&workspace, &created.path, "int main() { return 0; }\n")
-            .expect("unicode file should be written");
+        let initial = read_text_file(&workspace, &created.path).expect("initial file revision");
+        let written = write_text_file(
+            &workspace,
+            &created.path,
+            "int main() { return 0; }\n",
+            &initial.revision,
+        )
+        .expect("unicode file should be written");
+        assert_eq!(written.status, "saved");
         let content =
             read_text_file(&workspace, &created.path).expect("unicode file should be readable");
         assert!(content.content.contains("return 0"));
@@ -344,6 +538,51 @@ mod tests {
         delete_entry(&workspace, &moved.path).expect("moved file should be deleted");
         delete_entry(&workspace, &directory.path).expect("directory should be deleted");
         fs::remove_dir_all(temporary_root).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn conditional_atomic_save_rejects_a_stale_revision() {
+        let workspace = temporary_directory("conditional-save");
+        let path = workspace.join("main.cpp");
+        fs::write(&path, "original\n").expect("initial file");
+        let path = path_text(&path);
+        let initial = read_text_file(&workspace, &path).expect("initial revision");
+
+        fs::write(&path, "external change\n").expect("external write");
+        let conflict = write_text_file(&workspace, &path, "editor change\n", &initial.revision)
+            .expect("conflict result");
+
+        assert_eq!(conflict.status, "conflict");
+        assert_eq!(
+            fs::read_to_string(&path).expect("preserved external content"),
+            "external change\n"
+        );
+        fs::remove_dir_all(workspace).expect("temporary directory should be removed");
+    }
+
+    #[test]
+    fn atomic_save_returns_the_revision_that_was_written() {
+        let workspace = temporary_directory("atomic-save");
+        let path = workspace.join("main.cpp");
+        fs::write(&path, "before\n").expect("initial file");
+        let path = path_text(&path);
+        let initial = read_text_file(&workspace, &path).expect("initial revision");
+
+        let saved =
+            write_text_file(&workspace, &path, "after\n", &initial.revision).expect("atomic save");
+        let reread = read_text_file(&workspace, &path).expect("saved file");
+
+        assert_eq!(saved.status, "saved");
+        assert_eq!(saved.revision, reread.revision);
+        assert_eq!(reread.content, "after\n");
+        assert!(fs::read_dir(&workspace)
+            .expect("workspace entries")
+            .all(|entry| !entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".lightcp-save-")));
+        fs::remove_dir_all(workspace).expect("temporary directory should be removed");
     }
 
     fn temporary_directory(label: &str) -> PathBuf {

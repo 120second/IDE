@@ -76,27 +76,25 @@ export function showSignatureTooltip(
   view.dispatch({ effects: setSignatureTooltipEffect.of(value) });
 }
 
-export function incrementalChange(
+export function incrementalChanges(
   update: Pick<ViewUpdate, "changes" | "startState" | "state">,
-): LspTextChange | undefined {
-  let fromA = Number.POSITIVE_INFINITY;
-  let toA = 0;
-  let fromB = Number.POSITIVE_INFINITY;
-  let toB = 0;
+): LspTextChange[] {
+  const changes: LspTextChange[] = [];
   update.changes.iterChanges((changeFromA, changeToA, changeFromB, changeToB) => {
-    fromA = Math.min(fromA, changeFromA);
-    toA = Math.max(toA, changeToA);
-    fromB = Math.min(fromB, changeFromB);
-    toB = Math.max(toB, changeToB);
+    changes.push({
+      range: {
+        start: positionAt(update.startState, changeFromA),
+        end: positionAt(update.startState, changeToA),
+      },
+      text: update.state.doc.sliceString(changeFromB, changeToB),
+    });
   });
-  if (!Number.isFinite(fromA) || !Number.isFinite(fromB)) return undefined;
-  return {
-    range: {
-      start: positionAt(update.startState, fromA),
-      end: positionAt(update.startState, toA),
-    },
-    text: update.state.doc.sliceString(fromB, toB),
-  };
+
+  // LSP applies contentChanges in array order. Sending the non-overlapping
+  // CodeMirror changes from the end of the document keeps every range valid
+  // against the document version that precedes this transaction.
+  changes.reverse();
+  return changes;
 }
 
 export function positionAt(state: EditorState, offset: number): LspPosition {

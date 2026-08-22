@@ -12,6 +12,18 @@ export interface FileContent {
   path: string;
   content: string;
   modifiedAt?: number;
+  revision: string;
+}
+
+export interface WriteTextResult {
+  status: "saved" | "conflict";
+  path: string;
+  revision: string;
+}
+
+export interface FileRevision {
+  path: string;
+  revision: string;
 }
 
 export interface PathResult {
@@ -34,4 +46,3 @@ export interface TreeRow {
   expanded: boolean;
   loading: boolean;
 }
-

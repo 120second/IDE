@@ -6,6 +6,7 @@ pub mod generator;
 pub mod health;
 pub mod lsp;
 pub mod performance;
+pub mod recovery;
 pub mod runner;
 pub mod settings;
 pub mod stress;

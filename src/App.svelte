@@ -101,6 +101,12 @@
       .then(([, editorModule]) => {
         const editor = new editorModule.EditorWorkspace(settings.value);
         if (disposed) return;
+        editor.setExternalConflictResolver(({ title }) => ux.confirm({
+          title: "文件已在磁盘上更改",
+          message: `“${title}”在 LightCP 外部被修改。确认后将用编辑器中的内容覆盖磁盘版本。`,
+          confirmLabel: "覆盖磁盘文件",
+          danger: true,
+        }));
         workspace = editor;
         lspStore = new LspStore(editor, shell);
         archiveStore = new ArchiveStore(editor);
@@ -109,7 +115,7 @@
         execution = new ExecutionStore(editor, settings, shell);
         debugStore = new DebugStore(editor, execution, settings, shell);
         stressStore = new StressStore(editor, generator, execution, debugStore, settings, shell);
-        sessionStore = new SessionStore(fileWorkspace, shell, ux);
+        sessionStore = new SessionStore(fileWorkspace, editor, shell, ux);
         registerPerformanceReaders(
           () => execution!.approximateOutputBytes + debugStore!.approximateOutputBytes,
           () =>

@@ -67,7 +67,14 @@
     </div>
   </div>
 
-  <div class="debug-status" class:error={debug.state === "error"}>
+  <div
+    class="debug-status"
+    class:starting={debug.state === "starting"}
+    class:running={debug.state === "running"}
+    class:stopped={debug.state === "stopped"}
+    class:exited={debug.state === "exited"}
+    class:error={debug.state === "error"}
+  >
     <strong>{stateLabel()}</strong>
     <span>{debug.reason || "在编辑器行号左侧点击可设置断点。"}</span>
   </div>

@@ -213,11 +213,23 @@ fn path_key(path: &str) -> String {
 }
 
 fn changes_for_event(event: Event, pending_rename: &mut Option<String>) -> Vec<WorkspaceChange> {
-    let paths = event
+    let mut paths = event
         .paths
         .iter()
         .map(|path| dunce::simplified(path).to_string_lossy().into_owned())
         .collect::<Vec<_>>();
+    let contained_save_temporary = paths.iter().any(|path| is_save_temporary(path));
+    paths.retain(|path| !is_save_temporary(path));
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    if contained_save_temporary && matches!(&event.kind, EventKind::Modify(ModifyKind::Name(_))) {
+        *pending_rename = None;
+        return vec![WorkspaceChange {
+            kind: "changed",
+            paths,
+        }];
+    }
 
     match event.kind {
         EventKind::Create(_) => {
@@ -288,6 +300,13 @@ fn changes_for_event(event: Event, pending_rename: &mut Option<String>) -> Vec<W
     }
 }
 
+fn is_save_temporary(path: &str) -> bool {
+    path.replace('/', "\\")
+        .rsplit('\\')
+        .next()
+        .is_some_and(|name| name.starts_with(".lightcp-save-") && name.ends_with(".tmp"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -344,5 +363,26 @@ mod tests {
         assert_eq!(batched.len(), 1);
         assert_eq!(batched[0].kind, "changed");
         assert_eq!(batched[0].paths, vec![path]);
+    }
+
+    #[test]
+    fn internal_save_temporary_is_hidden_from_workspace_events() {
+        let mut pending = None;
+        let temporary = changes_for_event(
+            Event::new(EventKind::Create(notify::event::CreateKind::File))
+                .add_path(PathBuf::from(r"C:\题目\.lightcp-save-1-2-0.tmp")),
+            &mut pending,
+        );
+        assert!(temporary.is_empty());
+
+        let replacement = changes_for_event(
+            Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+                .add_path(PathBuf::from(r"C:\题目\.lightcp-save-1-2-0.tmp"))
+                .add_path(PathBuf::from(r"C:\题目\main.cpp")),
+            &mut pending,
+        );
+        assert_eq!(replacement.len(), 1);
+        assert_eq!(replacement[0].kind, "changed");
+        assert_eq!(replacement[0].paths, vec![r"C:\题目\main.cpp"]);
     }
 }

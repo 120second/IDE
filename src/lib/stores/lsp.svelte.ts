@@ -150,8 +150,7 @@ export class LspStore implements LspClient {
     }
     pending.changes.push(...changes);
     pending.version = version;
-    if (pending.timer) clearTimeout(pending.timer);
-    pending.timer = setTimeout(() => void this.flushPath(path), CHANGE_BATCH_MS);
+    pending.timer ??= setTimeout(() => void this.flushPath(path), CHANGE_BATCH_MS);
   }
 
   didSave(path: string): void {
@@ -385,6 +384,7 @@ export class LspStore implements LspClient {
       return;
     }
     if (this.desiredWorkspace && !sameOrChildPath(event.path, this.desiredWorkspace)) return;
+    if (!this.openedDocuments.has(pathKey(event.path))) return;
     const diagnostics = event.diagnostics.map((diagnostic) => ({
       ...diagnostic,
       path: event.path,
