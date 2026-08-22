@@ -1,8 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LspPosition, LspStartResult, LspTextChange } from "../types/lsp";
 
-export function startClangd(clangdPath: string): Promise<LspStartResult> {
-  return invoke<LspStartResult>("start_clangd", { clangdPath });
+export function startClangd(
+  clangdPath: string,
+  compilerPath: string,
+  compilerStandard: string,
+  compilerArgs: readonly string[],
+): Promise<LspStartResult> {
+  return invoke<LspStartResult>("start_clangd", {
+    clangdPath,
+    compilerPath,
+    compilerStandard,
+    compilerArgs,
+  });
 }
 
 export function stopClangd(): Promise<void> {
@@ -73,4 +83,3 @@ export function lspReferences(
 export function cancelLspRequest(requestId: number): Promise<boolean> {
   return invoke<boolean>("cancel_lsp_request", { requestId });
 }
-

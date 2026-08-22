@@ -1,5 +1,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import {
+  closeBrackets,
+  closeBracketsKeymap,
   snippet,
   type Completion,
   type CompletionContext,
@@ -46,6 +48,7 @@ import { tags } from "@lezer/highlight";
 import { readTextFile, writeTextFile } from "../api/workspace";
 import type { AppSettings } from "../types/settings";
 import type { LspClient } from "../lsp/client";
+import type { TemplateDetail } from "../types/templates";
 import type {
   LspDiagnostic,
   LspLocation,
@@ -63,6 +66,7 @@ import {
   showSignatureTooltip,
   toCodeMirrorDiagnostic,
 } from "./lspCodeMirror";
+import { buildTemplateCompletionResult } from "./templateCompletion";
 
 export interface EditorTab {
   id: string;
@@ -73,6 +77,8 @@ export interface EditorTab {
   dirty: boolean;
   deleted: boolean;
   externalModified: boolean;
+  deferred?: boolean;
+  loading?: boolean;
 }
 
 const LARGE_FILE_THRESHOLD = 2 * 1024 * 1024;
@@ -81,6 +87,11 @@ export interface EditorBreakpointLocation {
   file: string;
   line: number;
 }
+
+type TemplateCompletionProvider = (
+  query: string,
+  signal: AbortSignal,
+) => Promise<readonly TemplateDetail[]>;
 
 class BreakpointGutterMarker extends GutterMarker {
   elementClass = "cm-breakpoint-marker";
@@ -109,66 +120,6 @@ const breakpointField = StateField.define<RangeSet<GutterMarker>>({
   },
 });
 
-const STARTER_TABS = [
-  {
-    title: "main.cpp",
-    document: `#include <bits/stdc++.h>
-using namespace std;
-
-void solve() {
-    int n;
-    cin >> n;
-
-    vector<int> a(n);
-    for (int &value : a) cin >> value;
-
-    cout << accumulate(a.begin(), a.end(), 0LL) << '\\n';
-}
-
-int main() {
-    ios::sync_with_stdio(false);
-    cin.tie(nullptr);
-
-    int tests = 1;
-    // cin >> tests;
-    while (tests--) solve();
-}
-`,
-  },
-  {
-    title: "graph.cpp",
-    document: `#include <bits/stdc++.h>
-using namespace std;
-
-vector<int> bfs(const vector<vector<int>>& graph, int source) {
-    vector<int> distance(graph.size(), -1);
-    queue<int> pending;
-
-    distance[source] = 0;
-    pending.push(source);
-
-    while (!pending.empty()) {
-        int node = pending.front();
-        pending.pop();
-        for (int next : graph[node]) {
-            if (distance[next] != -1) continue;
-            distance[next] = distance[node] + 1;
-            pending.push(next);
-        }
-    }
-    return distance;
-}
-`,
-  },
-  {
-    title: "scratch.cpp",
-    document: `// Temporary contest notes
-// Editor state, cursor, selection, undo history and scroll are kept per tab.
-
-`,
-  },
-] as const;
-
 export class EditorWorkspace {
   tabs = $state.raw<EditorTab[]>([]);
   activeId = $state("");
@@ -185,22 +136,15 @@ export class EditorWorkspace {
   private breakpointToggleHandler: ((file: string, line: number) => void) | undefined;
   private breakpointMoveHandler: ((file: string, lines: number[]) => void) | undefined;
   private lspClient: LspClient | undefined;
+  private templateCompletionProvider: TemplateCompletionProvider | undefined;
+  private templateCompletionPickedHandler: ((id: number) => void) | undefined;
   private signatureTimer: ReturnType<typeof setTimeout> | undefined;
   private openSequence = 0;
   private readonly recentWrites = new Map<string, number>();
+  private readonly hydrationRequests = new Map<string, Promise<void>>();
 
   constructor(settings: AppSettings) {
     this.currentAppearance = createAppearanceExtension(settings);
-    this.tabs = STARTER_TABS.map((tab, index) => ({
-      id: `starter-${index + 1}`,
-      title: tab.title,
-      state: this.createState(tab.document, undefined, this.currentAppearance),
-      scrollTop: 0,
-      dirty: false,
-      deleted: false,
-      externalModified: false,
-    }));
-    this.activeId = this.tabs[0]?.id ?? "";
   }
 
   get activeTab(): EditorTab | undefined {
@@ -238,10 +182,20 @@ export class EditorWorkspace {
     this.lspClient = client;
   }
 
+  setTemplateCompletionProvider(
+    provider: TemplateCompletionProvider | undefined,
+    onPicked?: (id: number) => void,
+  ): void {
+    this.templateCompletionProvider = provider;
+    this.templateCompletionPickedHandler = onPicked;
+  }
+
   openLspDocuments(): { path: string; text: string }[] {
     this.captureActiveView();
     return this.tabs.flatMap((tab) =>
-      tab.path && !tab.deleted ? [{ path: tab.path, text: tab.state.doc.toString() }] : [],
+      tab.path && !tab.deleted && !tab.deferred
+        ? [{ path: tab.path, text: tab.state.doc.toString() }]
+        : [],
     );
   }
 
@@ -333,7 +287,11 @@ export class EditorWorkspace {
   }
 
   switchTab(id: string): void {
-    if (id === this.activeId || !this.tabs.some((tab) => tab.id === id)) return;
+    if (!this.tabs.some((tab) => tab.id === id)) return;
+    if (id === this.activeId) {
+      if (this.activeTab?.deferred) void this.hydrateTab(id);
+      return;
+    }
     this.captureActiveView();
     this.activeId = id;
 
@@ -351,6 +309,7 @@ export class EditorWorkspace {
       this.updateCursor(activeTab.state);
       this.view.focus();
     }
+    if (activeTab?.deferred) void this.hydrateTab(id);
   }
 
   createTab(): void {
@@ -378,6 +337,7 @@ export class EditorWorkspace {
     const existing = this.tabs.find((tab) => tab.path && samePath(tab.path, path));
     if (existing) {
       this.switchTab(existing.id);
+      await this.hydrateTab(existing.id);
       return;
     }
 
@@ -419,6 +379,7 @@ export class EditorWorkspace {
   }
 
   async saveActive(): Promise<boolean> {
+    if (this.activeTab?.deferred) await this.hydrateTab(this.activeTab.id);
     this.captureActiveView();
     const active = this.activeTab;
     if (!active?.path) {
@@ -543,13 +504,12 @@ export class EditorWorkspace {
 
     if (id === this.activeId) this.captureActiveView();
     const closing = this.tabs[index];
-    if (closing.path && !closing.deleted) this.lspClient?.didClose(closing.path);
+    if (closing.path && !closing.deleted && !closing.deferred) this.lspClient?.didClose(closing.path);
     const remaining = this.tabs.filter((tab) => tab.id !== id);
 
     if (remaining.length === 0) {
       this.tabs = [];
       this.activeId = "";
-      this.createTab();
       return;
     }
 
@@ -647,6 +607,89 @@ export class EditorWorkspace {
     }
   }
 
+  async restoreSessionTabs(paths: readonly string[], activePath?: string): Promise<void> {
+    const uniquePaths = [...new Map(
+      paths
+        .filter((path) => typeof path === "string" && path.trim())
+        .slice(0, 64)
+        .map((path) => [normalizedPath(path), path]),
+    ).values()];
+    if (uniquePaths.length === 0) return;
+
+    this.captureActiveView();
+    for (const tab of this.tabs) {
+      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
+    }
+    this.tabs = uniquePaths.map((path, index) => ({
+      id: `restored-${Date.now()}-${index}`,
+      title: fileName(path),
+      path,
+      state: this.createState("", undefined, this.currentAppearance),
+      scrollTop: 0,
+      dirty: false,
+      deleted: false,
+      externalModified: false,
+      deferred: true,
+      loading: false,
+    }));
+    const active = this.tabs.find((tab) => activePath && samePath(tab.path ?? "", activePath))
+      ?? this.tabs[0];
+    this.activeId = active.id;
+    this.view?.setState(active.state);
+    this.restoreScroll(0);
+    this.notice = `正在恢复 ${active.title}…`;
+    await this.hydrateTab(active.id);
+  }
+
+  sessionFiles(): { openFiles: string[]; activeFile?: string } {
+    this.captureActiveView();
+    return {
+      openFiles: this.tabs.flatMap((tab) => tab.path && !tab.deleted ? [tab.path] : []),
+      activeFile: this.activeTab?.path,
+    };
+  }
+
+  private hydrateTab(id: string): Promise<void> {
+    const existing = this.hydrationRequests.get(id);
+    if (existing) return existing;
+    const request = this.performHydration(id).finally(() => this.hydrationRequests.delete(id));
+    this.hydrationRequests.set(id, request);
+    return request;
+  }
+
+  private async performHydration(id: string): Promise<void> {
+    const pending = this.tabs.find((tab) => tab.id === id);
+    if (!pending?.deferred || !pending.path) return;
+    this.replaceTab(id, { ...pending, loading: true });
+    try {
+      const file = await readTextFile(pending.path);
+      const current = this.tabs.find((tab) => tab.id === id);
+      if (!current?.deferred) return;
+      const hydrated: EditorTab = {
+        ...current,
+        title: fileName(file.path),
+        path: file.path,
+        state: this.createState(file.content, undefined, this.currentAppearance),
+        deferred: false,
+        loading: false,
+        deleted: false,
+      };
+      this.replaceTab(id, hydrated);
+      this.lspClient?.didOpen(file.path, file.content);
+      if (this.activeId === id) {
+        this.view?.setState(hydrated.state);
+        this.restoreScroll(hydrated.scrollTop);
+        this.updateCursor(hydrated.state);
+        this.notice = `已恢复 ${hydrated.title}`;
+      }
+    } catch (error) {
+      const current = this.tabs.find((tab) => tab.id === id);
+      if (!current) return;
+      this.replaceTab(id, { ...current, deferred: false, loading: false, deleted: true });
+      if (this.activeId === id) this.notice = `无法恢复 ${current.title}：${errorMessage(error)}`;
+    }
+  }
+
   private createState(
     document: string,
     settings?: AppSettings,
@@ -663,6 +706,7 @@ export class EditorWorkspace {
           foldGutter(),
           indentOnInput(),
           bracketMatching(),
+          closeBrackets(),
           highlightActiveLine(),
           highlightSelectionMatches(),
           cpp(),
@@ -688,8 +732,16 @@ export class EditorWorkspace {
         dropCursor(),
         rectangularSelection(),
         crosshairCursor(),
-        keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+        keymap.of([
+          ...closeBracketsKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+          ...foldKeymap,
+          indentWithTab,
+        ]),
         ...createLspExtensions({
+          templateCompletion: (context) => this.templateCompletion(context),
           completion: (context) => this.lspCompletion(context),
           hover: (view, position) => this.lspHoverTooltip(view, position),
           definition: () => void this.goToDefinition(),
@@ -840,6 +892,24 @@ export class EditorWorkspace {
     return { from, options, validFor: /^[\w:]*$/ };
   }
 
+  private async templateCompletion(context: CompletionContext): Promise<CompletionResult | null> {
+    if (!this.templateCompletionProvider || context.state.doc.length >= LARGE_FILE_THRESHOLD) {
+      return null;
+    }
+    const word = context.matchBefore(/[\w\u3400-\u9fff]*$/);
+    if (!word || word.from === word.to) return null;
+
+    const controller = new AbortController();
+    context.addEventListener("abort", () => controller.abort(), { onDocChange: true });
+    const templates = await this.templateCompletionProvider(word.text, controller.signal);
+    if (controller.signal.aborted) return null;
+    return buildTemplateCompletionResult(
+      word.from,
+      templates,
+      (id) => this.templateCompletionPickedHandler?.(id),
+    );
+  }
+
   private async lspHoverTooltip(view: EditorView, position: number): Promise<Tooltip | null> {
     const tab = this.activeTab;
     if (!tab?.path || !this.lspClient?.ready || view.state.doc.length >= LARGE_FILE_THRESHOLD) {
@@ -932,7 +1002,6 @@ function createAppearanceExtension(settings: Partial<AppSettings>): Extension {
     ? {
         text: "#20242c",
         muted: "#7b8291",
-        gutter: "rgba(243, 245, 249, 0.92)",
         activeLine: "rgba(59, 130, 246, 0.075)",
         selection: "rgba(55, 116, 205, 0.22)",
         cursor: "#2563eb",
@@ -947,7 +1016,6 @@ function createAppearanceExtension(settings: Partial<AppSettings>): Extension {
     : {
         text: "#d9dde7",
         muted: "#626a79",
-        gutter: "rgba(18, 20, 25, 0.9)",
         activeLine: "rgba(103, 155, 235, 0.08)",
         selection: "rgba(78, 133, 209, 0.3)",
         cursor: "#82b7ff",
@@ -986,7 +1054,7 @@ function createAppearanceExtension(settings: Partial<AppSettings>): Extension {
       ".cm-gutters": {
         minWidth: "46px",
         color: colors.muted,
-        backgroundColor: colors.gutter,
+        backgroundColor: "transparent",
         borderRight: "1px solid var(--border)",
       },
       ".cm-activeLineGutter": {

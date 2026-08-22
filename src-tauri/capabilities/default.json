@@ -3,5 +3,13 @@
   "identifier": "default",
   "description": "Default capability for the LightCP main window",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-maximize",
+    "core:window:allow-available-monitors",
+    "core:window:allow-set-effects",
+    "dialog:allow-open"
+  ]
 }

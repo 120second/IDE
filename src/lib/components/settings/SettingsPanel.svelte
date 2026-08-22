@@ -1,5 +1,19 @@
 <script lang="ts">
   import type { SettingsStore } from "../../stores/settings.svelte";
+  import {
+    APPEARANCE_PRESETS,
+    backgroundImageUrl,
+    type AppearancePresetId,
+  } from "../../stores/settings.svelte";
+  import { chooseBackgroundImage } from "../../api/appearance";
+  import {
+    DEFAULT_KEYBINDINGS,
+    SHORTCUT_IDS,
+    SHORTCUT_LABELS,
+    shortcutConflicts,
+    shortcutFromEvent,
+    type ShortcutId,
+  } from "../../keybindings";
 
   interface Props {
     settings: SettingsStore;
@@ -9,9 +23,88 @@
 
   const percent = (value: number) => `${Math.round(value * 100)}%`;
   const parseArguments = (value: string) => value.split(/\s+/).map((argument) => argument.trim()).filter(Boolean);
+  let conflicts = $derived(shortcutConflicts(settings.value.keybindings));
+  let choosingBackground = $state(false);
+  let loadedBackground = $state("");
+  let failedBackground = $state("");
+  let backgroundPickerError = $state("");
+  let previewUrl = $derived(backgroundImageUrl(settings.value.backgroundImage));
+
+  const appearancePresets: { id: AppearancePresetId; label: string }[] = [
+    { id: "solid", label: "不透明" },
+    { id: "balanced", label: "毛玻璃" },
+    { id: "glass", label: "透明" },
+  ];
+
+  function presetActive(id: AppearancePresetId): boolean {
+    const preset = APPEARANCE_PRESETS[id];
+    return Math.abs(settings.value.backgroundOpacity - preset.backgroundOpacity) < 0.001
+      && settings.value.backgroundEffect === preset.backgroundEffect
+      && Math.abs(settings.value.windowOpacity - preset.windowOpacity) < 0.001
+      && Math.abs(settings.value.sidebarOpacity - preset.sidebarOpacity) < 0.001
+      && Math.abs(settings.value.editorOpacity - preset.editorOpacity) < 0.001
+      && Math.abs(settings.value.blur - preset.blur) < 0.001;
+  }
+
+  async function browseBackground(): Promise<void> {
+    if (choosingBackground) return;
+    choosingBackground = true;
+    backgroundPickerError = "";
+    try {
+      const selected = await chooseBackgroundImage();
+      if (selected) settings.update({ backgroundImage: selected });
+    } catch (error) {
+      backgroundPickerError = error instanceof Error ? error.message : String(error);
+    } finally {
+      choosingBackground = false;
+    }
+  }
+
+  function captureShortcut(event: KeyboardEvent, id: ShortcutId): void {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Backspace" || event.key === "Delete") {
+      updateShortcut(id, DEFAULT_KEYBINDINGS[id]);
+      return;
+    }
+    const shortcut = shortcutFromEvent(event);
+    if (shortcut) updateShortcut(id, shortcut);
+  }
+
+  function updateShortcut(id: ShortcutId, value: string): void {
+    settings.update({ keybindings: { ...settings.value.keybindings, [id]: value } });
+  }
 </script>
 
 <div class="settings-panel">
+  <section class="settings-section shortcut-settings">
+    <div class="section-heading">
+      <div>
+        <h3>快捷键</h3>
+        <p>聚焦输入框后直接按下新的组合键；按 Backspace 恢复该项默认值。</p>
+      </div>
+    </div>
+
+    {#each SHORTCUT_IDS as id}
+      <label class:error-row={conflicts.has(id)} class="shortcut-row">
+        <span>
+          <strong>{SHORTCUT_LABELS[id]}</strong>
+          {#if conflicts.has(id)}
+            <small>与 {conflicts.get(id)?.map((other) => SHORTCUT_LABELS[other]).join("、")} 冲突</small>
+          {/if}
+        </span>
+        <input
+          class="shortcut-input"
+          readonly
+          aria-invalid={conflicts.has(id)}
+          aria-label={`${SHORTCUT_LABELS[id]}快捷键`}
+          value={settings.value.keybindings[id]}
+          onkeydown={(event) => captureShortcut(event, id)}
+        />
+      </label>
+    {/each}
+  </section>
+
   <section class="settings-section">
     <div class="section-heading">
       <div>
@@ -25,6 +118,37 @@
         {:else if settings.saveState === "loading"}正在加载…
         {/if}
       </span>
+    </div>
+
+    <div class="appearance-preview" aria-label="外观预览">
+      {#if previewUrl}
+        {#key previewUrl}
+          <img
+            src={previewUrl}
+            alt=""
+            onload={() => { loadedBackground = settings.value.backgroundImage; failedBackground = ""; }}
+            onerror={() => { failedBackground = settings.value.backgroundImage; loadedBackground = ""; }}
+          />
+        {/key}
+      {/if}
+      <div class="appearance-preview-sidebar"></div>
+      <div class="appearance-preview-editor">
+        <i></i><i></i><i></i><i></i>
+      </div>
+      <span class="appearance-preview-theme">{settings.value.theme === "dark" ? "深色" : "浅色"}</span>
+    </div>
+
+    <div class="setting-row vertical">
+      <span class="setting-label">外观预设</span>
+      <div class="segmented appearance-presets" aria-label="外观预设">
+        {#each appearancePresets as preset}
+          <button
+            class:active={presetActive(preset.id)}
+            onclick={() => settings.applyAppearancePreset(preset.id)}>{preset.label}</button
+          >
+        {/each}
+      </div>
+      <span class="setting-hint">“透明”保留桌面细节；“毛玻璃”会使用 Windows Acrylic 强模糊。</span>
     </div>
 
     <div class="setting-row vertical">
@@ -41,19 +165,66 @@
       </div>
     </div>
 
-    <label class="setting-row vertical">
+    <div class="setting-row vertical">
+      <span class="setting-label">窗口背景效果</span>
+      <div class="segmented" aria-label="窗口背景效果">
+        <button
+          class:active={settings.value.backgroundEffect === "transparent"}
+          onclick={() => settings.update({ backgroundEffect: "transparent" })}>透明</button
+        >
+        <button
+          class:active={settings.value.backgroundEffect === "acrylic"}
+          onclick={() => settings.update({ backgroundEffect: "acrylic" })}>毛玻璃</button
+        >
+      </div>
+    </div>
+
+    <div class="setting-row vertical">
       <span class="setting-label">背景图片路径</span>
-      <input
-        class="text-input"
-        value={settings.value.backgroundImage}
-        placeholder="C:\用户\你的用户名\图片\background.jpg"
-        oninput={(event) => settings.update({ backgroundImage: event.currentTarget.value })}
-      />
-      <span class="setting-hint">支持用户目录内的绝对路径或 HTTPS 图片地址。</span>
-    </label>
+      <div class="background-input-row">
+        <input
+          class="text-input"
+          aria-label="背景图片路径"
+          value={settings.value.backgroundImage}
+          placeholder="本地图片路径或 HTTPS 地址"
+          oninput={(event) => {
+            backgroundPickerError = "";
+            settings.update({ backgroundImage: event.currentTarget.value });
+          }}
+        />
+        <button class="secondary-button" disabled={choosingBackground} onclick={() => void browseBackground()}>
+          {choosingBackground ? "选择中…" : "浏览"}
+        </button>
+        <button
+          class="secondary-button"
+          disabled={!settings.value.backgroundImage}
+          onclick={() => {
+            backgroundPickerError = "";
+            settings.update({ backgroundImage: "" });
+          }}>清除</button
+        >
+      </div>
+      <span
+        class:failed={(Boolean(settings.value.backgroundImage) && failedBackground === settings.value.backgroundImage) || Boolean(backgroundPickerError)}
+        class="background-image-state"
+      >
+        {#if backgroundPickerError}
+          选择失败：{backgroundPickerError}
+        {:else if !settings.value.backgroundImage}
+          未设置背景图片
+        {:else if failedBackground === settings.value.backgroundImage}
+          图片无法加载；本地图片需位于 Windows 用户目录内
+        {:else if loadedBackground === settings.value.backgroundImage}
+          图片已加载
+        {:else}
+          正在检查图片…
+        {/if}
+      </span>
+      <span class="setting-hint">支持用户目录内的 PNG、JPG、WebP、GIF、BMP、SVG，或 HTTPS 图片地址。</span>
+    </div>
 
     <label class="setting-row vertical">
-      <span class="range-heading"><span>背景透明度</span><output>{percent(settings.value.backgroundOpacity)}</output></span>
+      <span class="range-heading"><span>背景图片可见度</span><output>{percent(settings.value.backgroundOpacity)}</output></span>
       <input
         type="range"
         min="0"
@@ -65,10 +236,23 @@
     </label>
 
     <label class="setting-row vertical">
-      <span class="range-heading"><span>侧栏透明度</span><output>{percent(settings.value.sidebarOpacity)}</output></span>
+      <span class="range-heading"><span>窗口底色不透明度</span><output>{percent(settings.value.windowOpacity)}</output></span>
       <input
         type="range"
-        min="0.5"
+        min="0"
+        max="1"
+        step="0.01"
+        value={settings.value.windowOpacity}
+        oninput={(event) => settings.update({ windowOpacity: Number(event.currentTarget.value) })}
+      />
+      <span class="setting-hint">数值越低，桌面透出越明显；设为 0% 时不再叠加窗口底色。</span>
+    </label>
+
+    <label class="setting-row vertical">
+      <span class="range-heading"><span>侧栏不透明度</span><output>{percent(settings.value.sidebarOpacity)}</output></span>
+      <input
+        type="range"
+        min="0"
         max="1"
         step="0.01"
         value={settings.value.sidebarOpacity}
@@ -77,10 +261,10 @@
     </label>
 
     <label class="setting-row vertical">
-      <span class="range-heading"><span>编辑器透明度</span><output>{percent(settings.value.editorOpacity)}</output></span>
+      <span class="range-heading"><span>编辑区不透明度</span><output>{percent(settings.value.editorOpacity)}</output></span>
       <input
         type="range"
-        min="0.75"
+        min="0"
         max="1"
         step="0.01"
         value={settings.value.editorOpacity}
@@ -100,6 +284,10 @@
         oninput={(event) => settings.update({ blur: Number(event.currentTarget.value) })}
       />
     </label>
+
+    <button class="secondary-button reset-appearance" onclick={() => settings.resetAppearance()}>
+      恢复默认外观
+    </button>
   </section>
 
   <section class="settings-section">
@@ -246,7 +434,7 @@
     <label class="toggle-row">
       <span>
         <strong>性能模式</strong>
-        <small>关闭模糊、过渡动画和装饰效果。</small>
+        <small>关闭系统毛玻璃、界面模糊、过渡动画和装饰效果。</small>
       </span>
       <input
         type="checkbox"

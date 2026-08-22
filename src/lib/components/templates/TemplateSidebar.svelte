@@ -23,6 +23,10 @@
   let categoryViewport: HTMLDivElement;
   let categoryScrollTop = $state(0);
   let categoryViewportHeight = $state(300);
+  let draggedCategoryId = $state<number>();
+  let dropCategoryId = $state<number>();
+  let categoryDropMode = $state<"before" | "inside" | "after">("inside");
+  let rootDropActive = $state(false);
   let categoryRows = $derived(templateStore.categoryRows);
   let categoryStart = $derived(
     Math.max(0, Math.floor(categoryScrollTop / CATEGORY_ROW_HEIGHT) - CATEGORY_OVERSCAN),
@@ -45,19 +49,36 @@
   });
 
   function beginCategoryDrag(event: DragEvent, id: number): void {
+    draggedCategoryId = id;
     event.dataTransfer?.setData("application/x-lightcp-template-category", String(id));
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer?.setData("text/plain", String(id));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.dropEffect = "move";
+    }
   }
 
-  function allowCategoryDrop(event: DragEvent): void {
-    if (event.dataTransfer?.types.includes("application/x-lightcp-template-category")) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
+  function allowCategoryDrop(event: DragEvent, row?: TemplateCategoryRow): void {
+    const categoryDrag = Boolean(
+      draggedCategoryId
+      || event.dataTransfer?.types.includes("application/x-lightcp-template-category"),
+    );
+    const templateDrag = Boolean(
+      event.dataTransfer?.types.includes("application/x-lightcp-template"),
+    );
+    if (!categoryDrag && !templateDrag) return;
+    event.preventDefault();
+    if (row) event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    rootDropActive = !row;
+    dropCategoryId = row?.category.id;
+    if (!row || templateDrag) {
+      categoryDropMode = "inside";
+      return;
     }
-    if (event.dataTransfer?.types.includes("application/x-lightcp-template")) {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-    }
+    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const ratio = (event.clientY - bounds.top) / bounds.height;
+    categoryDropMode = ratio < 0.3 ? "before" : ratio > 0.7 ? "after" : "inside";
   }
 
   function dropOnCategory(event: DragEvent, row: TemplateCategoryRow): void {
@@ -67,46 +88,70 @@
     const templateText = event.dataTransfer?.getData("application/x-lightcp-template");
     if (templateText) {
       const count = templateStore.templates.filter(
-        (template) => template.categoryId === row.category.id,
+        (template) => template.categoryId === row.category.id && template.id !== Number(templateText),
       ).length;
       void templateStore.moveTemplate(Number(templateText), row.category.id, count);
+      clearCategoryDrag();
       return;
     }
-    if (!categoryText) return;
+    const source = Number(categoryText || draggedCategoryId);
+    if (!source) {
+      clearCategoryDrag();
+      return;
+    }
 
     const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
     const ratio = (event.clientY - bounds.top) / bounds.height;
     if (ratio >= 0.3 && ratio <= 0.7) {
       const childCount = templateStore.categories.filter(
-        (category) => category.parentId === row.category.id,
+        (category) => category.parentId === row.category.id && category.id !== source,
       ).length;
-      void templateStore.moveCategory(Number(categoryText), row.category.id, childCount);
+      void templateStore.moveCategory(source, row.category.id, childCount);
+      clearCategoryDrag();
       return;
     }
     const siblings = templateStore.categories
-      .filter((category) => category.parentId === row.category.parentId)
+      .filter((category) => category.parentId === row.category.parentId && category.id !== source)
       .sort((left, right) => left.sortOrder - right.sortOrder || left.id - right.id);
     const index = siblings.findIndex((category) => category.id === row.category.id);
     void templateStore.moveCategory(
-      Number(categoryText),
+      source,
       row.category.parentId,
       index + (ratio > 0.7 ? 1 : 0),
     );
+    clearCategoryDrag();
   }
 
   function dropOnRoot(event: DragEvent): void {
     event.preventDefault();
     const categoryText = event.dataTransfer?.getData("application/x-lightcp-template-category");
     const templateText = event.dataTransfer?.getData("application/x-lightcp-template");
-    if (categoryText) {
-      const roots = templateStore.categories.filter((category) => category.parentId === undefined);
-      void templateStore.moveCategory(Number(categoryText), undefined, roots.length);
+    const categoryId = Number(categoryText || draggedCategoryId);
+    if (categoryId) {
+      const roots = templateStore.categories.filter(
+        (category) => category.parentId === undefined && category.id !== categoryId,
+      );
+      void templateStore.moveCategory(categoryId, undefined, roots.length);
     } else if (templateText) {
       const ungrouped = templateStore.templates.filter(
-        (template) => template.categoryId === undefined,
+        (template) => template.categoryId === undefined && template.id !== Number(templateText),
       );
       void templateStore.moveTemplate(Number(templateText), undefined, ungrouped.length);
     }
+    clearCategoryDrag();
+  }
+
+  function leaveCategoryDrop(event: DragEvent, id: number): void {
+    const next = event.relatedTarget;
+    if (next instanceof Node && (event.currentTarget as HTMLElement).contains(next)) return;
+    if (dropCategoryId === id) dropCategoryId = undefined;
+  }
+
+  function clearCategoryDrag(): void {
+    draggedCategoryId = undefined;
+    dropCategoryId = undefined;
+    categoryDropMode = "inside";
+    rootDropActive = false;
   }
 </script>
 
@@ -154,6 +199,7 @@
 
   <div
     class="category-tree"
+    class:root-drop-target={rootDropActive}
     bind:this={categoryViewport}
     role="tree"
     tabindex="0"
@@ -167,6 +213,10 @@
       <div
         class="category-row"
         class:active={templateStore.selectedCategoryId === row.category.id && templateStore.collection === "all"}
+        class:dragging={draggedCategoryId === row.category.id}
+        class:drop-target={dropCategoryId === row.category.id && categoryDropMode === "inside"}
+        class:drop-before={dropCategoryId === row.category.id && categoryDropMode === "before"}
+        class:drop-after={dropCategoryId === row.category.id && categoryDropMode === "after"}
         role="treeitem"
         aria-level={row.depth + 1}
         aria-expanded={row.hasChildren ? row.expanded : undefined}
@@ -180,7 +230,9 @@
           if (event.key === "Enter") void templateStore.setCategory(row.category.id);
         }}
         ondragstart={(event) => beginCategoryDrag(event, row.category.id)}
-        ondragover={allowCategoryDrop}
+        ondragover={(event) => allowCategoryDrop(event, row)}
+        ondragleave={(event) => leaveCategoryDrop(event, row.category.id)}
+        ondragend={clearCategoryDrag}
         ondrop={(event) => dropOnCategory(event, row)}
       >
         <button

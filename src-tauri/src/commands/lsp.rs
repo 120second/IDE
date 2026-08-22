@@ -10,6 +10,9 @@ use crate::{
 #[tauri::command]
 pub async fn start_clangd(
     clangd_path: String,
+    compiler_path: String,
+    compiler_standard: String,
+    compiler_args: Vec<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<LspStartResult, CommandError> {
@@ -17,12 +20,19 @@ pub async fn start_clangd(
     let performance = state.performance.clone();
     let workspace_root = state.active_workspace_root().map_err(CommandError::from)?;
     blocking(move || {
-        manager.start(workspace_root, clangd_path, move |event| {
-            performance.record_ipc_event();
-            if let Err(error) = app.emit("lsp-event", event) {
-                log::warn!("failed to emit LSP event: {error}");
-            }
-        })
+        manager.start(
+            workspace_root,
+            clangd_path,
+            compiler_path,
+            compiler_standard,
+            compiler_args,
+            move |event| {
+                performance.record_ipc_event();
+                if let Err(error) = app.emit("lsp-event", event) {
+                    log::warn!("failed to emit LSP event: {error}");
+                }
+            },
+        )
     })
     .await
 }

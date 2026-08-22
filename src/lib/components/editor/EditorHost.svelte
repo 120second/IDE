@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
+  import ContextMenu from "../ux/ContextMenu.svelte";
 
   interface Props {
     workspace: EditorWorkspace;
@@ -18,11 +19,10 @@
 
   function openMenu(event: MouseEvent): void {
     const code = workspace.getSelectedText();
-    if (!code) return;
     event.preventDefault();
     menu = {
       x: Math.min(event.clientX, window.innerWidth - 180),
-      y: Math.min(event.clientY, window.innerHeight - 55),
+      y: Math.min(event.clientY, window.innerHeight - 180),
       code,
     };
   }
@@ -33,7 +33,16 @@
 <div class="editor-host" role="application" aria-label="代码编辑器" bind:this={host} oncontextmenu={openMenu}></div>
 
 {#if menu}
-  <div class="context-menu editor-context-menu" role="menu" tabindex="-1" style:left={`${menu.x}px`} style:top={`${menu.y}px`}>
-    <button role="menuitem" onclick={() => { saveAsSnippet(menu!.code); menu = undefined; }}>保存为代码片段</button>
-  </div>
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    close={() => (menu = undefined)}
+    items={[
+      { label: "保存", action: () => void workspace.saveActive() },
+      { label: "保存为代码片段", disabled: !menu.code, action: () => saveAsSnippet(menu!.code) },
+      { label: "转到定义", separatorBefore: true, action: () => void workspace.goToDefinition() },
+      { label: "查找引用", action: () => void workspace.findReferences() },
+      { label: "参数提示", action: () => void workspace.requestSignatureHelp() },
+    ]}
+  />
 {/if}

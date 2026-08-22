@@ -4,12 +4,14 @@
   import Icon from "../shell/Icon.svelte";
   import BulkArchiveDialog from "./BulkArchiveDialog.svelte";
   import SmartCollectionDialog from "./SmartCollectionDialog.svelte";
+  import type { KeybindingMap } from "../../keybindings";
 
   interface Props {
     archiveStore: ArchiveStore;
+    keybindings: KeybindingMap;
   }
 
-  let { archiveStore }: Props = $props();
+  let { archiveStore, keybindings }: Props = $props();
   let bulkDialogOpen = $state(false);
   let collectionDialogOpen = $state(false);
   let editingCollection = $state<SmartCollection>();
@@ -36,7 +38,7 @@
 <section class="archive-panel">
   <div class="archive-search-row">
     <div class="search-box archive-search"><Icon name="search" size={13} /><input aria-label="搜索归档" placeholder="标题、题号、标签…" value={archiveStore.search} oninput={(event) => archiveStore.setSearch(event.currentTarget.value)} /></div>
-    <button title="归档当前文件 · Ctrl+Shift+A" aria-label="归档当前文件" onclick={() => archiveStore.openQuickArchive()}><Icon name="plus" size={13} /></button>
+    <button title={`归档当前文件 · ${keybindings.quickArchive}`} aria-label="归档当前文件" onclick={() => archiveStore.openQuickArchive()}><Icon name="plus" size={13} /></button>
   </div>
 
   <div class="archive-virtual-tree">

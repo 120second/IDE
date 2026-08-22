@@ -11,6 +11,7 @@
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
   import type { LspStore } from "../../stores/lsp.svelte";
+  import type { UxStore } from "../../stores/ux.svelte";
   import type { HealthStatus } from "../../types/health";
   import EditorHost from "../editor/EditorHost.svelte";
   import TabBar from "../editor/TabBar.svelte";
@@ -24,6 +25,7 @@
   import { matchesShortcut } from "../../keybindings";
   import Sidebar from "./Sidebar.svelte";
   import StatusBar from "./StatusBar.svelte";
+  import UxOverlay from "../ux/UxOverlay.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -37,11 +39,12 @@
     debugStore: DebugStore;
     stressStore: StressStore;
     lspStore: LspStore;
+    ux: UxStore;
     backendState: "checking" | "ready" | "error";
     health?: HealthStatus;
   }
 
-  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, backendState, health }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, ux, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
 
   $effect(() => {
@@ -53,12 +56,13 @@
     let chordTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (matchesShortcut(event, "quickArchive")) {
+      const keybindings = settings.value.keybindings;
+      if (matchesShortcut(event, "quickArchive", keybindings)) {
         event.preventDefault();
         archiveStore.openQuickArchive();
         return;
       }
-      if (matchesShortcut(event, "quickTemplate")) {
+      if (matchesShortcut(event, "quickTemplate", keybindings)) {
         event.preventDefault();
         quickSearchOpen = true;
         return;
@@ -68,34 +72,50 @@
         shell.toggleZenMode();
         return;
       }
-      if (matchesShortcut(event, "toggleSidebar")) {
+      if (matchesShortcut(event, "toggleSidebar", keybindings)) {
         event.preventDefault();
         shell.toggleSidebar();
         return;
       }
-      if (matchesShortcut(event, "togglePanel")) {
+      if (matchesShortcut(event, "togglePanel", keybindings)) {
         event.preventDefault();
         shell.toggleBottomPanel();
         return;
       }
-      if (matchesShortcut(event, "save")) {
+      if (matchesShortcut(event, "save", keybindings)) {
         event.preventDefault();
         void workspace.saveActive();
         return;
       }
-      if (matchesShortcut(event, "runCurrent")) {
+      if (matchesShortcut(event, "runCurrent", keybindings)) {
         event.preventDefault();
         if (event.repeat) return;
         if (shell.activeActivity === "templates") shell.activeActivity = "explorer";
         void execution.runCurrent();
         return;
       }
-      if (matchesShortcut(event, "runAll")) {
+      if (matchesShortcut(event, "runAll", keybindings)) {
         event.preventDefault();
         if (event.repeat) return;
         shell.activeActivity = "testcases";
         shell.sidebarVisible = true;
         void execution.runAll();
+        return;
+      }
+      if (matchesShortcut(event, "stress", keybindings)) {
+        event.preventDefault();
+        if (event.repeat) return;
+        shell.activeActivity = "judge";
+        shell.sidebarVisible = true;
+        void stressStore.start();
+        return;
+      }
+      if (matchesShortcut(event, "debug", keybindings)) {
+        event.preventDefault();
+        if (event.repeat) return;
+        shell.activeActivity = "debug";
+        shell.sidebarVisible = true;
+        void debugStore.startCurrent();
         return;
       }
       if (awaitingZenKey && !event.ctrlKey && event.key.toLowerCase() === "z") {
@@ -133,7 +153,7 @@
     {#if !shell.zenMode}<ActivityBar {shell} />{/if}
     <div class="workbench">
       {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge"}
-        <Sidebar {shell} {workspace} {fileWorkspace} {templateStore} {execution} {generator} {archiveStore} debug={debugStore} {settings} />
+        <Sidebar {shell} {workspace} {fileWorkspace} {templateStore} {execution} {generator} {archiveStore} debug={debugStore} {settings} {ux} />
       {/if}
       <section class="editor-column" aria-label="编辑器工作台">
         {#if shell.activeActivity === "templates" && !shell.zenMode}
@@ -143,6 +163,8 @@
         {:else}
           <TabBar
             {workspace}
+            {ux}
+            keybindings={settings.value.keybindings}
             togglePanel={() => shell.toggleBottomPanel()}
             toggleZen={() => shell.toggleZenMode()}
             compile={() => void execution.compileCurrent()}
@@ -152,10 +174,14 @@
             running={execution.running}
           />
           <div class="editor-surface">
-            <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
+            {#if workspace.activeTab}
+              <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
+            {:else}
+              <div class="editor-empty-state" aria-label="未打开文件"></div>
+            {/if}
           </div>
           {#if shell.bottomPanelVisible && !shell.zenMode}
-            <BottomPanel {shell} {workspace} {execution} debug={debugStore} lsp={lspStore} {backendState} {health} />
+            <BottomPanel {shell} {workspace} {execution} debug={debugStore} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} {health} />
           {/if}
         {/if}
       </section>
@@ -166,8 +192,10 @@
       </button>
     {/if}
   </div>
-  <StatusBar {shell} {workspace} lsp={lspStore} {backendState} />
+  <StatusBar {shell} {workspace} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} />
 </div>
+
+<UxOverlay {ux} />
 
 {#if quickSearchOpen}
   <TemplateQuickSearch

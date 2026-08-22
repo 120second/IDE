@@ -6,14 +6,17 @@
   import type { Testcase, TestcaseInput, TestcaseKind } from "../../types/execution";
   import Icon from "../shell/Icon.svelte";
   import RandomGenerator from "./random/RandomGenerator.svelte";
+  import type { KeybindingMap } from "../../keybindings";
+  import { testcaseEditorToggle } from "./testcaseEditorState";
 
   interface Props {
     workspace: EditorWorkspace;
     execution: ExecutionStore;
     generator: GeneratorStore;
+    keybindings: KeybindingMap;
   }
 
-  let { workspace, execution, generator }: Props = $props();
+  let { workspace, execution, generator, keybindings }: Props = $props();
   let activeTab = $state<"fixed" | "random">("fixed");
   let editingId = $state<number>();
   let formOpen = $state(false);
@@ -60,6 +63,15 @@
   }
 
   function beginEdit(testcase: Testcase): void {
+    const action = testcaseEditorToggle(formOpen, editingId, testcase.id);
+    if (action === "collapse") {
+      formOpen = false;
+      return;
+    }
+    if (action === "resume") {
+      formOpen = true;
+      return;
+    }
     editingId = testcase.id;
     draft = inputFromTestcase(testcase);
     formOpen = true;
@@ -144,7 +156,7 @@
     </div>
   {:else}
     <div class="testcase-actions">
-      <button class="primary-button" onclick={() => void execution.runAll()} disabled={execution.running || execution.compiling}>全部运行 <kbd>F6</kbd></button>
+      <button class="primary-button" onclick={() => void execution.runAll()} disabled={execution.running || execution.compiling}>全部运行 <kbd>{keybindings.runAll}</kbd></button>
       {#if execution.running}
         <button class="danger-button" onclick={() => void execution.stop()} disabled={execution.stopping}>{execution.stopping ? "正在停止…" : "停止"}</button>
       {:else}
@@ -173,7 +185,12 @@
               checked={testcase.enabled}
               onchange={(event) => void toggleEnabled(testcase, event.currentTarget.checked)}
             />
-            <button class="testcase-main" onclick={() => beginEdit(testcase)}>
+            <button
+              class="testcase-main"
+              class:active={formOpen && editingId === testcase.id}
+              aria-expanded={formOpen && editingId === testcase.id}
+              onclick={() => beginEdit(testcase)}
+            >
               <span><strong>{testcase.name}</strong><small>{kindLabel(testcase.kind)}</small></span>
               {#if resultStatus(testcase.id)}<em class={`result-${resultStatus(testcase.id)?.toLowerCase()}`}>{statusLabel(resultStatus(testcase.id))}</em>{/if}
             </button>

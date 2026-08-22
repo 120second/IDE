@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
   import type { FileEntry } from "../../types/workspace";
@@ -24,13 +24,19 @@
     Math.min(rows.length, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN),
   );
   let renderedRows = $derived(rows.slice(start, end));
+  let draggedPath = $state("");
+  let dropTargetPath = $state("");
+  let expandTimer: ReturnType<typeof setTimeout> | undefined;
 
   onMount(() => {
     const observer = new ResizeObserver(([entry]) => {
       viewportHeight = entry.contentRect.height;
     });
     observer.observe(viewport);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (expandTimer) clearTimeout(expandTimer);
+    };
   });
 
   function activate(entry: FileEntry): void {
@@ -43,28 +49,103 @@
   }
 
   function onKeyDown(event: KeyboardEvent, entry: FileEntry): void {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    activate(entry);
+    const index = rows.findIndex((row) => row.entry.path === entry.path);
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      activate(entry);
+    } else if (event.key === "ArrowDown") {
+      event.preventDefault();
+      void focusRow(Math.min(rows.length - 1, index + 1));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      void focusRow(Math.max(0, index - 1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      void focusRow(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      void focusRow(rows.length - 1);
+    } else if (event.key === "ArrowRight" && entry.kind === "directory") {
+      event.preventDefault();
+      const row = rows[index];
+      if (!row.expanded) void fileWorkspace.toggleDirectory(entry);
+      else void focusRow(Math.min(rows.length - 1, index + 1));
+    } else if (event.key === "ArrowLeft" && entry.kind === "directory") {
+      event.preventDefault();
+      if (rows[index].expanded) void fileWorkspace.toggleDirectory(entry);
+    }
+  }
+
+  async function focusRow(index: number): Promise<void> {
+    const row = rows[index];
+    if (!row) return;
+    fileWorkspace.select(row.entry.path);
+    const top = index * ROW_HEIGHT;
+    if (top < viewport.scrollTop) viewport.scrollTop = top;
+    else if (top + ROW_HEIGHT > viewport.scrollTop + viewportHeight) {
+      viewport.scrollTop = top - viewportHeight + ROW_HEIGHT;
+    }
+    scrollTop = viewport.scrollTop;
+    await tick();
+    viewport.querySelector<HTMLElement>(`[data-row-index="${index}"]`)?.focus();
   }
 
   function beginDrag(event: DragEvent, entry: FileEntry): void {
+    draggedPath = entry.path;
     event.dataTransfer?.setData("application/x-lightcp-path", entry.path);
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer?.setData("text/plain", entry.path);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.dropEffect = "move";
+    }
   }
 
   function allowDrop(event: DragEvent, entry: FileEntry): void {
-    if (entry.kind !== "directory") return;
+    if (
+      entry.kind !== "directory"
+      || entry.path === draggedPath
+      || (!draggedPath && !event.dataTransfer?.types.includes("application/x-lightcp-path"))
+    ) return;
     event.preventDefault();
+    event.stopPropagation();
+    if (dropTargetPath !== entry.path) {
+      if (expandTimer) clearTimeout(expandTimer);
+      dropTargetPath = entry.path;
+      const row = rows.find((candidate) => candidate.entry.path === entry.path);
+      if (row && !row.expanded) {
+        expandTimer = setTimeout(() => {
+          expandTimer = undefined;
+          void fileWorkspace.toggleDirectory(entry);
+        }, 650);
+      }
+    }
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   }
 
   function drop(event: DragEvent, target: FileEntry): void {
     if (target.kind !== "directory") return;
     event.preventDefault();
-    const sourcePath = event.dataTransfer?.getData("application/x-lightcp-path");
+    event.stopPropagation();
+    const sourcePath = event.dataTransfer?.getData("application/x-lightcp-path") || draggedPath;
     const source = rows.find((row) => row.entry.path === sourcePath)?.entry;
     if (source) void fileWorkspace.move(source, target.path);
+    clearDrag();
+  }
+
+  function leaveDrop(event: DragEvent, path: string): void {
+    const next = event.relatedTarget;
+    if (next instanceof Node && (event.currentTarget as HTMLElement).contains(next)) return;
+    if (dropTargetPath !== path) return;
+    if (expandTimer) clearTimeout(expandTimer);
+    expandTimer = undefined;
+    dropTargetPath = "";
+  }
+
+  function clearDrag(): void {
+    if (expandTimer) clearTimeout(expandTimer);
+    expandTimer = undefined;
+    draggedPath = "";
+    dropTargetPath = "";
   }
 </script>
 
@@ -81,11 +162,14 @@
         class="tree-row"
         class:selected={fileWorkspace.selectedPath === row.entry.path}
         class:directory={row.entry.kind === "directory"}
+        class:dragging={draggedPath === row.entry.path}
+        class:drop-target={dropTargetPath === row.entry.path}
         role="treeitem"
         aria-level={row.depth + 1}
         aria-selected={fileWorkspace.selectedPath === row.entry.path}
         aria-expanded={row.entry.kind === "directory" ? row.expanded : undefined}
         tabindex={fileWorkspace.selectedPath === row.entry.path ? 0 : -1}
+        data-row-index={start + index}
         draggable="true"
         title={row.entry.path}
         style:top={`${(start + index) * ROW_HEIGHT}px`}
@@ -96,6 +180,8 @@
         oncontextmenu={(event) => openMenu(event, row.entry)}
         ondragstart={(event) => beginDrag(event, row.entry)}
         ondragover={(event) => allowDrop(event, row.entry)}
+        ondragleave={(event) => leaveDrop(event, row.entry.path)}
+        ondragend={clearDrag}
         ondrop={(event) => drop(event, row.entry)}
       >
         {#if row.entry.kind === "directory"}

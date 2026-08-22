@@ -5,6 +5,7 @@
   import type { EditorWorkspace } from "./lib/editor/workspace.svelte";
   import {
     applyDocumentAppearance,
+    applyNativeWindowAppearance,
     SettingsStore,
   } from "./lib/stores/settings.svelte";
   import { ShellStore } from "./lib/stores/shell.svelte";
@@ -16,6 +17,8 @@
   import { TemplateStore } from "./lib/stores/templates.svelte";
   import { WorkspaceStore } from "./lib/stores/workspace.svelte";
   import { LspStore } from "./lib/stores/lsp.svelte";
+  import { UxStore } from "./lib/stores/ux.svelte";
+  import { SessionStore } from "./lib/stores/session";
   import type { CommandError, HealthStatus } from "./lib/types/health";
   import {
     installPerformanceConsole,
@@ -25,6 +28,7 @@
 
   const shell = new ShellStore();
   const settings = new SettingsStore();
+  const ux = new UxStore();
 
   let workspace = $state<EditorWorkspace>();
   let fileWorkspace = $state<WorkspaceStore>();
@@ -34,6 +38,7 @@
   let debugStore = $state<DebugStore>();
   let stressStore = $state<StressStore>();
   let lspStore = $state<LspStore>();
+  let sessionStore = $state<SessionStore>();
   const generator = new GeneratorStore();
   let backendState = $state<"checking" | "ready" | "error">("checking");
   let health = $state<HealthStatus>();
@@ -42,13 +47,48 @@
   $effect(() => {
     const appearance = settings.value;
     applyDocumentAppearance(appearance);
+    void applyNativeWindowAppearance(appearance);
     untrack(() => workspace?.updateAppearance(appearance));
+  });
+
+  $effect(() => {
+    fileWorkspace?.info?.path;
+    shell.activeActivity;
+    shell.sidebarVisible;
+    shell.bottomPanelVisible;
+    shell.activeBottomPanel;
+    shell.sidebarWidth;
+    shell.bottomPanelHeight;
+    untrack(() => sessionStore?.schedulePersist());
+  });
+
+  $effect(() => {
+    const errors = [
+      settings.errorMessage,
+      fileWorkspace?.error,
+      templateStore?.error,
+      execution?.error,
+      archiveStore?.error,
+      debugStore?.error,
+      stressStore?.error,
+      generator.error,
+    ].filter((message): message is string => Boolean(message));
+    untrack(() => errors.forEach((message) => ux.error(message)));
   });
 
   $effect(() => {
     const root = fileWorkspace?.info?.path;
     const clangdPath = settings.value.clangdPath;
-    untrack(() => lspStore?.configure(root, clangdPath));
+    const compilerPath = settings.value.compilerPath;
+    const compilerStandard = settings.value.compilerStandard;
+    const compilerArgs = [...settings.value.releaseArgs];
+    untrack(() => lspStore?.configure(
+      root,
+      clangdPath,
+      compilerPath,
+      compilerStandard,
+      compilerArgs,
+    ));
   });
 
   onMount(() => {
@@ -65,10 +105,11 @@
         lspStore = new LspStore(editor, shell);
         archiveStore = new ArchiveStore(editor);
         fileWorkspace = new WorkspaceStore(editor, archiveStore);
-        templateStore = new TemplateStore(editor);
+        templateStore = new TemplateStore(editor, ux);
         execution = new ExecutionStore(editor, settings, shell);
         debugStore = new DebugStore(editor, execution, settings, shell);
         stressStore = new StressStore(editor, generator, execution, debugStore, settings, shell);
+        sessionStore = new SessionStore(fileWorkspace, shell, ux);
         registerPerformanceReaders(
           () => execution!.approximateOutputBytes + debugStore!.approximateOutputBytes,
           () =>
@@ -77,7 +118,7 @@
             + Number(stressStore!.running)
             + Number(lspStore!.state === "starting" || lspStore!.ready),
         );
-        void fileWorkspace.initialize();
+        void fileWorkspace.initialize().then(() => sessionStore?.initialize());
         void execution.initialize();
         void debugStore.initialize();
         void stressStore.initialize();
@@ -104,6 +145,7 @@
 
     return () => {
       disposed = true;
+      sessionStore?.dispose();
       fileWorkspace?.dispose();
       templateStore?.dispose();
       execution?.dispose();
@@ -114,6 +156,7 @@
       workspace?.dispose();
       generator.dispose();
       settings.dispose();
+      ux.dispose();
     };
   });
 </script>
@@ -123,7 +166,7 @@
 </svelte:head>
 
 {#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
-  <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {backendState} {health} />
+  <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {backendState} {health} />
 {:else}
   <main class="boot-screen" aria-live="polite">
     <div class="boot-mark">L</div>

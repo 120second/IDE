@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,12 +12,22 @@ pub enum ThemePreference {
     Light,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackgroundEffect {
+    #[default]
+    Transparent,
+    Acrylic,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppSettings {
     pub theme: ThemePreference,
     pub background_image: String,
     pub background_opacity: f64,
+    pub background_effect: BackgroundEffect,
+    pub window_opacity: f64,
     pub sidebar_opacity: f64,
     pub editor_opacity: f64,
     pub blur: f64,
@@ -33,6 +43,7 @@ pub struct AppSettings {
     pub debug_args: Vec<String>,
     pub run_timeout_ms: u64,
     pub max_output_bytes: usize,
+    pub keybindings: BTreeMap<String, String>,
 }
 
 impl Default for AppSettings {
@@ -41,6 +52,8 @@ impl Default for AppSettings {
             theme: ThemePreference::Dark,
             background_image: String::new(),
             background_opacity: 0.18,
+            background_effect: BackgroundEffect::Transparent,
+            window_opacity: 0.32,
             sidebar_opacity: 0.96,
             editor_opacity: 0.98,
             blur: 12.0,
@@ -56,6 +69,7 @@ impl Default for AppSettings {
             debug_args: vec!["-g".to_owned(), "-O0".to_owned()],
             run_timeout_ms: 2_000,
             max_output_bytes: 2 * 1024 * 1024,
+            keybindings: default_keybindings(),
         }
     }
 }
@@ -64,8 +78,9 @@ impl AppSettings {
     pub fn sanitize(mut self) -> Self {
         self.background_image = self.background_image.trim().chars().take(2048).collect();
         self.background_opacity = finite_clamp(self.background_opacity, 0.0, 1.0, 0.18);
-        self.sidebar_opacity = finite_clamp(self.sidebar_opacity, 0.5, 1.0, 0.96);
-        self.editor_opacity = finite_clamp(self.editor_opacity, 0.75, 1.0, 0.98);
+        self.window_opacity = finite_clamp(self.window_opacity, 0.0, 1.0, 0.32);
+        self.sidebar_opacity = finite_clamp(self.sidebar_opacity, 0.0, 1.0, 0.96);
+        self.editor_opacity = finite_clamp(self.editor_opacity, 0.0, 1.0, 0.98);
         self.blur = finite_clamp(self.blur, 0.0, 24.0, 12.0);
         self.font_size = finite_clamp(self.font_size, 11.0, 24.0, 14.0);
         self.line_height = finite_clamp(self.line_height, 1.2, 2.0, 1.62);
@@ -85,9 +100,41 @@ impl AppSettings {
         self.compiler_standard = bounded_nonempty(&self.compiler_standard, "c++20", 32);
         self.release_args = sanitize_arguments(self.release_args, &["-O2"]);
         self.debug_args = sanitize_arguments(self.debug_args, &["-g", "-O0"]);
+        self.keybindings = sanitize_keybindings(self.keybindings);
 
         self
     }
+}
+
+fn default_keybindings() -> BTreeMap<String, String> {
+    [
+        ("save", "Ctrl+S"),
+        ("toggleSidebar", "Ctrl+B"),
+        ("quickTemplate", "Ctrl+Alt+T"),
+        ("quickArchive", "Ctrl+Shift+A"),
+        ("runCurrent", "F5"),
+        ("runAll", "F6"),
+        ("stress", "F7"),
+        ("debug", "F8"),
+        ("togglePanel", "Ctrl+J"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+    .collect()
+}
+
+fn sanitize_keybindings(mut value: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    default_keybindings()
+        .into_iter()
+        .map(|(key, fallback)| {
+            let shortcut = value
+                .remove(&key)
+                .map(|candidate| candidate.trim().chars().take(64).collect::<String>())
+                .filter(|candidate| !candidate.is_empty())
+                .unwrap_or(fallback);
+            (key, shortcut)
+        })
+        .collect()
 }
 
 fn bounded_nonempty(value: &str, fallback: &str, limit: usize) -> String {
@@ -159,6 +206,7 @@ mod tests {
     fn settings_are_sanitized_to_supported_ranges() {
         let settings = AppSettings {
             background_opacity: -2.0,
+            window_opacity: -1.0,
             sidebar_opacity: 4.0,
             editor_opacity: f64::NAN,
             blur: 100.0,
@@ -171,6 +219,7 @@ mod tests {
         .sanitize();
 
         assert_eq!(settings.background_opacity, 0.0);
+        assert_eq!(settings.window_opacity, 0.0);
         assert_eq!(settings.sidebar_opacity, 1.0);
         assert_eq!(settings.editor_opacity, 0.98);
         assert_eq!(settings.blur, 24.0);
@@ -183,6 +232,10 @@ mod tests {
             r"C:\Program Files\LLVM\bin\clangd.exe"
         );
         assert_eq!(settings.run_timeout_ms, 2_000);
+        assert_eq!(
+            settings.keybindings.get("debug").map(String::as_str),
+            Some("F8")
+        );
     }
 
     #[test]
@@ -198,6 +251,8 @@ mod tests {
         let path = std::env::temp_dir().join(file_name);
         let expected = AppSettings {
             theme: ThemePreference::Light,
+            background_effect: BackgroundEffect::Acrylic,
+            window_opacity: 0.44,
             font_size: 17.0,
             line_height: 1.74,
             performance_mode: true,
@@ -209,11 +264,35 @@ mod tests {
         let loaded = load(&path).expect("settings should load");
 
         assert!(matches!(loaded.theme, ThemePreference::Light));
+        assert!(matches!(
+            loaded.background_effect,
+            BackgroundEffect::Acrylic
+        ));
+        assert_eq!(loaded.window_opacity, 0.44);
         assert_eq!(loaded.font_size, 17.0);
         assert_eq!(loaded.line_height, 1.74);
         assert!(loaded.performance_mode);
         assert_eq!(loaded.clangd_path, r"C:\Program Files\LLVM\bin\clangd.exe");
+        assert_eq!(
+            loaded.keybindings.get("stress").map(String::as_str),
+            Some("F7")
+        );
 
         fs::remove_file(path).expect("temporary settings file should be removable");
+    }
+
+    #[test]
+    fn transparent_appearance_values_remain_available() {
+        let settings = AppSettings {
+            window_opacity: 0.0,
+            sidebar_opacity: 0.0,
+            editor_opacity: 0.0,
+            ..AppSettings::default()
+        }
+        .sanitize();
+
+        assert_eq!(settings.window_opacity, 0.0);
+        assert_eq!(settings.sidebar_opacity, 0.0);
+        assert_eq!(settings.editor_opacity, 0.0);
     }
 }

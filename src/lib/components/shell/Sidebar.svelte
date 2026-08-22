@@ -9,6 +9,7 @@
   import type { ActivityId, ShellStore } from "../../stores/shell.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
+  import type { UxStore } from "../../stores/ux.svelte";
   import ExplorerPanel from "../explorer/ExplorerPanel.svelte";
   import TestcasePanel from "../testcases/TestcasePanel.svelte";
   import SettingsPanel from "../settings/SettingsPanel.svelte";
@@ -26,6 +27,7 @@
     generator: GeneratorStore;
     archiveStore: ArchiveStore;
     debug: DebugStore;
+    ux: UxStore;
   }
 
   const titles: Record<ActivityId, string> = {
@@ -38,7 +40,7 @@
     settings: "设置",
   };
 
-  let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug, ux }: Props = $props();
   let stopResize = () => {};
   onDestroy(() => stopResize());
 
@@ -59,12 +61,18 @@
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }
+
+  function resizeWithKeyboard(event: KeyboardEvent): void {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    shell.setSidebarWidth(shell.sidebarWidth + (event.key === "ArrowRight" ? 12 : -12));
+  }
 </script>
 
 <aside class="sidebar" style:width={`${shell.sidebarWidth}px`} aria-label={titles[shell.activeActivity]}>
   <header class="sidebar-header">
     <span>{titles[shell.activeActivity]}</span>
-    <button aria-label="隐藏侧栏" title="隐藏侧栏 · Ctrl+B" onclick={() => shell.toggleSidebar()}>
+    <button aria-label="隐藏侧栏" title={`隐藏侧栏 · ${settings.value.keybindings.toggleSidebar}`} onclick={() => shell.toggleSidebar()}>
       <Icon name="close" size={14} />
     </button>
   </header>
@@ -77,9 +85,9 @@
     {#if shell.activeActivity === "settings"}
       <SettingsPanel {settings} />
     {:else if shell.activeActivity === "explorer"}
-      <ExplorerPanel {fileWorkspace} {templateStore} {archiveStore} editor={workspace} />
+      <ExplorerPanel {fileWorkspace} {templateStore} {archiveStore} editor={workspace} {ux} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "testcases"}
-      <TestcasePanel {workspace} {execution} {generator} />
+      <TestcasePanel {workspace} {execution} {generator} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "search"}
       <div class="search-box"><Icon name="search" size={15} /><input aria-label="搜索" placeholder="搜索工作区" /></div>
       <div class="empty-state"><p>搜索工作区文件</p><span>请先打开一个文件夹。</span></div>
@@ -95,5 +103,18 @@
       </div>
     {/if}
   </div>
-  <div class="sidebar-resize-handle" role="separator" aria-orientation="vertical" onpointerdown={beginResize}></div>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="sidebar-resize-handle"
+    role="separator"
+    aria-label="调整侧栏宽度"
+    aria-orientation="vertical"
+    aria-valuemin="210"
+    aria-valuemax="380"
+    aria-valuenow={shell.sidebarWidth}
+    tabindex="0"
+    onpointerdown={beginResize}
+    onkeydown={resizeWithKeyboard}
+  ></div>
 </aside>

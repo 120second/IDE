@@ -3,15 +3,17 @@
   import type { ShellStore } from "../../stores/shell.svelte";
   import type { LspStore } from "../../stores/lsp.svelte";
   import Icon from "./Icon.svelte";
+  import type { KeybindingMap } from "../../keybindings";
 
   interface Props {
     shell: ShellStore;
     workspace: EditorWorkspace;
     backendState: "checking" | "ready" | "error";
     lsp: LspStore;
+    keybindings: KeybindingMap;
   }
 
-  let { shell, workspace, backendState, lsp }: Props = $props();
+  let { shell, workspace, backendState, lsp, keybindings }: Props = $props();
 
   const lspLabel = () => {
     if (lsp.state === "ready") return lsp.serverVersion ? `clangd ${lsp.serverVersion}` : "clangd 就绪";
@@ -24,7 +26,7 @@
 
 <footer class="status-bar">
   <div class="status-left">
-    <button class="status-item" title="切换侧栏 · Ctrl+B" onclick={() => shell.toggleSidebar()}>
+    <button class="status-item" title={`切换侧栏 · ${keybindings.toggleSidebar}`} onclick={() => shell.toggleSidebar()}>
       <Icon name="panel" size={13} />
       <span>LightCP</span>
     </button>

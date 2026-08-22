@@ -1,197 +1,190 @@
-# LightCP
+<div align="center">
+  <img src="assets/lightcp-icon.svg" width="88" alt="LightCP logo" />
+  <h1>LightCP</h1>
+  <p>面向算法竞赛的 Windows 轻量级 C++ IDE</p>
+  <p>
+    <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-0078D4?logo=windows" />
+    <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri" />
+    <img alt="Svelte 5" src="https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white" />
+    <img alt="Rust" src="https://img.shields.io/badge/backend-Rust-000000?logo=rust" />
+  </p>
+</div>
 
-LightCP 是一个 Windows 优先的轻量算法竞赛 IDE。本仓库目前完成 **Batch 10：clangd**，包含 Tauri 2、Svelte 5、TypeScript、Vite、Rust、SQLite migration、CodeMirror 6、统一错误类型、日志和设置持久化。
+LightCP 把竞赛中常用的编辑、编译运行、样例管理、代码模板、调试、数据生成和对拍流程集中在一个桌面应用中。界面由 Svelte 5 和 CodeMirror 6 构建，系统能力由 Tauri 2、Rust 与 SQLite 提供。
 
-已实现 IDE Shell、多 Tab 编辑器、真实工作区、文件管理、原生 watcher、完整模板中心、Compiler、Runner、固定样例、代码归档、确定性随机数据生成器、GDB/MI 图形化调试器、后台并发压力测试，以及基于 clangd 的 C++ 诊断、补全与代码导航。
+> 项目仍在持续开发，目前优先支持 Windows 10/11 和 C++ 工作流。
+
+## 功能概览
+
+| 模块 | 主要能力 |
+| --- | --- |
+| 编辑器 | 多标签、会话恢复、括号/引号自动闭合、搜索、代码折叠、断点行号、超大文件降级 |
+| clangd | C++ 诊断、补全、悬停信息、签名帮助、跳转定义和查找引用 |
+| 模板中心 | 代码片段与文件模板、嵌套分类、拖放整理、收藏、搜索、版本历史、恢复与删除历史版本 |
+| 模板补全 | 在编辑器中按名称、触发词或别名查找模板；模板候选优先显示在 clangd 候选上方 |
+| 工作区 | 最近目录恢复、懒加载文件树、新建/重命名/删除、文件与目录拖放移动、原生文件监听 |
+| 编译运行 | 可配置 g++、C++17/20/23、Release/Debug 参数、stdin、超时和输出容量 |
+| 测试点 | Sample、Custom、Hack 测试点，支持复制、排序、启停、单项运行和批量运行 |
+| 调试器 | 基于 GDB/MI 的断点、条件断点、调用栈、局部变量、监视表达式和单步调试 |
+| 随机数据 | 可视化规则树、确定性种子、数组/排列/矩阵/树/图/DAG 等生成器 |
+| 压力测试 | 待测程序与暴力程序并发运行，保存首个反例，并可直接转为 Hack 或进入调试 |
+| 代码归档 | 平台、题号、难度、标签、状态、收藏、智能集合和批量整理 |
+| 外观 | 深浅主题、背景图片、透明度、窗口底色、侧栏/编辑区透明度及毛玻璃模糊 |
+
+## 技术栈
+
+- Tauri 2 + Rust：桌面窗口、文件系统、进程、SQLite、调试器与后台任务
+- Svelte 5 + TypeScript + Vite：界面与状态管理
+- CodeMirror 6：代码编辑器、片段占位符与补全界面
+- clangd：C++ Language Server Protocol 服务
+- SQLite：模板、测试点、归档、生成规则和最近工作区等持久化数据
 
 ## 环境要求
 
 - Windows 10/11
-- Node.js 20.19+（推荐当前 LTS）
-- Rust stable MSVC 1.77.2+
+- Node.js 20.19 或更高版本
+- Rust stable（MSVC toolchain）
 - Microsoft Visual Studio C++ Build Tools
-- Microsoft Edge WebView2
-- g++（默认从 `PATH` 查找，也可在 Settings 中指定完整路径）
-- GDB（默认从 `PATH` 查找，也可在 Settings 中指定 `gdb.exe` 完整路径）
-- clangd（可选；默认自动查找 `PATH`、LLVM 和 Visual Studio 2022 LLVM 目录，也可在 Settings 中指定完整路径）
+- Microsoft Edge WebView2 Runtime
+- g++：编译和运行 C++ 程序
+- GDB：使用图形化调试功能时需要
+- clangd：使用诊断、补全和代码导航时需要
 
-Tauri 的 Windows 前置环境参考：[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
+g++、GDB 和 clangd 默认从 `PATH` 及常见安装目录查找，也可以在 LightCP 设置中填写完整路径。Tauri 的 Windows 环境配置可参考 [官方 prerequisites](https://v2.tauri.app/start/prerequisites/)。
 
-## 安装
-
-```powershell
-npm install
-```
-
-如果尚未安装 Rust：
+## 快速开始
 
 ```powershell
-winget install --id Rustlang.Rustup -e
-```
-
-安装后重新打开终端，确认 `cargo --version` 可用。
-
-## 开发运行
-
-启动完整桌面应用：
-
-```powershell
+git clone https://github.com/120second/IDE.git
+cd IDE
+npm ci
 npm run tauri dev
 ```
 
-应用启动后应显示：
+只运行 `npm run dev` 会启动 Vite 网页服务，但浏览器环境不能使用 Tauri 的 Rust 后端能力；日常开发应使用 `npm run tauri dev`。
+
+## 构建 Windows Release
+
+```powershell
+npm run tauri build
+```
+
+构建完成后，可执行文件位于：
 
 ```text
-Rust backend ready
+src-tauri\target\release\lightcp.exe
 ```
 
-常用快捷键：
+必须通过 Tauri CLI 构建可分发版本。不要直接使用 `cargo build --release` 作为桌面发行构建，否则应用可能仍尝试连接开发地址 `localhost:1420`。
 
-- `Ctrl+B`：显示/隐藏 Sidebar
-- `Ctrl+J`：显示/隐藏 Bottom Panel
-- `Ctrl+K` 后按 `Z`：进入/退出 Zen Mode
-- `Escape`：退出 Zen Mode
-- `Ctrl+F`：编辑器搜索
-- `Ctrl+S`：保存当前真实文件
-- `Ctrl+Alt+T`：打开 Snippet Quick Search，按 Enter 插入当前编辑器
-- `Ctrl+Shift+A`：快速归档当前工作区 C++ 文件
-- `F5`：编译并运行当前 C++ 文件
-- `F6`：编译并运行当前文件的所有已启用固定样例
-- `F12`：跳转到定义
-- `Shift+F12`：查找引用并显示在“问题”面板
-- `Ctrl+Shift+Space`：显示函数签名帮助
-- `Ctrl+Z` / `Ctrl+Y`：Undo / Redo
+当前 `tauri.conf.json` 关闭了安装包打包，因此命令只生成独立 EXE；如需 MSI/NSIS，可在发布流程中启用 Tauri bundle。
 
-只启动 Vite 浏览器预览时无法连接 Rust backend，这是预期行为：
+## 检查与测试
 
 ```powershell
-npm run dev
-```
-
-## 检查与构建
-
-```powershell
+# Svelte 与 TypeScript 静态检查
 npm run check
+
+# 前端单元测试
 npm test
+
+# 前端生产构建
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-npx tauri build --no-bundle
+
+# Rust 测试
+cargo test --manifest-path src-tauri/Cargo.toml -j 1
+
+# Rust 格式检查
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+# 完整桌面 Release
+npm run tauri build
 ```
 
-最后一条生成 Windows 可执行文件但不创建安装包。安装包配置留到发布批次。
+## 常用快捷键
 
-## 数据与日志
+| 快捷键 | 功能 |
+| --- | --- |
+| `Ctrl+S` | 保存当前文件 |
+| `Ctrl+B` | 显示或隐藏侧栏 |
+| `Ctrl+J` | 显示或隐藏底部面板 |
+| `Ctrl+K`，然后 `Z` | 进入或退出 Zen Mode |
+| `Escape` | 退出 Zen Mode |
+| `Ctrl+F` | 在编辑器中搜索 |
+| `Ctrl+Alt+T` | 打开代码片段快速搜索 |
+| `Ctrl+Shift+A` | 归档当前 C++ 文件 |
+| `F5` | 编译并运行当前文件 |
+| `F6` | 运行当前文件的全部已启用测试点 |
+| `F12` | 跳转到定义 |
+| `Shift+F12` | 查找引用 |
+| `Ctrl+Shift+Space` | 显示函数签名帮助 |
+| `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做 |
 
-运行时数据库与设置位于 Tauri 为 `com.lightcp.ide` 解析的本机应用数据目录：
+## 模板与编辑器补全
+
+代码片段支持 `${1:name}`、`${2:value}` 和 `$0` 等占位符。插入后使用 `Tab` / `Shift+Tab` 在占位符之间移动。
+
+保存模板后，可以直接在 C++ 编辑器中输入模板名称、触发词或别名：
+
+1. LightCP 查询代码片段模板，不加载文件模板。
+2. 精确触发词、精确名称和前缀匹配优先。
+3. 模板结果固定显示在 clangd 候选之前。
+4. 选中候选后插入完整片段并进入占位符编辑。
+
+模板分类支持多层嵌套。分类和模板都可通过拖放调整位置或移动到其他分类；模板每次保存都会产生历史版本，默认最多保留最近 20 个版本。
+
+## 工作区与文件安全
+
+- 应用首次打开时不自动创建示例文件；用户选择工作区后会在下次启动时恢复该目录。
+- 文件树仅先读取根目录一层，展开子目录时再按需加载。
+- 文件和文件夹可以在资源管理器中拖放移动，Rust 后端会校验目标仍位于当前工作区。
+- 外部修改会通过 Windows 原生 `ReadDirectoryChangesW` watcher 同步到编辑器。
+- 存在未保存编辑时，外部变化会标记冲突，不会静默覆盖编辑内容。
+
+## 本地数据
+
+LightCP 的数据库与设置保存在 Tauri 为 `com.lightcp.ide` 解析的应用数据目录中，主要文件包括：
 
 ```text
 lightcp.db
 settings.json
 ```
 
-设置在 UI 中实时预览，并在最后一次变化 400ms 后写盘。Rust 日志默认写入终端和 Tauri 应用日志目录。
+工作区源文件仍保存在用户选择的目录中。数据库采用只追加 migration；模板、测试点、归档 metadata、随机生成规则等数据不会提交到本仓库。
 
-SQLite migration 为只追加机制；详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。本批性能审计与实测结果见 [docs/PERFORMANCE_REPORT_BATCH9.md](docs/PERFORMANCE_REPORT_BATCH9.md)。
-
-最近打开的工作区保存在 `recent_workspaces`。模板数据保存在 schema v3 的模板表中，固定样例保存在 schema v4 的 `testcases` 表中，归档 metadata、标签和智能集合保存在 schema v5，版本化随机生成规则保存在 schema v6 的 `generator_profiles`，schema v7 补充 Template 与 Archive 热查询索引。所有 Workspace 文件操作均通过 Rust command 执行并校验当前根目录边界；Windows watcher 使用原生 `ReadDirectoryChangesW`，不轮询磁盘。
-
-## 当前目录
-
-- `src/`：Svelte/TypeScript 前端
-- `src-tauri/`：Rust Core 与 Tauri 配置
-- `docs/`：架构文档
-
-## 编辑器状态模型
-
-应用始终只维护一个可见的 CodeMirror `EditorView`。每个 Tab 保存独立的 `EditorState` 和 scroll offset，因此 cursor、selection、undo history 与滚动位置可以在切换时恢复。
-
-CodeMirror/C++ 解析器独立为异步 chunk，避免把完整编辑器核心塞入启动主包。
-
-## Workspace 行为
-
-- “Open Folder” 使用系统目录选择器，支持中文和空格路径。
-- 初次只读取根目录一层，展开子目录时才读取该层。
-- 文件树只渲染可视行，可承载单层 1000+ 节点。
-- 双击文件在现有单个 `EditorView` 中打开；同一路径不会重复开 Tab。
-- 外部修改在无本地编辑时自动重载；存在未保存编辑时显示冲突标记。
-- 外部删除和重命名会更新已打开 Tab 的状态和路径。
-
-## Template Center 行为
-
-- Templates Activity 提供 Snippets 与 File Templates 两类独立视图，以及 Search、Favorites、Recent 和六种排序。
-- 分类支持多层嵌套、增删改、拖放移动和手动排序；模板支持分类移动、收藏与拖放排序。
-- 启动和列表查询只读取 metadata；代码正文仅在打开、插入或创建文件时按需读取。
-- Snippet 支持 `${1:name}`、`${2:value}`、`$0`，插入后用 `Tab` / `Shift+Tab` 在占位符之间移动。
-- 编辑器选区右键可执行 “Save as Snippet”；每次保存会生成快照并保留最近 20 个版本。
-- 新建文件可选择 Empty C++、Contest C++ 或 Multi Test C++，内容通过 Rust 文件命令写入。
-
-## Compiler、Runner 与固定样例
-
-- Settings 可设置 compiler path、C++17/20/23、Release 参数、Debug 参数、运行超时和最大输出容量。
-- Build 会先保存当前文件，再由 Rust 直接启动 g++；结果包含 stdout、stderr、exit code 和耗时，可执行文件写入应用数据目录的 `build/`。
-- Runner 在后台线程执行，支持 stdin、stdout、stderr、exit code、超时和 Stop。输出在 Rust 侧每约 24ms 合并后发送，且前后端均有容量上限。
-- Testcases Activity 按当前 C++ 文件管理 Sample、Custom、Hack，支持新增、编辑、启用、复制、删除、拖动排序、Run One 和 Run All。
-- 比较器仅忽略行末空格与最终多余换行，不忽略内部空格差异。
-- Output 使用单一原生只读文本控件并按 32ms 合并更新，避免大量 stdout 创建成千上万个 DOM 节点。
-
-## 竞赛代码归档
-
-- Explorer 提供“文件 / 代码归档”双视图；虚拟分类全部由 SQLite 查询，不复制或移动代码文件。
-- Explorer 已发现、新建或打开的 `.cpp` 文件会登记到 Inbox；不会递归扫描 Workspace，也不会读取文件正文来建立索引。
-- `Ctrl+Shift+A` 可填写平台、题号、标题、难度、标签、状态、笔记和收藏；历史标签提供自动完成。
-- 内置收藏、最近编辑、已完成、待复习、平台、难度和算法标签分类；同一个文件可以同时出现在多个虚拟分类中。
-- 归档结果支持多选，并可批量添加标签、修改平台、难度与状态。
-- 智能集合支持平台、难度范围、状态和一组 OR 算法标签，并保存为 Workspace 专属查询。
-- LightCP 内部及外部发生文件重命名、移动或删除时，原生 watcher 会同步 metadata 路径或可用状态。
-
-## 随机数据生成器
-
-- Testcases Activity 的“随机生成”页以 Line、Field、Repeat、Tree、Graph 和 Matrix 组成结构化规则树；同一行可以包含多个整数，数组默认独占一行。
-- 范围和长度使用结构化的常量/变量/变量偏移表达式。下拉框只列出当前位置可见的整数；删除被引用变量后，依赖规则立即标红并禁止生成。
-- 相同 Rule Tree、种子和设置产生完全相同的数据；种子使用十进制字符串跨 IPC 传递，避免 JavaScript 大整数精度损失。
-- 支持整数、数组、二进制/小写字符串、排列、矩阵、嵌套重复块、树、带权树、简单无向图、连通无向图和 DAG。
-- 生成结果可以复制、直接编译运行当前 C++ 文件，或保存为普通固定测试点；不依赖 AI、网络或额外的 `generator.cpp`。
-- 规则树、全局策略、默认树形和种子会按当前 C++ 文件自动保存。内置 n、n+数组、n m、边表、查询、多测、树、带权树、图、排列和字符串模板。
-
-界面可搭建的典型输入结构：
+## 项目结构
 
 ```text
-第 1 行  [n: 1~100] [q: 1~100]
-第 2 行  [a: 长度 n，元素 1~1000]
-重复 q 次
-  第 1 行  [l: 1~n] [r: l~n]
+LightCP/
+├─ src/                 # Svelte / TypeScript 前端
+├─ src-tauri/           # Rust Core、Tauri commands 与配置
+├─ docs/                # 架构及性能审计文档
+├─ assets/              # 项目资源
+├─ package.json
+└─ README.md
 ```
 
-原有 DSL parser 仍保留在 Rust Core，用于兼容和未来的高级导入/导出，但默认界面和结构化生成路径不再拼接或解析 DSL 字符串。
+进一步阅读：
 
-## GDB 图形化调试
+- [架构说明](docs/ARCHITECTURE.md)
+- [Batch 9 性能审计](docs/PERFORMANCE_REPORT_BATCH9.md)
 
-- 调试控制通道使用 `--interpreter=mi2`，所有状态、调用栈、变量和断点均来自结构化 GDB/MI record；普通 GDB 控制台文本只显示，不参与解析。
-- Debug Current File 和 Debug Testcase 都复用 Debug 编译配置（默认 `-g -O0`）；调试测试点会自动把对应输入连接到程序 stdin。
-- 点击编辑器行号左侧可添加或删除断点；调试侧栏可启停断点并填写条件，例如 `i == 514`。
-- 程序停止后一次刷新调用栈、当前 frame 的局部变量和全部 Watch；Running 状态不执行表达式求值。
-- 数组和复合对象按需展开，每页最多 100 项，不会自动读取大型数组的全部元素。
-- Stop、Restart 和窗口退出都会结束 GDB 及被调试程序，并清理测试点临时输入文件。
+## 设计要点
 
-## 压力测试
+- 编辑器始终只维护一个可见 `EditorView`，每个标签保存独立 `EditorState` 和滚动位置。
+- 大文件会关闭自动补全、Hover 和高成本语法装饰，但保留基础编辑及文档同步。
+- 后台进程输出在 Rust 和前端两侧均设置容量上限，避免大输出无限占用内存。
+- clangd、GDB、Runner 和压力测试均由 Rust 统一管理生命周期，窗口退出时回收子进程。
+- 模板列表通常只读取 metadata；编辑、插入或补全时再读取必要的代码正文。
 
-- “压力测试”工作区直接复用当前文件的可视化随机规则，以当前编辑器文件作为待测程序，并选择另一份工作区 C++ 文件作为暴力程序。
-- 两份程序只编译一次；每轮获得同一份 stdin，并通过两套复用的 Runner 在后台并发执行。输出沿用固定测试点比较器的规则。
-- 支持有限迭代和无限模式、uint64 确定性种子、单程序超时、实时总数/通过/失败/耗时/速度统计，以及随时停止。
-- 第一组输出不一致、RE、TLE 或超量输出会立即结束本轮，并保留 seed、输入、双端 stdout、stderr、退出码和执行时间。
-- 失败用例可保存为固定 Hack 测试点、复制输入、继续使用下一 seed 对拍，或直接复用 Debug Testcase 流程启动 GDB 调试。
-- Stop 使用共享取消信号终止当前待测程序和暴力程序；界面日志只保留最近 500 条，不会随无限压力测试持续增长。
+## 参与开发
 
-## clangd 语言服务
+提交改动前请至少运行：
 
-- clangd 由 Rust `ClangdManager` 集中启动、初始化、停止和回收；切换 Workspace 会先结束旧会话，再按新根目录重新初始化。
-- 打开文件时发送一次完整文本，后续编辑只发送 LSP range 增量；连续编辑在约 32ms 内合并为一次 IPC，并保证同一文档通知顺序。
-- Diagnostics 同步为 CodeMirror 波浪线、行标记和中文“问题”列表；点击列表项可定位到对应文件和位置。
-- 补全支持文档变更取消和新请求淘汰旧请求；Hover、定义、签名帮助和引用都会丢弃已经过期的结果。
-- 状态栏显示 clangd 状态。未安装、路径错误或进程崩溃时会给出明确说明并允许点击重连；clangd 不可用不会影响编辑、编译、运行、测试、调试等功能。
-- 为避免 5~10 MiB 源文件触发高成本交互，超大文件保留增量文档同步与诊断，但关闭自动补全、Hover、语法树和装饰性编辑扩展。
+```powershell
+npm run check
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml -j 1
+```
 
-## 下一批
-
-Batch 10 已完成；下一批为 Batch 11：最终体验优化。
+如果改动会影响桌面启动或前端资源加载，还应执行一次 `npm run tauri build` 并启动生成的 EXE 验证。

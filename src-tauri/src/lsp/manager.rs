@@ -52,6 +52,9 @@ impl ClangdManager {
         &self,
         workspace_root: PathBuf,
         configured_path: String,
+        compiler_path: String,
+        compiler_standard: String,
+        compiler_args: Vec<String>,
         emit: F,
     ) -> AppResult<LspStartResult>
     where
@@ -62,7 +65,14 @@ impl ClangdManager {
             .lock()
             .map_err(|_| lsp_error("clangd lifecycle lock was poisoned"))?;
         self.stop_unlocked()?;
-        let session = ClangdSession::spawn(workspace_root, &configured_path, Arc::new(emit))?;
+        let session = ClangdSession::spawn(
+            workspace_root,
+            &configured_path,
+            &compiler_path,
+            &compiler_standard,
+            compiler_args,
+            Arc::new(emit),
+        )?;
         let result = match session.initialize() {
             Ok(result) => result,
             Err(error) => {
@@ -104,6 +114,7 @@ impl ClangdManager {
     pub fn did_open(&self, path: &str, text: String, version: i64) -> AppResult<()> {
         let session = self.session()?;
         session.validate_document_path(path)?;
+        session.configure_document(path)?;
         session.notify(
             "textDocument/didOpen",
             did_open_params(path, text, version)?,
@@ -255,6 +266,9 @@ impl Drop for ClangdManager {
 struct ClangdSession {
     executable: String,
     workspace_root: PathBuf,
+    compiler_executable: String,
+    compiler_standard: String,
+    compiler_args: Vec<String>,
     emit: EventSink,
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
@@ -270,6 +284,9 @@ impl ClangdSession {
     fn spawn(
         workspace_root: PathBuf,
         configured_path: &str,
+        compiler_path: &str,
+        compiler_standard: &str,
+        compiler_args: Vec<String>,
         emit: EventSink,
     ) -> AppResult<Arc<Self>> {
         if !workspace_root.is_dir() {
@@ -279,12 +296,21 @@ impl ClangdSession {
             )));
         }
 
+        let compiler_executable = resolve_compiler_executable(compiler_path)?;
+        let compiler_standard = normalize_compiler_standard(compiler_standard);
+        let compiler_args = compiler_args
+            .into_iter()
+            .map(|argument| argument.trim().chars().take(4096).collect::<String>())
+            .filter(|argument| !argument.is_empty())
+            .take(128)
+            .collect::<Vec<_>>();
         let candidates = clangd_candidates(configured_path);
         let mut errors = Vec::new();
         for executable in candidates {
             let mut command = Command::new(&executable);
             command
                 .arg("--background-index")
+                .arg(format!("--query-driver={compiler_executable}"))
                 .current_dir(&workspace_root)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -302,6 +328,9 @@ impl ClangdSession {
                     let session = Arc::new(Self {
                         executable: executable.clone(),
                         workspace_root,
+                        compiler_executable,
+                        compiler_standard,
+                        compiler_args,
                         emit,
                         child: Mutex::new(child),
                         stdin: Mutex::new(stdin),
@@ -421,6 +450,39 @@ impl ClangdSession {
             )));
         }
         Ok(())
+    }
+
+    fn configure_document(&self, path: &str) -> AppResult<()> {
+        if has_compilation_database(Path::new(path)) {
+            return Ok(());
+        }
+        let working_directory = Path::new(path)
+            .parent()
+            .unwrap_or(&self.workspace_root)
+            .to_string_lossy()
+            .into_owned();
+        let mut compilation_command = Vec::with_capacity(self.compiler_args.len() + 3);
+        compilation_command.push(self.compiler_executable.clone());
+        compilation_command.push(format!("-std={}", self.compiler_standard));
+        compilation_command.extend(self.compiler_args.iter().cloned());
+        compilation_command.push(path.to_owned());
+
+        let mut changes = serde_json::Map::new();
+        changes.insert(
+            path.to_owned(),
+            json!({
+                "workingDirectory": working_directory,
+                "compilationCommand": compilation_command,
+            }),
+        );
+        self.notify(
+            "workspace/didChangeConfiguration",
+            json!({
+                "settings": {
+                    "compilationDatabaseChanges": Value::Object(changes),
+                }
+            }),
+        )
     }
 
     fn request(
@@ -713,6 +775,79 @@ impl ClangdSession {
     }
 }
 
+fn resolve_compiler_executable(configured_path: &str) -> AppResult<String> {
+    let configured = configured_path.trim();
+    let configured = if configured.is_empty() {
+        "g++"
+    } else {
+        configured
+    };
+    let direct = PathBuf::from(configured);
+    if direct.is_file() {
+        return Ok(dunce::canonicalize(&direct)
+            .unwrap_or(direct)
+            .to_string_lossy()
+            .into_owned());
+    }
+    if direct.is_absolute() || configured.contains('/') || configured.contains('\\') {
+        return Err(AppError::CompilerNotFound(configured.to_owned()));
+    }
+
+    let mut names = vec![configured.to_owned()];
+    #[cfg(windows)]
+    if direct.extension().is_none() {
+        let extensions =
+            std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+        names.extend(
+            extensions
+                .split(';')
+                .filter(|extension| !extension.is_empty())
+                .map(|extension| format!("{configured}{extension}")),
+        );
+    }
+
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for name in &names {
+                let candidate = directory.join(name);
+                if !candidate.is_file() {
+                    continue;
+                }
+                return Ok(dunce::canonicalize(&candidate)
+                    .unwrap_or(candidate)
+                    .to_string_lossy()
+                    .into_owned());
+            }
+        }
+    }
+    Err(AppError::CompilerNotFound(configured.to_owned()))
+}
+
+fn normalize_compiler_standard(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        "c++20".to_owned()
+    } else {
+        value.chars().take(32).collect()
+    }
+}
+
+fn has_compilation_database(source: &Path) -> bool {
+    let mut directory = source.parent();
+    while let Some(candidate) = directory {
+        if candidate.join("compile_commands.json").is_file()
+            || candidate
+                .join("build")
+                .join("compile_commands.json")
+                .is_file()
+        {
+            return true;
+        }
+        directory = candidate.parent();
+    }
+    false
+}
+
 fn clangd_candidates(configured_path: &str) -> Vec<String> {
     let configured_path = configured_path.trim();
     if !configured_path.is_empty() {
@@ -970,15 +1105,22 @@ mod tests {
         ));
         fs::create_dir_all(&root).expect("temporary workspace should be created");
         let source = root.join("main.cpp");
-        let text = "int helper(int value) { return value; }\nint main() { return helper(missing_name); }\n";
+        let text = "#include <bits/stdc++.h>\nint helper(int value) { return value; }\nint main() { std::vector<int> values; return helper(missing_name); }\n";
         fs::write(&source, text).expect("source should be written");
 
         let manager = ClangdManager::default();
         let (event_sender, event_receiver) = std::sync::mpsc::channel();
         let result = manager
-            .start(root.clone(), String::new(), move |event| {
-                let _ = event_sender.send(event);
-            })
+            .start(
+                root.clone(),
+                String::new(),
+                "g++".to_owned(),
+                "c++20".to_owned(),
+                Vec::new(),
+                move |event| {
+                    let _ = event_sender.send(event);
+                },
+            )
             .expect("clangd should initialize");
         assert!(!result.executable.is_empty());
         manager
@@ -989,7 +1131,7 @@ mod tests {
                 "textDocument/hover",
                 &source.to_string_lossy(),
                 LspPosition {
-                    line: 1,
+                    line: 2,
                     character: 22,
                 },
                 99,
@@ -1001,7 +1143,7 @@ mod tests {
                 "textDocument/definition",
                 &source.to_string_lossy(),
                 LspPosition {
-                    line: 1,
+                    line: 2,
                     character: 22,
                 },
                 100,
@@ -1012,7 +1154,7 @@ mod tests {
             .references(
                 &source.to_string_lossy(),
                 LspPosition {
-                    line: 0,
+                    line: 1,
                     character: 5,
                 },
                 101,
@@ -1022,9 +1164,14 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut received_diagnostic = false;
+        let mut missing_system_header = false;
         while Instant::now() < deadline {
             match event_receiver.recv_timeout(Duration::from_millis(200)) {
                 Ok(LspEvent::Diagnostics { diagnostics, .. }) if !diagnostics.is_empty() => {
+                    missing_system_header = diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code == "pp_file_not_found"
+                            || diagnostic.message.contains("file not found")
+                    });
                     received_diagnostic = true;
                     break;
                 }
@@ -1034,6 +1181,10 @@ mod tests {
             }
         }
         assert!(received_diagnostic, "clangd should publish diagnostics");
+        assert!(
+            !missing_system_header,
+            "clangd should load MinGW system headers through the configured compiler"
+        );
         manager.stop().expect("clangd should stop");
         assert!(!manager.is_active());
 

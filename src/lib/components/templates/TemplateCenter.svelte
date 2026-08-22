@@ -15,6 +15,10 @@
   let listViewport: HTMLDivElement;
   let listScrollTop = $state(0);
   let listViewportHeight = $state(400);
+  let draggedTemplateId = $state<number>();
+  let dropTemplateId = $state<number>();
+  let dropAfter = $state(false);
+  let detailOpen = $derived(templateStore.detailLoading || templateStore.mode !== "empty");
   let templateStart = $derived(
     Math.max(0, Math.floor(listScrollTop / TEMPLATE_ROW_HEIGHT) - TEMPLATE_OVERSCAN),
   );
@@ -35,26 +39,58 @@
   });
 
   function beginTemplateDrag(event: DragEvent, template: TemplateMetadata): void {
+    draggedTemplateId = template.id;
     event.dataTransfer?.setData("application/x-lightcp-template", String(template.id));
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-  }
-
-  function allowTemplateDrop(event: DragEvent): void {
-    if (event.dataTransfer?.types.includes("application/x-lightcp-template")) {
-      event.preventDefault();
+    event.dataTransfer?.setData("text/plain", String(template.id));
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.dropEffect = "move";
     }
   }
 
-  function dropBefore(event: DragEvent, target: TemplateMetadata): void {
+  function allowTemplateDrop(event: DragEvent, target: TemplateMetadata): void {
+    if (
+      templateStore.sort === "manual"
+      && !templateStore.search
+      && (draggedTemplateId || event.dataTransfer?.types.includes("application/x-lightcp-template"))
+    ) {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      dropTemplateId = target.id;
+      dropAfter = event.clientY >= bounds.top + bounds.height / 2;
+    }
+  }
+
+  function dropTemplate(event: DragEvent, target: TemplateMetadata): void {
+    if (templateStore.sort !== "manual" || templateStore.search) return;
     event.preventDefault();
-    const source = Number(event.dataTransfer?.getData("application/x-lightcp-template"));
-    if (!source || source === target.id) return;
+    event.stopPropagation();
+    const source = Number(
+      event.dataTransfer?.getData("application/x-lightcp-template") || draggedTemplateId,
+    );
+    if (!source || source === target.id) {
+      clearTemplateDrag();
+      return;
+    }
     const siblings = templateStore.templates.filter(
-      (template) => template.categoryId === target.categoryId,
+      (template) => template.categoryId === target.categoryId && template.id !== source,
     );
     const index = siblings.findIndex((template) => template.id === target.id);
-    void templateStore.moveTemplate(source, target.categoryId, Math.max(0, index));
+    void templateStore.moveTemplate(source, target.categoryId, Math.max(0, index + Number(dropAfter)));
+    clearTemplateDrag();
+  }
+
+  function leaveTemplateDrop(event: DragEvent, id: number): void {
+    const next = event.relatedTarget;
+    if (next instanceof Node && (event.currentTarget as HTMLElement).contains(next)) return;
+    if (dropTemplateId === id) dropTemplateId = undefined;
+  }
+
+  function clearTemplateDrag(): void {
+    draggedTemplateId = undefined;
+    dropTemplateId = undefined;
+    dropAfter = false;
   }
 
   function categoryName(categoryId?: number): string {
@@ -66,6 +102,13 @@
       .split(/[,，\n]/)
       .map((alias) => alias.trim())
       .filter(Boolean);
+  }
+
+  function collapseFromBlank(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    if (!target.closest(".template-list-pane")) return;
+    if (target.closest("button, input, select, .template-list-row")) return;
+    templateStore.collapseEditor();
   }
 
   async function showHistory(): Promise<void> {
@@ -80,6 +123,8 @@
   }
 </script>
 
+<svelte:window onclick={collapseFromBlank} />
+
 <section class="template-center" aria-label="模板中心">
   <header class="template-center-header">
     <div>
@@ -89,11 +134,11 @@
     <button class="primary-button" onclick={() => templateStore.beginCreate()}><Icon name="plus" size={13} /> 新建</button>
   </header>
 
-  <div class="template-center-body">
+  <div class="template-center-body" class:detail-open={detailOpen}>
     <aside class="template-list-pane" aria-label="模板列表">
       <div class="template-list-summary">
         <span>{templateStore.loading ? "正在加载…" : `${templateStore.templates.length} 个模板`}</span>
-        {#if templateStore.sort !== "manual"}<small>当前排序方式不支持拖动</small>{/if}
+        {#if templateStore.sort !== "manual"}<small>拖到分类可移动；列表排序需切换手动</small>{/if}
       </div>
       <div class="template-list" bind:this={listViewport} onscroll={(event) => (listScrollTop = event.currentTarget.scrollTop)}>
         <div class="template-list-spacer" style:height={`${templateStore.templates.length * TEMPLATE_ROW_HEIGHT}px`}>
@@ -101,17 +146,23 @@
           <div
             class="template-list-row"
             class:active={templateStore.selectedId === template.id}
+            class:dragging={draggedTemplateId === template.id}
+            class:drop-before={dropTemplateId === template.id && !dropAfter}
+            class:drop-after={dropTemplateId === template.id && dropAfter}
             role="button"
             tabindex="0"
-            draggable={templateStore.sort === "manual" && !templateStore.search}
+            draggable="true"
+            aria-grabbed={draggedTemplateId === template.id}
             style:top={`${(templateStart + index) * TEMPLATE_ROW_HEIGHT}px`}
             onclick={() => void templateStore.openTemplate(template.id)}
             onkeydown={(event) => {
               if (event.key === "Enter") void templateStore.openTemplate(template.id);
             }}
             ondragstart={(event) => beginTemplateDrag(event, template)}
-            ondragover={allowTemplateDrop}
-            ondrop={(event) => dropBefore(event, template)}
+            ondragover={(event) => allowTemplateDrop(event, template)}
+            ondragleave={(event) => leaveTemplateDrop(event, template.id)}
+            ondragend={clearTemplateDrag}
+            ondrop={(event) => dropTemplate(event, template)}
           >
             <span class="template-type-mark">{template.kind === "snippet" ? "{}" : "C++"}</span>
             <span class="template-list-copy">
@@ -142,16 +193,11 @@
       </div>
     </aside>
 
+    {#if detailOpen}
     <div class="template-detail-pane">
       {#if templateStore.detailLoading}
         <div class="template-detail-empty">正在加载模板内容…</div>
-      {:else if templateStore.mode === "empty"}
-        <div class="template-detail-empty">
-          <Icon name="templates" size={34} />
-          <strong>请选择模板</strong>
-          <span>列表仅加载概要信息，打开模板时才会读取代码内容。</span>
-        </div>
-      {:else}
+      {:else if templateStore.mode !== "empty"}
         <form class="template-editor-form" onsubmit={(event) => { event.preventDefault(); void templateStore.saveDraft(); }}>
           <header class="template-editor-toolbar">
             <div>
@@ -202,6 +248,7 @@
         </form>
       {/if}
     </div>
+    {/if}
   </div>
 </section>
 
@@ -227,7 +274,18 @@
           {#if templateStore.versionPreview}
             <header>
               <span>v{templateStore.versionPreview.versionNumber}</span>
-              <button class="primary-button" onclick={() => void templateStore.restoreVersion(templateStore.versionPreview!.id)}>恢复此版本</button>
+              <div class="history-preview-actions">
+                <button
+                  class="danger-button"
+                  onclick={() => {
+                    const version = templateStore.versions.find(
+                      (candidate) => candidate.id === templateStore.versionPreview?.id,
+                    );
+                    if (version) void templateStore.deleteVersion(version);
+                  }}
+                >删除此版本</button>
+                <button class="primary-button" onclick={() => void templateStore.restoreVersion(templateStore.versionPreview!.id)}>恢复此版本</button>
+              </div>
             </header>
             <pre>{templateStore.versionPreview.code}</pre>
           {:else}

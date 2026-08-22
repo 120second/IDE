@@ -17,6 +17,7 @@ import {
 import type { LspDiagnostic, LspPosition, LspTextChange } from "../types/lsp";
 
 interface LspExtensionCallbacks {
+  templateCompletion: (context: CompletionContext) => Promise<CompletionResult | null>;
   completion: (context: CompletionContext) => Promise<CompletionResult | null>;
   hover: (view: EditorView, position: number) => Promise<Tooltip | null>;
   definition: () => void;
@@ -57,7 +58,7 @@ export function createLspExtensions(
     ...(interactive
       ? [
           autocompletion({
-            override: [callbacks.completion],
+            override: [callbacks.templateCompletion, callbacks.completion],
             activateOnTypingDelay: 90,
             maxRenderedOptions: 100,
           }),

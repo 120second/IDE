@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { matchesShortcut } from "./keybindings";
+import {
+  DEFAULT_KEYBINDINGS,
+  matchesShortcut,
+  normalizeKeybindings,
+  shortcutConflicts,
+  shortcutFromEvent,
+} from "./keybindings";
 
 function keyEvent(key: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
   return {
@@ -27,5 +33,23 @@ describe("centralized keybindings", () => {
   it("maps the quick archive chord", () => {
     expect(matchesShortcut(keyEvent("A", { ctrlKey: true, shiftKey: true }), "quickArchive")).toBe(true);
     expect(matchesShortcut(keyEvent("A", { ctrlKey: true }), "quickArchive")).toBe(false);
+  });
+
+  it("maps the Batch 11 stress and debug shortcuts", () => {
+    expect(matchesShortcut(keyEvent("F7"), "stress")).toBe(true);
+    expect(matchesShortcut(keyEvent("F8"), "debug")).toBe(true);
+  });
+
+  it("uses a customized binding and reports conflicts", () => {
+    const bindings = { ...DEFAULT_KEYBINDINGS, runCurrent: "Ctrl+R", runAll: "Ctrl+R" };
+    expect(matchesShortcut(keyEvent("r", { ctrlKey: true }), "runCurrent", bindings)).toBe(true);
+    expect(shortcutConflicts(bindings).get("runCurrent")).toEqual(["runAll"]);
+  });
+
+  it("normalizes persisted and captured shortcuts", () => {
+    expect(normalizeKeybindings({ save: "control+shift+s" }).save).toBe("Ctrl+Shift+S");
+    expect(normalizeKeybindings({ save: "invalid" }).save).toBe("Ctrl+S");
+    expect(shortcutFromEvent(keyEvent("F8"))).toBe("F8");
+    expect(shortcutFromEvent(keyEvent("r", { ctrlKey: true, altKey: true }))).toBe("Ctrl+Alt+R");
   });
 });

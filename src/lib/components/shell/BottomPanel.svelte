@@ -7,6 +7,7 @@
   import type { HealthStatus } from "../../types/health";
   import type { LspStore } from "../../stores/lsp.svelte";
   import Icon from "./Icon.svelte";
+  import type { KeybindingMap } from "../../keybindings";
 
   interface Props {
     shell: ShellStore;
@@ -16,6 +17,7 @@
     execution: ExecutionStore;
     debug: DebugStore;
     lsp: LspStore;
+    keybindings: KeybindingMap;
   }
 
   const panels: { id: BottomPanelId; label: string }[] = [
@@ -26,7 +28,7 @@
     { id: "debugConsole", label: "调试控制台" },
   ];
 
-  let { shell, workspace, backendState, health, execution, debug, lsp }: Props = $props();
+  let { shell, workspace, backendState, health, execution, debug, lsp, keybindings }: Props = $props();
   const LSP_PAGE_SIZE = 150;
   let referencePage = $state(0);
   let diagnosticPage = $state(0);
@@ -68,6 +70,12 @@
     window.addEventListener("pointerup", onUp);
   }
 
+  function resizeWithKeyboard(event: KeyboardEvent): void {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    shell.setBottomPanelHeight(shell.bottomPanelHeight + (event.key === "ArrowUp" ? 12 : -12));
+  }
+
   function statusLabel(status: string): string {
     if (status === "Stopped") return "已停止";
     if (status === "Running") return "运行中";
@@ -76,7 +84,20 @@
 </script>
 
 <section class="bottom-panel" style:height={`${shell.bottomPanelHeight}px`} aria-label="底部面板">
-  <div class="panel-resize-handle" role="separator" aria-orientation="horizontal" onpointerdown={beginResize}></div>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <div
+    class="panel-resize-handle"
+    role="separator"
+    aria-label="调整底部面板高度"
+    aria-orientation="horizontal"
+    aria-valuemin="120"
+    aria-valuemax="420"
+    aria-valuenow={shell.bottomPanelHeight}
+    tabindex="0"
+    onpointerdown={beginResize}
+    onkeydown={resizeWithKeyboard}
+  ></div>
   <header class="panel-tabs">
     <div class="panel-tab-list" role="tablist" aria-label="面板视图">
       {#each panels as panel}
@@ -91,7 +112,7 @@
         </button>
       {/each}
     </div>
-    <button class="panel-close" aria-label="关闭面板" title="关闭面板 · Ctrl+J" onclick={() => shell.toggleBottomPanel()}>
+    <button class="panel-close" aria-label="关闭面板" title={`关闭面板 · ${keybindings.togglePanel}`} onclick={() => shell.toggleBottomPanel()}>
       <Icon name="close" size={14} />
     </button>
   </header>

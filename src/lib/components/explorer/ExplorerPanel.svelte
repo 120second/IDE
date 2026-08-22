@@ -8,12 +8,17 @@
   import FileTemplateDialog from "../templates/FileTemplateDialog.svelte";
   import FileTree from "./FileTree.svelte";
   import ArchivePanel from "../archive/ArchivePanel.svelte";
+  import type { UxStore } from "../../stores/ux.svelte";
+  import ContextMenu from "../ux/ContextMenu.svelte";
+  import type { KeybindingMap } from "../../keybindings";
 
   interface Props {
     fileWorkspace: WorkspaceStore;
     editor: EditorWorkspace;
     templateStore: TemplateStore;
     archiveStore: ArchiveStore;
+    ux: UxStore;
+    keybindings: KeybindingMap;
   }
 
   interface ContextMenuState {
@@ -22,10 +27,11 @@
     entry: FileEntry;
   }
 
-  let { fileWorkspace, editor, templateStore, archiveStore }: Props = $props();
+  let { fileWorkspace, editor, templateStore, archiveStore, ux, keybindings }: Props = $props();
   let menu = $state<ContextMenuState>();
   let fileDialogParent = $state<string>();
   let view = $state<"files" | "archive">("files");
+  let rootDropActive = $state(false);
   let selectedEntry = $derived(
     fileWorkspace.visibleRows.find((row) => row.entry.path === fileWorkspace.selectedPath)?.entry,
   );
@@ -52,11 +58,17 @@
     if (name && name !== entry.name) void fileWorkspace.rename(entry, name);
   }
 
-  function requestDelete(entry: FileEntry): void {
+  async function requestDelete(entry: FileEntry): Promise<void> {
     menu = undefined;
-    if (window.confirm(`确定删除“${entry.name}”吗？此操作无法撤销。`)) {
-      void fileWorkspace.delete(entry);
-    }
+    const accepted = await ux.confirm({
+      title: entry.kind === "directory" ? "删除文件夹" : "删除文件",
+      message: `确定删除“${entry.name}”吗？此操作无法撤销。`,
+      confirmLabel: "删除",
+      danger: true,
+    });
+    if (!accepted) return;
+    await fileWorkspace.delete(entry);
+    if (!fileWorkspace.error) ux.success(`已删除“${entry.name}”。`);
   }
 
   function openEntry(entry: FileEntry): void {
@@ -77,8 +89,12 @@
   }
 
   function allowRootDrop(event: DragEvent): void {
-    if (!fileWorkspace.info) return;
+    if (
+      !fileWorkspace.info
+      || !event.dataTransfer?.types.includes("application/x-lightcp-path")
+    ) return;
     event.preventDefault();
+    rootDropActive = true;
     if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   }
 
@@ -88,6 +104,13 @@
     const sourcePath = event.dataTransfer?.getData("application/x-lightcp-path");
     const entry = fileWorkspace.visibleRows.find((row) => row.entry.path === sourcePath)?.entry;
     if (root && entry) void fileWorkspace.move(entry, root);
+    rootDropActive = false;
+  }
+
+  function leaveRootDrop(event: DragEvent): void {
+    const next = event.relatedTarget;
+    if (next instanceof Node && (event.currentTarget as HTMLElement).contains(next)) return;
+    rootDropActive = false;
   }
 </script>
 
@@ -100,13 +123,15 @@
       <button class:active={view === "archive"} role="tab" aria-selected={view === "archive"} onclick={() => { view = "archive"; void archiveStore.refreshAll(); }}>代码归档</button>
     </div>
     {#if view === "archive"}
-      <ArchivePanel {archiveStore} />
+      <ArchivePanel {archiveStore} {keybindings} />
     {:else}
       <header
         class="workspace-heading"
+        class:drop-target={rootDropActive}
         role="group"
         title={fileWorkspace.info.path}
         ondragover={allowRootDrop}
+        ondragleave={leaveRootDrop}
         ondrop={dropOnRoot}
       >
         <span>{fileWorkspace.info.name}</span>
@@ -151,22 +176,20 @@
 </section>
 
 {#if menu}
-  <div
-    class="context-menu"
-    style:left={`${menu.x}px`}
-    style:top={`${menu.y}px`}
-    role="menu"
-    tabindex="-1"
-  >
-    <button role="menuitem" onclick={() => openEntry(menu!.entry)}>打开</button>
-    {#if menu.entry.kind === "directory"}
-      <button role="menuitem" onclick={() => requestCreate("file", menu!.entry)}>新建文件</button>
-      <button role="menuitem" onclick={() => requestCreate("directory", menu!.entry)}>新建文件夹</button>
-      <span class="menu-separator"></span>
-    {/if}
-    <button role="menuitem" onclick={() => requestRename(menu!.entry)}>重命名</button>
-    <button class="danger" role="menuitem" onclick={() => requestDelete(menu!.entry)}>删除</button>
-  </div>
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    close={() => (menu = undefined)}
+    items={[
+      { label: "打开", action: () => openEntry(menu!.entry) },
+      ...(menu.entry.kind === "directory" ? [
+        { label: "新建文件", action: () => requestCreate("file", menu!.entry) },
+        { label: "新建文件夹", action: () => requestCreate("directory", menu!.entry) },
+      ] : []),
+      { label: "重命名", separatorBefore: true, action: () => requestRename(menu!.entry) },
+      { label: "删除", danger: true, action: () => void requestDelete(menu!.entry) },
+    ]}
+  />
 {/if}
 
 {#if fileDialogParent}

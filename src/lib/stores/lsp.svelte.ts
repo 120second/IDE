@@ -62,6 +62,9 @@ export class LspStore implements LspClient {
   private requestSequence = 0;
   private desiredWorkspace = "";
   private desiredClangdPath = "";
+  private desiredCompilerPath = "g++";
+  private desiredCompilerStandard = "c++20";
+  private desiredCompilerArgs: string[] = [];
   private appliedConfiguration = "";
   private configureTimer: ReturnType<typeof setTimeout> | undefined;
   private connectionQueue: Promise<void> = Promise.resolve();
@@ -88,12 +91,29 @@ export class LspStore implements LspClient {
     return this.diagnostics.filter((diagnostic) => diagnostic.severity === 2).length;
   }
 
-  configure(workspace: string | undefined, clangdPath: string): void {
+  configure(
+    workspace: string | undefined,
+    clangdPath: string,
+    compilerPath: string,
+    compilerStandard: string,
+    compilerArgs: readonly string[],
+  ): void {
     const nextWorkspace = workspace?.trim() ?? "";
     const nextPath = clangdPath.trim();
-    if (nextWorkspace === this.desiredWorkspace && nextPath === this.desiredClangdPath) return;
+    const nextCompiler = compilerPath.trim() || "g++";
+    const nextStandard = compilerStandard.trim() || "c++20";
+    const nextArgs = compilerArgs.map((argument) => argument.trim()).filter(Boolean);
+    const unchanged = nextWorkspace === this.desiredWorkspace
+      && nextPath === this.desiredClangdPath
+      && nextCompiler === this.desiredCompilerPath
+      && nextStandard === this.desiredCompilerStandard
+      && JSON.stringify(nextArgs) === JSON.stringify(this.desiredCompilerArgs);
+    if (unchanged) return;
     this.desiredWorkspace = nextWorkspace;
     this.desiredClangdPath = nextPath;
+    this.desiredCompilerPath = nextCompiler;
+    this.desiredCompilerStandard = nextStandard;
+    this.desiredCompilerArgs = nextArgs;
     if (this.configureTimer) clearTimeout(this.configureTimer);
     this.configureTimer = setTimeout(() => {
       this.configureTimer = undefined;
@@ -250,7 +270,16 @@ export class LspStore implements LspClient {
     while (!this.disposed) {
       const workspace = this.desiredWorkspace;
       const clangdPath = this.desiredClangdPath;
-      const configuration = `${pathKey(workspace)}\0${clangdPath}`;
+      const compilerPath = this.desiredCompilerPath;
+      const compilerStandard = this.desiredCompilerStandard;
+      const compilerArgs = [...this.desiredCompilerArgs];
+      const configuration = [
+        pathKey(workspace),
+        clangdPath,
+        compilerPath,
+        compilerStandard,
+        JSON.stringify(compilerArgs),
+      ].join("\0");
       if (configuration === this.appliedConfiguration && this.ready) return;
 
       this.clearPendingChanges();
@@ -282,8 +311,19 @@ export class LspStore implements LspClient {
       this.state = "starting";
       this.message = "正在启动 clangd…";
       try {
-        const result = await startClangd(clangdPath);
-        if (workspace !== this.desiredWorkspace || clangdPath !== this.desiredClangdPath) {
+        const result = await startClangd(
+          clangdPath,
+          compilerPath,
+          compilerStandard,
+          compilerArgs,
+        );
+        if (configuration !== [
+          pathKey(this.desiredWorkspace),
+          this.desiredClangdPath,
+          this.desiredCompilerPath,
+          this.desiredCompilerStandard,
+          JSON.stringify(this.desiredCompilerArgs),
+        ].join("\0")) {
           continue;
         }
         this.appliedConfiguration = configuration;
@@ -296,7 +336,13 @@ export class LspStore implements LspClient {
         await this.syncOpenDocuments();
         return;
       } catch (error) {
-        if (workspace !== this.desiredWorkspace || clangdPath !== this.desiredClangdPath) {
+        if (configuration !== [
+          pathKey(this.desiredWorkspace),
+          this.desiredClangdPath,
+          this.desiredCompilerPath,
+          this.desiredCompilerStandard,
+          JSON.stringify(this.desiredCompilerArgs),
+        ].join("\0")) {
           continue;
         }
         this.appliedConfiguration = configuration;

@@ -3,6 +3,7 @@ import {
   createTemplateCategory,
   deleteTemplate,
   deleteTemplateCategory,
+  deleteTemplateVersion,
   getTemplate,
   getTemplateVersion,
   listTemplateCategories,
@@ -13,6 +14,7 @@ import {
   recordTemplateUse,
   renameTemplateCategory,
   restoreTemplateVersion,
+  searchTemplateCompletions,
   setTemplateFavorite,
   updateTemplate,
 } from "../api/templates";
@@ -31,6 +33,7 @@ import type {
   TemplateVersionMetadata,
 } from "../types/templates";
 import { buildTemplateCategoryRows } from "../templateTree";
+import type { UxStore } from "./ux.svelte";
 
 const EMPTY_DRAFT: TemplateInput = {
   kind: "snippet",
@@ -69,6 +72,7 @@ export class TemplateStore {
   notice = $state("");
 
   private readonly expandedCategories = new Set<number>();
+  private readonly createDrafts = new Map<TemplateKind, TemplateInput>();
   private categoryRevision = $state(0);
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   private listRequest = 0;
@@ -80,7 +84,15 @@ export class TemplateStore {
   private categoryRowsCache: TemplateCategoryRow[] = [];
   private categoryRowsCacheRevision = -1;
 
-  constructor(private readonly editor: EditorWorkspace) {}
+  constructor(
+    private readonly editor: EditorWorkspace,
+    private readonly ux: UxStore,
+  ) {
+    this.editor.setTemplateCompletionProvider(
+      (query, signal) => this.searchEditorCompletions(query, signal),
+      (id) => this.recordEditorCompletionUse(id),
+    );
+  }
 
   get categoryRows(): TemplateCategoryRow[] {
     const revision = this.categoryRevision;
@@ -122,10 +134,12 @@ export class TemplateStore {
 
   dispose(): void {
     if (this.searchTimer) clearTimeout(this.searchTimer);
+    this.editor.setTemplateCompletionProvider(undefined);
   }
 
   async setKind(kind: TemplateKind): Promise<void> {
     if (this.kind === kind) return;
+    this.rememberCreateDraft();
     this.kind = kind;
     this.collection = "all";
     this.selectedCategoryId = undefined;
@@ -224,11 +238,18 @@ export class TemplateStore {
   }
 
   async deleteCategory(category: TemplateCategory): Promise<void> {
-    if (!window.confirm(`确定删除分类“${category.name}”及其所有子分类吗？`)) return;
+    const accepted = await this.ux.confirm({
+      title: "删除模板分类",
+      message: `确定删除分类“${category.name}”及其所有子分类吗？此操作无法撤销。`,
+      confirmLabel: "删除分类",
+      danger: true,
+    });
+    if (!accepted) return;
     try {
       await deleteTemplateCategory(category.id);
       this.selectedCategoryId = undefined;
       await Promise.all([this.refreshCategories(), this.refreshTemplates()]);
+      this.ux.success(`已删除分类“${category.name}”。`);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -245,25 +266,39 @@ export class TemplateStore {
     }
   }
 
-  beginCreate(kind: TemplateKind = this.kind, code = ""): void {
+  beginCreate(kind: TemplateKind = this.kind, code?: string): void {
+    this.rememberCreateDraft();
     const kindChanged = this.kind !== kind;
     this.kind = kind;
     this.selectedId = undefined;
     this.detail = undefined;
     this.versions = [];
     this.versionPreview = undefined;
-    this.draft = {
-      ...EMPTY_DRAFT,
-      kind,
-      categoryId: this.selectedCategoryId,
-      code,
-    };
+    const savedDraft = code === undefined ? this.createDrafts.get(kind) : undefined;
+    this.draft = savedDraft
+      ? cloneTemplateInput(savedDraft)
+      : {
+          ...EMPTY_DRAFT,
+          kind,
+          categoryId: this.selectedCategoryId,
+          code: code ?? "",
+        };
     this.mode = "create";
     if (kindChanged) void this.refreshTemplates();
   }
 
+  collapseEditor(): void {
+    this.rememberCreateDraft();
+    this.selectedId = undefined;
+    this.detail = undefined;
+    this.versions = [];
+    this.versionPreview = undefined;
+    this.mode = "empty";
+  }
+
   async openTemplate(id: number): Promise<void> {
     if (this.selectedId === id && this.detail) return;
+    this.rememberCreateDraft();
     this.selectedId = id;
     this.detail = undefined;
     this.versions = [];
@@ -291,9 +326,12 @@ export class TemplateStore {
     this.saving = true;
     this.error = "";
     try {
-      const detail = this.mode === "create" || !this.selectedId
+      const selectedId = this.selectedId;
+      const creating = this.mode === "create" || selectedId === undefined;
+      const detail = creating
         ? await createTemplate(this.draft)
-        : await updateTemplate(this.selectedId, this.draft);
+        : await updateTemplate(selectedId, this.draft);
+      if (creating) this.createDrafts.delete(detail.kind);
       this.selectedId = detail.id;
       this.detail = detail;
       this.draft = inputFromDetail(detail);
@@ -310,7 +348,14 @@ export class TemplateStore {
 
   async deleteSelected(): Promise<void> {
     const detail = this.detail;
-    if (!detail || !window.confirm(`确定删除模板“${detail.name}”吗？`)) return;
+    if (!detail) return;
+    const accepted = await this.ux.confirm({
+      title: "删除模板",
+      message: `确定删除模板“${detail.name}”吗？此操作无法撤销。`,
+      confirmLabel: "删除模板",
+      danger: true,
+    });
+    if (!accepted) return;
     try {
       await deleteTemplate(detail.id);
       this.selectedId = undefined;
@@ -318,6 +363,7 @@ export class TemplateStore {
       this.mode = "empty";
       this.versions = [];
       await Promise.all([this.refreshTemplates(), this.refreshFileTemplates()]);
+      this.ux.success(`已删除模板“${detail.name}”。`);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -337,12 +383,18 @@ export class TemplateStore {
   }
 
   async moveTemplate(id: number, categoryId: number | undefined, targetIndex: number): Promise<void> {
-    if (this.sort !== "manual") {
+    const source = this.templates.find((template) => template.id === id);
+    const changesCategory = source?.categoryId !== categoryId;
+    if (this.sort !== "manual" && !changesCategory) {
       this.notice = "请先切换到手动排序，再拖动模板。";
       return;
     }
     try {
       await moveTemplate(id, categoryId, targetIndex);
+      if (this.detail?.id === id) {
+        this.detail = { ...this.detail, categoryId };
+        this.draft.categoryId = categoryId;
+      }
       await Promise.all([this.refreshTemplates(), this.refreshFileTemplates()]);
     } catch (error) {
       this.error = errorMessage(error);
@@ -396,6 +448,25 @@ export class TemplateStore {
     }
   }
 
+  private async searchEditorCompletions(
+    query: string,
+    signal: AbortSignal,
+  ): Promise<readonly TemplateDetail[]> {
+    try {
+      const results = await searchTemplateCompletions(query);
+      return signal.aborted ? [] : results;
+    } catch (error) {
+      if (!signal.aborted) this.error = errorMessage(error);
+      return [];
+    }
+  }
+
+  private recordEditorCompletionUse(id: number): void {
+    void recordTemplateUse(id).catch((error) => {
+      this.error = errorMessage(error);
+    });
+  }
+
   async loadHistory(): Promise<void> {
     if (!this.selectedId) return;
     this.historyLoading = true;
@@ -411,6 +482,25 @@ export class TemplateStore {
   async previewVersion(versionId: number): Promise<void> {
     try {
       this.versionPreview = await getTemplateVersion(versionId);
+    } catch (error) {
+      this.error = errorMessage(error);
+    }
+  }
+
+  async deleteVersion(version: TemplateVersionMetadata): Promise<void> {
+    if (!this.selectedId || version.templateId !== this.selectedId) return;
+    const accepted = await this.ux.confirm({
+      title: "删除历史版本",
+      message: `确定删除 v${version.versionNumber} 的历史代码吗？此操作无法撤销。`,
+      confirmLabel: "删除版本",
+      danger: true,
+    });
+    if (!accepted) return;
+    try {
+      await deleteTemplateVersion(this.selectedId, version.id);
+      if (this.versionPreview?.id === version.id) this.versionPreview = undefined;
+      await this.loadHistory();
+      this.ux.success(`已删除历史版本 v${version.versionNumber}。`);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -449,6 +539,11 @@ export class TemplateStore {
   private buildCategoryRows(): TemplateCategoryRow[] {
     return buildTemplateCategoryRows(this.categories, this.expandedCategories);
   }
+
+  private rememberCreateDraft(): void {
+    if (this.mode !== "create") return;
+    this.createDrafts.set(this.draft.kind, cloneTemplateInput(this.draft));
+  }
 }
 
 function defaultFilter(kind: TemplateKind): TemplateFilter {
@@ -474,6 +569,10 @@ function inputFromDetail(detail: TemplateDetail): TemplateInput {
     favorite: detail.favorite,
     code: detail.code,
   };
+}
+
+function cloneTemplateInput(input: TemplateInput): TemplateInput {
+  return { ...input, aliases: [...input.aliases] };
 }
 
 function errorMessage(error: unknown): string {

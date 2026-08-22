@@ -61,6 +61,20 @@ pub fn list_templates(
 }
 
 #[tauri::command(async)]
+pub fn search_template_completions(
+    query: String,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<TemplateDetail>, CommandError> {
+    template_core::search_template_completions(
+        &state.paths.database_file,
+        &query,
+        limit.unwrap_or(20),
+    )
+    .map_err(CommandError::from)
+}
+
+#[tauri::command(async)]
 pub fn get_template(id: i64, state: State<'_, AppState>) -> Result<TemplateDetail, CommandError> {
     template_core::get_template(&state.paths.database_file, id).map_err(CommandError::from)
 }
@@ -129,6 +143,16 @@ pub fn get_template_version(
     state: State<'_, AppState>,
 ) -> Result<TemplateVersionDetail, CommandError> {
     template_core::get_version(&state.paths.database_file, version_id).map_err(CommandError::from)
+}
+
+#[tauri::command(async)]
+pub fn delete_template_version(
+    template_id: i64,
+    version_id: i64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    template_core::delete_version(&state.paths.database_file, template_id, version_id)
+        .map_err(CommandError::from)
 }
 
 #[tauri::command(async)]

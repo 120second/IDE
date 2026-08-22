@@ -122,7 +122,18 @@ pub fn list_templates(
     }
     if let Some(category_id) = filter.category_id {
         values.push(Value::Integer(category_id));
-        sql.push_str(&format!(" AND category_id = ?{}", values.len()));
+        let index = values.len();
+        sql.push_str(&format!(
+            " AND category_id IN (
+                WITH RECURSIVE selected_categories(id) AS (
+                    SELECT ?{index}
+                    UNION ALL
+                    SELECT child.id FROM template_categories child
+                    JOIN selected_categories parent ON child.parent_id = parent.id
+                )
+                SELECT id FROM selected_categories
+            )"
+        ));
     }
     sql.push_str(match filter.sort {
         TemplateSort::Manual => " ORDER BY sort_order, id",
@@ -135,6 +146,45 @@ pub fn list_templates(
 
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map(params_from_iter(values), map_metadata)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+}
+
+pub fn search_template_completions(
+    database_path: &Path,
+    query: &str,
+    limit: usize,
+) -> AppResult<Vec<TemplateDetail>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let connection = connect(database_path)?;
+    let prefix = format!("{query}%");
+    let contains = format!("%{query}%");
+    let limit = limit.clamp(1, 50) as i64;
+    let sql = format!(
+        "SELECT {METADATA_COLUMNS}, code
+         FROM templates
+         WHERE kind = 'snippet'
+           AND (name LIKE ?3 OR trigger LIKE ?3 OR aliases LIKE ?3 OR description LIKE ?3)
+         ORDER BY CASE
+             WHEN trigger = ?1 COLLATE NOCASE THEN 0
+             WHEN name = ?1 COLLATE NOCASE THEN 1
+             WHEN trigger LIKE ?2 THEN 2
+             WHEN name LIKE ?2 THEN 3
+             WHEN aliases LIKE ?3 THEN 4
+             ELSE 5
+           END,
+           favorite DESC,
+           use_count DESC,
+           last_used DESC,
+           sort_order,
+           id
+         LIMIT ?4"
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params![query, prefix, contains, limit], map_detail)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
 }
 
@@ -332,6 +382,15 @@ pub fn get_version(database_path: &Path, version_id: i64) -> AppResult<TemplateV
         .ok_or_else(|| template_error(format!("template version {version_id} does not exist")))
 }
 
+pub fn delete_version(database_path: &Path, template_id: i64, version_id: i64) -> AppResult<()> {
+    let connection = connect(database_path)?;
+    let changed = connection.execute(
+        "DELETE FROM template_versions WHERE id = ?1 AND template_id = ?2",
+        params![version_id, template_id],
+    )?;
+    ensure_changed(changed, "template version", version_id)
+}
+
 pub fn restore_version(
     database_path: &Path,
     template_id: i64,
@@ -399,14 +458,16 @@ fn get_template_from_connection(
 ) -> AppResult<TemplateDetail> {
     let sql = format!("SELECT {METADATA_COLUMNS}, code FROM templates WHERE id = ?1");
     connection
-        .query_row(&sql, [id], |row| {
-            Ok(TemplateDetail {
-                metadata: map_metadata(row)?,
-                code: row.get(14)?,
-            })
-        })
+        .query_row(&sql, [id], map_detail)
         .optional()?
         .ok_or_else(|| template_error(format!("template {id} does not exist")))
+}
+
+fn map_detail(row: &Row<'_>) -> rusqlite::Result<TemplateDetail> {
+    Ok(TemplateDetail {
+        metadata: map_metadata(row)?,
+        code: row.get(14)?,
+    })
 }
 
 fn map_category(row: &Row<'_>) -> rusqlite::Result<TemplateCategory> {
@@ -761,6 +822,79 @@ mod tests {
     }
 
     #[test]
+    fn completion_search_returns_code_ranks_exact_matches_and_excludes_file_templates() {
+        let database_path = temporary_database("completion-search");
+        let prefix = create_template(
+            &database_path,
+            &snippet_input(
+                "StoerWagner",
+                &["mincut", "global-cut"],
+                None,
+                "prefix code",
+            ),
+        )
+        .expect("prefix template");
+        let exact = create_template(
+            &database_path,
+            &snippet_input("Stoer", &["cut"], None, "exact code"),
+        )
+        .expect("exact template");
+        let mut file = snippet_input("StoerFile", &["mincut"], None, "file code");
+        file.kind = TemplateKind::File;
+        create_template(&database_path, &file).expect("file template");
+
+        let matches =
+            search_template_completions(&database_path, "Stoer", 20).expect("completion search");
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].metadata.id, exact.metadata.id);
+        assert_eq!(matches[1].metadata.id, prefix.metadata.id);
+        assert_eq!(matches[1].code, "prefix code");
+
+        let alias_matches = search_template_completions(&database_path, "global", 20)
+            .expect("alias completion search");
+        assert_eq!(alias_matches.len(), 1);
+        assert_eq!(alias_matches[0].metadata.id, prefix.metadata.id);
+        cleanup_database(database_path);
+    }
+
+    #[test]
+    fn parent_category_includes_templates_from_all_descendants() {
+        let database_path = temporary_database("recursive-category-filter");
+        let parent = create_category(&database_path, "网络流", None).expect("parent category");
+        let child =
+            create_category(&database_path, "最小割", Some(parent.id)).expect("child category");
+        let grandchild = create_category(&database_path, "全局最小割", Some(child.id))
+            .expect("grandchild category");
+        let parent_template = create_template(
+            &database_path,
+            &snippet_input("Dinic", &[], Some(parent.id), "parent"),
+        )
+        .expect("parent template");
+        let child_template = create_template(
+            &database_path,
+            &snippet_input("GomoryHu", &[], Some(grandchild.id), "descendant"),
+        )
+        .expect("descendant template");
+
+        let mut filter = default_filter();
+        filter.category_id = Some(parent.id);
+        let parent_results = list_templates(&database_path, &filter).expect("parent filter");
+        assert_eq!(parent_results.len(), 2);
+        assert!(parent_results
+            .iter()
+            .any(|item| item.id == parent_template.metadata.id));
+        assert!(parent_results
+            .iter()
+            .any(|item| item.id == child_template.metadata.id));
+
+        filter.category_id = Some(child.id);
+        let child_results = list_templates(&database_path, &filter).expect("child filter");
+        assert_eq!(child_results.len(), 1);
+        assert_eq!(child_results[0].id, child_template.metadata.id);
+        cleanup_database(database_path);
+    }
+
+    #[test]
     fn versions_are_capped_and_can_be_restored() {
         let database_path = temporary_database("version-restore");
         let category = create_category(&database_path, "Loops", None).expect("category");
@@ -796,6 +930,17 @@ mod tests {
                 .unwrap()
                 .len(),
             20
+        );
+        let deleted_version = versions[0].id;
+        assert!(delete_version(&database_path, detail.metadata.id + 1, deleted_version).is_err());
+        delete_version(&database_path, detail.metadata.id, deleted_version)
+            .expect("owned historical version should be deleted");
+        assert!(get_version(&database_path, deleted_version).is_err());
+        assert_eq!(
+            list_versions(&database_path, detail.metadata.id)
+                .unwrap()
+                .len(),
+            19
         );
         cleanup_database(database_path);
     }

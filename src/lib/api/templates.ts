@@ -42,6 +42,16 @@ export function listTemplates(filter: TemplateFilter): Promise<TemplateMetadata[
     : Promise.resolve([]);
 }
 
+export function searchTemplateCompletions(
+  query: string,
+  limit = 20,
+): Promise<TemplateDetail[]> {
+  return isTauri()
+    ? invoke<TemplateDetail[]>("search_template_completions", { query, limit })
+      .then((items) => items.map(normalizeDetail))
+    : Promise.resolve([]);
+}
+
 export function getTemplate(id: number): Promise<TemplateDetail> {
   return invoke<TemplateDetail>("get_template", { id }).then(normalizeDetail);
 }
@@ -80,6 +90,10 @@ export function listTemplateVersions(templateId: number): Promise<TemplateVersio
 
 export function getTemplateVersion(versionId: number): Promise<TemplateVersionDetail> {
   return invoke<TemplateVersionDetail>("get_template_version", { versionId }).then(normalizeVersion);
+}
+
+export function deleteTemplateVersion(templateId: number, versionId: number): Promise<void> {
+  return invoke<void>("delete_template_version", { templateId, versionId });
 }
 
 export function restoreTemplateVersion(
