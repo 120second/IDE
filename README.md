@@ -18,11 +18,11 @@ LightCP 把竞赛中常用的编辑、编译运行、样例管理、代码模板
 
 | 模块 | 主要能力 |
 | --- | --- |
-| 编辑器 | 多标签、会话恢复、括号/引号自动闭合、搜索、代码折叠、断点行号、超大文件降级 |
+| 编辑器 | 多标签、欢迎页、命令面板、会话恢复、安全批量保存/关闭、代码折叠、超大文件降级 |
 | clangd | C++ 诊断、补全、悬停信息、签名帮助、跳转定义和查找引用 |
 | 模板中心 | 代码片段与文件模板、嵌套分类、拖放整理、收藏、搜索、版本历史、恢复与删除历史版本 |
 | 模板补全 | 在编辑器中按名称、触发词或别名查找模板；模板候选优先显示在 clangd 候选上方 |
-| 工作区 | 最近目录恢复、懒加载文件树、新建/重命名/删除、文件与目录拖放移动、原生文件监听 |
+| 工作区 | 最近目录恢复、懒加载文件树、模糊快速打开、有界跨文件搜索、安全切换目录、文件监听 |
 | 编译运行 | 可配置 g++、C++17/20/23、Release/Debug 参数、stdin、超时和输出容量 |
 | 测试点 | Sample、Custom、Hack 测试点，支持复制、排序、启停、单项运行和批量运行 |
 | 调试器 | 基于 GDB/MI 的断点、条件断点、调用栈、局部变量、监视表达式和单步调试 |
@@ -50,7 +50,7 @@ LightCP 把竞赛中常用的编辑、编译运行、样例管理、代码模板
 - GDB：使用图形化调试功能时需要
 - clangd：使用诊断、补全和代码导航时需要
 
-g++、GDB 和 clangd 默认从 `PATH` 及常见安装目录查找，也可以在 LightCP 设置中填写完整路径。Tauri 的 Windows 环境配置可参考 [官方 prerequisites](https://v2.tauri.app/start/prerequisites/)。
+g++ 和 GDB 默认从 `PATH` 查找；clangd 还会检查 LLVM 和 Visual Studio 的常见安装目录。三者都可在 LightCP 设置中填写完整路径，并直接查看实时可用性诊断。Tauri 的 Windows 环境配置可参考 [官方 prerequisites](https://v2.tauri.app/start/prerequisites/)。
 
 ## 快速开始
 
@@ -97,6 +97,12 @@ cargo test --manifest-path src-tauri/Cargo.toml -j 1
 # Rust 格式检查
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
+# Rust 静态质量检查
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+# 手动性能/压力审计
+cargo test --manifest-path src-tauri/Cargo.toml --test performance_audit -- --ignored --test-threads=1
+
 # 完整桌面 Release
 npm run tauri build
 ```
@@ -106,11 +112,18 @@ npm run tauri build
 | 快捷键 | 功能 |
 | --- | --- |
 | `Ctrl+S` | 保存当前文件 |
+| `Ctrl+N` | 在工作区中新建 C++ 文件 |
+| `Ctrl+P` | 按文件名快速打开 |
+| `Ctrl+Shift+P` | 打开命令面板 |
+| `Ctrl+W` | 关闭当前编辑器（未保存时询问） |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 切换下一个 / 上一个编辑器 |
+| `Ctrl+K`，然后 `S` | 保存全部已修改文件 |
 | `Ctrl+B` | 显示或隐藏侧栏 |
 | `Ctrl+J` | 显示或隐藏底部面板 |
 | `Ctrl+K`，然后 `Z` | 进入或退出 Zen Mode |
 | `Escape` | 退出 Zen Mode |
 | `Ctrl+F` | 在编辑器中搜索 |
+| `Ctrl+Shift+F` | 搜索整个工作区 |
 | `Ctrl+Alt+T` | 打开代码片段快速搜索 |
 | `Ctrl+Shift+A` | 归档当前 C++ 文件 |
 | `F5` | 编译并运行当前文件 |
@@ -119,6 +132,8 @@ npm run tauri build
 | `Shift+F12` | 查找引用 |
 | `Ctrl+Shift+Space` | 显示函数签名帮助 |
 | `Ctrl+Z` / `Ctrl+Y` | 撤销 / 重做 |
+
+编辑器标签支持鼠标中键关闭和右键菜单；右键菜单可保存、保存全部、关闭当前、关闭其他或关闭全部编辑器。批量关闭时，未保存文件会集中提供“保存并关闭 / 不保存 / 取消”选择。
 
 ## 模板与编辑器补全
 

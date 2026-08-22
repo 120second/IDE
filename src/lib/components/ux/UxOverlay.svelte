@@ -68,6 +68,13 @@
       <p id="confirmation-message">{ux.confirmation.message}</p>
       <div class="confirmation-actions">
         <button class="secondary-button" bind:this={cancelButton} onclick={() => ux.cancelConfirmation()}>取消</button>
+        {#if ux.confirmation.secondaryLabel}
+          <button
+            class:danger-button={ux.confirmation.secondaryDanger}
+            class:secondary-button={!ux.confirmation.secondaryDanger}
+            onclick={() => ux.acceptSecondaryConfirmation()}
+          >{ux.confirmation.secondaryLabel}</button>
+        {/if}
         <button class:danger-button={ux.confirmation.danger} class:primary-button={!ux.confirmation.danger} onclick={() => ux.acceptConfirmation()}>{ux.confirmation.confirmLabel}</button>
       </div>
     </div>

@@ -58,6 +58,32 @@ describe("workspace session persistence", () => {
     expect(reopenedWorkspace.openPath).toHaveBeenCalledWith("D:\\Problem Set");
     reopened.dispose();
   });
+
+  it("migrates the removed terminal placeholder to the real output panel", async () => {
+    values.set("lightcp.session.v1", JSON.stringify({
+      version: 1,
+      activeActivity: "explorer",
+      sidebarVisible: true,
+      bottomPanelVisible: true,
+      activeBottomPanel: "terminal",
+      sidebarWidth: 264,
+      bottomPanelHeight: 190,
+    }));
+    const shell = new ShellStore();
+    const workspace = workspaceStub("");
+    workspace.recent = [];
+    const store = new SessionStore(
+      workspace as never,
+      editorStub() as never,
+      shell,
+      { error: vi.fn() } as never,
+    );
+
+    await store.initialize();
+
+    expect(shell.activeBottomPanel).toBe("output");
+    store.dispose();
+  });
 });
 
 describe("window session geometry", () => {

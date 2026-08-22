@@ -26,6 +26,11 @@
   import Sidebar from "./Sidebar.svelte";
   import StatusBar from "./StatusBar.svelte";
   import UxOverlay from "../ux/UxOverlay.svelte";
+  import WelcomeView from "../editor/WelcomeView.svelte";
+  import QuickFileOpen from "../editor/QuickFileOpen.svelte";
+  import { requestCloseTabs } from "../../editor/closeTabs";
+  import CommandPalette from "./CommandPalette.svelte";
+  import type { WorkbenchCommand } from "../../types/commands";
 
   interface Props {
     shell: ShellStore;
@@ -46,17 +51,44 @@
 
   let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, ux, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
+  let quickFileOpen = $state(false);
+  let commandPaletteOpen = $state(false);
+  let workbenchCommands = $derived<WorkbenchCommand[]>([
+    command("file.new", "新建 C++ 文件", "文件", "newFile", () => void createSourceFile()),
+    command("file.openFolder", "打开文件夹", "文件", undefined, () => void fileWorkspace.openFolderPicker()),
+    command("file.quickOpen", "快速打开文件", "文件", "quickOpen", () => openQuickFile()),
+    command("file.search", "搜索整个工作区", "搜索", "searchWorkspace", () => showActivity("search")),
+    command("file.save", "保存当前文件", "文件", "save", () => void saveCurrent()),
+    { id: "file.saveAll", label: "保存全部文件", category: "文件", shortcut: "Ctrl+K S", run: () => void saveAll() },
+    command("editor.close", "关闭当前编辑器", "编辑器", "closeEditor", () => void closeActiveEditor()),
+    command("build.compile", "编译当前文件", "运行", undefined, () => void execution.compileCurrent()),
+    command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent()),
+    command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }),
+    command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }),
+    command("stress.start", "开始压力测试", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
+    command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
+    command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
+    command("view.settings", "打开设置", "视图", undefined, () => showActivity("settings")),
+    command("view.toggleSidebar", "切换侧栏", "视图", "toggleSidebar", () => shell.toggleSidebar()),
+    command("view.togglePanel", "切换底部面板", "视图", "togglePanel", () => shell.toggleBottomPanel()),
+    { id: "view.zen", label: "切换禅模式", category: "视图", shortcut: "Ctrl+K Z", run: () => shell.toggleZenMode() },
+  ]);
 
   $effect(() => {
     if (shell.activeActivity === "templates") void templateStore.initialize();
   });
 
   onMount(() => {
-    let awaitingZenKey = false;
+    let awaitingChordKey = false;
     let chordTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onKeyDown = (event: KeyboardEvent) => {
       const keybindings = settings.value.keybindings;
+      if (matchesShortcut(event, "commandPalette", keybindings)) {
+        event.preventDefault();
+        commandPaletteOpen = true;
+        return;
+      }
       if (matchesShortcut(event, "quickArchive", keybindings)) {
         event.preventDefault();
         archiveStore.openQuickArchive();
@@ -65,6 +97,43 @@
       if (matchesShortcut(event, "quickTemplate", keybindings)) {
         event.preventDefault();
         quickSearchOpen = true;
+        return;
+      }
+      if (matchesShortcut(event, "searchWorkspace", keybindings)) {
+        event.preventDefault();
+        shell.activeActivity = "search";
+        shell.sidebarVisible = true;
+        queueMicrotask(() => window.dispatchEvent(new Event("lightcp-focus-search")));
+        return;
+      }
+      if (matchesShortcut(event, "newFile", keybindings)) {
+        event.preventDefault();
+        void createSourceFile();
+        return;
+      }
+      if (matchesShortcut(event, "quickOpen", keybindings)) {
+        event.preventDefault();
+        if (fileWorkspace.info) quickFileOpen = true;
+        else {
+          shell.activeActivity = "explorer";
+          shell.sidebarVisible = true;
+          ux.info("请先打开一个工作区，再使用快速打开文件。");
+        }
+        return;
+      }
+      if (matchesShortcut(event, "closeEditor", keybindings)) {
+        event.preventDefault();
+        if (workspace.activeId) void requestCloseTabs(workspace, ux, [workspace.activeId]);
+        return;
+      }
+      if (matchesShortcut(event, "nextEditor", keybindings)) {
+        event.preventDefault();
+        switchEditor(1);
+        return;
+      }
+      if (matchesShortcut(event, "previousEditor", keybindings)) {
+        event.preventDefault();
+        switchEditor(-1);
         return;
       }
       if (event.key === "Escape" && shell.zenMode) {
@@ -118,18 +187,26 @@
         void debugStore.startCurrent();
         return;
       }
-      if (awaitingZenKey && !event.ctrlKey && event.key.toLowerCase() === "z") {
-        event.preventDefault();
-        awaitingZenKey = false;
+      if (awaitingChordKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        const chordKey = event.key.toLowerCase();
+        awaitingChordKey = false;
         if (chordTimer) clearTimeout(chordTimer);
-        shell.toggleZenMode();
-        return;
+        if (chordKey === "z") {
+          event.preventDefault();
+          shell.toggleZenMode();
+          return;
+        }
+        if (chordKey === "s") {
+          event.preventDefault();
+          void saveAll();
+          return;
+        }
       }
       if (event.ctrlKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        awaitingZenKey = true;
+        awaitingChordKey = true;
         if (chordTimer) clearTimeout(chordTimer);
-        chordTimer = setTimeout(() => (awaitingZenKey = false), 1200);
+        chordTimer = setTimeout(() => (awaitingChordKey = false), 1200);
       }
     };
 
@@ -144,6 +221,65 @@
     templateStore.beginCreate("snippet", code);
     shell.activeActivity = "templates";
     shell.sidebarVisible = true;
+  }
+
+  function command(
+    id: string,
+    label: string,
+    category: string,
+    shortcutId: keyof typeof settings.value.keybindings | undefined,
+    run: () => void,
+  ): WorkbenchCommand {
+    return { id, label, category, shortcut: shortcutId ? settings.value.keybindings[shortcutId] : undefined, run };
+  }
+
+  function showActivity(activity: typeof shell.activeActivity): void {
+    shell.activeActivity = activity;
+    shell.sidebarVisible = true;
+    if (activity === "search") queueMicrotask(() => window.dispatchEvent(new Event("lightcp-focus-search")));
+  }
+
+  function openQuickFile(): void {
+    if (fileWorkspace.info) quickFileOpen = true;
+    else ux.info("请先打开一个工作区，再使用快速打开文件。");
+  }
+
+  async function saveCurrent(): Promise<void> {
+    if (await workspace.saveActive()) ux.success("已保存当前文件。");
+    else if (workspace.notice) ux.error(workspace.notice);
+  }
+
+  async function closeActiveEditor(): Promise<void> {
+    if (workspace.activeId) await requestCloseTabs(workspace, ux, [workspace.activeId]);
+  }
+
+  function switchEditor(direction: 1 | -1): void {
+    if (workspace.tabs.length < 2) return;
+    const current = workspace.tabs.findIndex((tab) => tab.id === workspace.activeId);
+    const next = (Math.max(0, current) + direction + workspace.tabs.length) % workspace.tabs.length;
+    workspace.switchTab(workspace.tabs[next].id);
+    workspace.focus();
+  }
+
+  async function saveAll(): Promise<void> {
+    const result = await workspace.saveAll();
+    if (result.failed || result.skipped) {
+      ux.error(`保存完成：成功 ${result.saved} 个，失败 ${result.failed} 个，跳过 ${result.skipped} 个。`);
+    } else if (result.saved > 0) {
+      ux.success(`已保存 ${result.saved} 个文件。`);
+    } else {
+      ux.info("没有需要保存的文件。");
+    }
+  }
+
+  async function createSourceFile(): Promise<void> {
+    if (!fileWorkspace.info) await fileWorkspace.openFolderPicker();
+    const root = fileWorkspace.info?.path;
+    if (!root) return;
+    const entered = window.prompt("新建 C++ 文件", "main.cpp")?.trim();
+    if (!entered) return;
+    const name = entered.includes(".") ? entered : `${entered}.cpp`;
+    await fileWorkspace.create(root, name, "file", "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n\n    return 0;\n}\n");
   }
 </script>
 
@@ -172,12 +308,13 @@
             stop={() => void execution.stop()}
             busy={execution.compiling || execution.running}
             running={execution.running}
+            newFile={() => void createSourceFile()}
           />
           <div class="editor-surface">
             {#if workspace.activeTab}
               <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
             {:else}
-              <div class="editor-empty-state" aria-label="未打开文件"></div>
+              <WelcomeView {fileWorkspace} {shell} keybindings={settings.value.keybindings} />
             {/if}
           </div>
           {#if shell.bottomPanelVisible && !shell.zenMode}
@@ -202,6 +339,28 @@
     {templateStore}
     close={() => {
       quickSearchOpen = false;
+      workspace.focus();
+    }}
+  />
+{/if}
+
+{#if quickFileOpen}
+  <QuickFileOpen
+    {workspace}
+    shortcut={settings.value.keybindings.quickOpen}
+    close={() => {
+      quickFileOpen = false;
+      workspace.focus();
+    }}
+  />
+{/if}
+
+{#if commandPaletteOpen}
+  <CommandPalette
+    commands={workbenchCommands}
+    shortcut={settings.value.keybindings.commandPalette}
+    close={() => {
+      commandPaletteOpen = false;
       workspace.focus();
     }}
   />

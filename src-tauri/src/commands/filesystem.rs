@@ -7,7 +7,8 @@ use crate::{
     archive,
     error::{AppError, CommandError},
     filesystem::{
-        self as fs_core, FileContent, FileEntry, FileRevision, PathResult, WriteTextResult,
+        self as fs_core, FileContent, FileEntry, FileRevision, PathResult, WorkspaceFileResponse,
+        WorkspaceSearchResponse, WriteTextResult,
     },
     state::AppState,
 };
@@ -31,6 +32,42 @@ pub fn list_directory(
         );
     }
     Ok(entries)
+}
+
+#[tauri::command]
+pub async fn search_workspace(
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceSearchResponse, CommandError> {
+    let root = active_root(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        fs_core::search_workspace(&root, &query, case_sensitive, whole_word)
+    })
+    .await
+    .map_err(|error| {
+        CommandError::from(AppError::Internal(format!(
+            "workspace search task could not be joined: {error}"
+        )))
+    })?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn find_workspace_files(
+    query: String,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceFileResponse, CommandError> {
+    let root = active_root(&state)?;
+    tauri::async_runtime::spawn_blocking(move || fs_core::find_workspace_files(&root, &query))
+        .await
+        .map_err(|error| {
+            CommandError::from(AppError::Internal(format!(
+                "workspace file search task could not be joined: {error}"
+            )))
+        })?
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]

@@ -24,7 +24,6 @@
     { id: "problems", label: "问题" },
     { id: "output", label: "输出" },
     { id: "tests", label: "测试结果" },
-    { id: "terminal", label: "终端" },
     { id: "debugConsole", label: "调试控制台" },
   ];
 
@@ -200,8 +199,6 @@
           {/if}
         </div>
       </div>
-    {:else if shell.activeBottomPanel === "terminal"}
-      <div class="panel-empty"><Icon name="terminal" size={20} /><span>程序输出会缓冲显示在“输出”面板中。</span></div>
     {:else}
       <div class="execution-output debug-console-panel">
         <div class="execution-toolbar">

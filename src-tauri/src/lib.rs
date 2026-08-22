@@ -57,6 +57,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health::health_check,
+            commands::health::diagnose_toolchain,
             commands::performance::get_performance_snapshot,
             commands::lsp::start_clangd,
             commands::lsp::stop_clangd,
@@ -77,6 +78,8 @@ pub fn run() {
             commands::workspace::open_workspace,
             commands::workspace::list_recent_workspaces,
             commands::filesystem::list_directory,
+            commands::filesystem::search_workspace,
+            commands::filesystem::find_workspace_files,
             commands::filesystem::read_text_file,
             commands::filesystem::get_text_file_revision,
             commands::filesystem::write_text_file,

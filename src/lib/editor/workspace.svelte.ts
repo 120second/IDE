@@ -120,6 +120,12 @@ interface SaveSnapshot {
   expectedDiskRevision: string;
 }
 
+export interface SaveAllResult {
+  saved: number;
+  failed: number;
+  skipped: number;
+}
+
 export interface ExternalConflict {
   path: string;
   title: string;
@@ -465,52 +471,93 @@ export class EditorWorkspace {
   }
 
   async saveActive(): Promise<boolean> {
-    if (this.activeTab?.deferred) await this.hydrateTab(this.activeTab.id);
-    this.captureActiveView();
-    const active = this.activeTab;
-    if (!active?.path) {
+    const activeId = this.activeId;
+    if (!activeId) {
       this.saveState = "error";
       this.notice = "当前编辑器尚未对应工作区文件。";
       return false;
     }
-    if (active.deleted) {
+    return this.saveTab(activeId);
+  }
+
+  async saveTab(id: string): Promise<boolean> {
+    const requested = this.tabs.find((tab) => tab.id === id);
+    if (requested?.deferred) await this.hydrateTab(id);
+    this.captureActiveView();
+    const tab = this.tabs.find((candidate) => candidate.id === id);
+    if (!tab?.path) {
       this.saveState = "error";
-      this.notice = `${active.title} 已在 LightCP 外部被删除。`;
+      this.notice = tab
+        ? `${tab.title} 尚未对应工作区文件。`
+        : "要保存的编辑器已关闭。";
       return false;
     }
-    if (!active.diskRevision) {
+    if (tab.deleted) {
       this.saveState = "error";
-      this.notice = `无法确认 ${active.title} 的磁盘版本，请重新打开文件后再保存。`;
+      this.notice = `${tab.title} 已在 LightCP 外部被删除。`;
+      return false;
+    }
+    if (!tab.diskRevision) {
+      this.saveState = "error";
+      this.notice = `无法确认 ${tab.title} 的磁盘版本，请重新打开文件后再保存。`;
       return false;
     }
 
-    const revision = documentRevision(active.state);
-    const pending = this.pendingSaveRevisions.get(active.id);
+    const revision = documentRevision(tab.state);
+    const pending = this.pendingSaveRevisions.get(tab.id);
     if (pending?.revision === revision) return pending.promise;
     const snapshot: SaveSnapshot = {
-      tabId: active.id,
-      title: active.title,
-      path: active.path,
-      content: active.state.sliceDoc(),
+      tabId: tab.id,
+      title: tab.title,
+      path: tab.path,
+      content: tab.state.sliceDoc(),
       revision,
-      expectedDiskRevision: active.diskRevision,
+      expectedDiskRevision: tab.diskRevision,
     };
     this.saveState = "saving";
-    this.notice = `正在保存 ${active.title}…`;
-    const previous = this.saveQueues.get(active.id) ?? Promise.resolve(true);
+    this.notice = `正在保存 ${tab.title}…`;
+    const previous = this.saveQueues.get(tab.id) ?? Promise.resolve(true);
     let request: Promise<boolean>;
     request = previous
       .catch(() => false)
       .then(() => this.performSave(snapshot))
       .finally(() => {
-        if (this.saveQueues.get(active.id) === request) this.saveQueues.delete(active.id);
-        if (this.pendingSaveRevisions.get(active.id)?.promise === request) {
-          this.pendingSaveRevisions.delete(active.id);
+        if (this.saveQueues.get(tab.id) === request) this.saveQueues.delete(tab.id);
+        if (this.pendingSaveRevisions.get(tab.id)?.promise === request) {
+          this.pendingSaveRevisions.delete(tab.id);
         }
       });
-    this.saveQueues.set(active.id, request);
-    this.pendingSaveRevisions.set(active.id, { revision, promise: request });
+    this.saveQueues.set(tab.id, request);
+    this.pendingSaveRevisions.set(tab.id, { revision, promise: request });
     return request;
+  }
+
+  async saveAll(): Promise<SaveAllResult> {
+    this.captureActiveView();
+    const dirtyIds = this.tabs.filter((tab) => tab.dirty).map((tab) => tab.id);
+    const result: SaveAllResult = { saved: 0, failed: 0, skipped: 0 };
+
+    for (const id of dirtyIds) {
+      const tab = this.tabs.find((candidate) => candidate.id === id);
+      if (!tab?.path || tab.deleted || !tab.diskRevision) {
+        result.skipped += 1;
+        continue;
+      }
+      if (await this.saveTab(id)) result.saved += 1;
+      else result.failed += 1;
+    }
+
+    if (dirtyIds.length === 0) {
+      this.saveState = "saved";
+      this.notice = "没有需要保存的文件。";
+    } else if (result.failed === 0 && result.skipped === 0) {
+      this.saveState = "saved";
+      this.notice = `已保存 ${result.saved} 个文件。`;
+    } else {
+      this.saveState = "error";
+      this.notice = `保存完成：成功 ${result.saved} 个，失败 ${result.failed} 个，跳过 ${result.skipped} 个。`;
+    }
+    return result;
   }
 
   private async performSave(snapshot: SaveSnapshot): Promise<boolean> {
@@ -578,6 +625,10 @@ export class EditorWorkspace {
     }
     if (change.kind === "deleted") {
       for (const path of change.paths) this.handlePathDeleted(path);
+      return;
+    }
+    if (change.kind === "created") {
+      for (const path of change.paths) await this.handlePathRecreated(path);
       return;
     }
     if (change.kind !== "changed") return;
@@ -762,6 +813,56 @@ export class EditorWorkspace {
       });
       this.view.focus();
     }
+  }
+
+  private async handlePathRecreated(path: string): Promise<void> {
+    const deleted = this.tabs.find((tab) => tab.deleted && tab.path && samePath(tab.path, path));
+    if (!deleted) return;
+    try {
+      const file = await readTextFile(path);
+      const current = this.tabs.find((tab) => tab.id === deleted.id);
+      if (!current?.deleted || !current.path || !samePath(current.path, file.path)) return;
+      const disk = editorDocument(file.content);
+      const state = current.id === this.activeId && this.view ? this.view.state : current.state;
+      if (!current.dirty || (state.doc.eq(disk.text) && current.eol === disk.eol)) {
+        this.replaceDocument(current.id, file.content, file.revision);
+        this.notice = `已重新打开恢复的 ${current.title}。`;
+        return;
+      }
+
+      this.replaceTab(current.id, {
+        ...current,
+        state,
+        deleted: false,
+        externalModified: true,
+        externalRevision: file.revision,
+      });
+      if (usesLanguageServices(state.doc)) this.lspClient?.didOpen(file.path, state.doc.toString());
+      this.notice = `${current.title} 已在磁盘上重新创建，编辑器中的未保存内容已保留。`;
+      this.notifySessionChange();
+    } catch {
+      // A create notification can arrive before a writer has finished replacing the file.
+    }
+  }
+
+  closeAllTabs(): void {
+    this.captureActiveView();
+    for (const tab of this.tabs) {
+      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
+    }
+    this.tabs = [];
+    this.activeId = "";
+    this.saveState = "idle";
+    this.notice = "已关闭全部编辑器。";
+    this.notifySessionChange();
+  }
+
+  async openSearchMatch(path: string, line: number, column: number): Promise<void> {
+    const position = {
+      line: Math.max(0, Math.trunc(line) - 1),
+      character: Math.max(0, Math.trunc(column) - 1),
+    };
+    await this.openLocation({ path, range: { start: position, end: position } });
   }
 
   async restoreSessionTabs(paths: readonly string[], activePath?: string): Promise<void> {

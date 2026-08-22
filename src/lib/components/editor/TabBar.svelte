@@ -4,6 +4,8 @@
   import Icon from "../shell/Icon.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
   import type { KeybindingMap } from "../../keybindings";
+  import ContextMenu from "../ux/ContextMenu.svelte";
+  import { requestCloseTabs } from "../../editor/closeTabs";
 
   interface Props {
     workspace: EditorWorkspace;
@@ -16,29 +18,26 @@
     running: boolean;
     ux: UxStore;
     keybindings: KeybindingMap;
+    newFile: () => void;
   }
 
-  let { workspace, togglePanel, toggleZen, compile, run, stop, busy, running, ux, keybindings }: Props = $props();
+  let { workspace, togglePanel, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile }: Props = $props();
   let tabStrip: HTMLDivElement;
+  let menu = $state<{ x: number; y: number; tabId: string }>();
 
   async function closeTab(id: string): Promise<void> {
-    const tab = workspace.tabs.find((candidate) => candidate.id === id);
-    if (tab?.dirty) {
-      const accepted = await ux.confirm({
-        title: "关闭未保存的文件",
-        message: `“${tab.title}”包含未保存的更改，确定关闭吗？`,
-        confirmLabel: "仍然关闭",
-        danger: true,
-      });
-      if (!accepted) return;
-    }
-    workspace.closeTab(id);
+    await requestCloseTabs(workspace, ux, [id]);
   }
 
   async function handleTabKey(event: KeyboardEvent, id: string): Promise<void> {
     if ((event.target as HTMLElement).closest(".close-tab")) return;
     const index = workspace.tabs.findIndex((tab) => tab.id === id);
     let next = index;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      workspace.switchTab(id);
+      return;
+    }
     if (event.key === "ArrowLeft") next = (index - 1 + workspace.tabs.length) % workspace.tabs.length;
     else if (event.key === "ArrowRight") next = (index + 1) % workspace.tabs.length;
     else if (event.key === "Home") next = 0;
@@ -51,48 +50,83 @@
     event.preventDefault();
     workspace.switchTab(workspace.tabs[next].id);
     await tick();
-    tabStrip.querySelectorAll<HTMLElement>(".editor-tab")[next]?.focus();
+    tabStrip.querySelectorAll<HTMLElement>(".editor-tab-main")[next]?.focus();
+  }
+
+  async function saveAll(): Promise<void> {
+    const result = await workspace.saveAll();
+    if (result.failed || result.skipped) {
+      ux.error(`保存完成：成功 ${result.saved} 个，失败 ${result.failed} 个，跳过 ${result.skipped} 个。`);
+    } else if (result.saved > 0) {
+      ux.success(`已保存 ${result.saved} 个文件。`);
+    } else {
+      ux.info("没有需要保存的文件。");
+    }
+  }
+
+  async function saveTab(id: string): Promise<void> {
+    const tab = workspace.tabs.find((candidate) => candidate.id === id);
+    if (!tab) return;
+    if (await workspace.saveTab(id)) ux.success(`已保存 ${tab.title}。`);
+    else ux.error(workspace.notice);
+  }
+
+  function openMenu(event: MouseEvent, tabId: string): void {
+    event.preventDefault();
+    workspace.switchTab(tabId);
+    menu = { x: event.clientX, y: event.clientY, tabId };
   }
 </script>
 
 <header class="tab-bar">
   <div class="tab-strip" role="tablist" aria-label="已打开的编辑器" bind:this={tabStrip}>
     {#each workspace.tabs as tab (tab.id)}
-      <button
+      <div
         class="editor-tab"
+        role="presentation"
         class:active={tab.id === workspace.activeId}
         class:deleted={tab.deleted}
         class:external-modified={tab.externalModified}
-        role="tab"
-        aria-selected={tab.id === workspace.activeId}
-        tabindex={tab.id === workspace.activeId ? 0 : -1}
-        title={tab.path ?? tab.title}
-        onclick={() => workspace.switchTab(tab.id)}
-        onkeydown={(event) => void handleTabKey(event, tab.id)}
+        class:dirty-tab={tab.dirty}
+        oncontextmenu={(event) => openMenu(event, tab.id)}
+        onauxclick={(event) => {
+          if (event.button === 1) {
+            event.preventDefault();
+            void closeTab(tab.id);
+          }
+        }}
       >
-        <Icon name="cpp" size={15} />
-        <span class="tab-title">{tab.title}{tab.deleted ? "（已删除）" : ""}</span>
-        {#if tab.loading}<span class="tab-loading" aria-label="正在加载"></span>{/if}
-        {#if tab.externalModified}<span class="external-marker" title="磁盘内容已更改">!</span>{/if}
-        {#if tab.dirty}<span class="dirty" aria-label="未保存的更改"></span>{/if}
-        <span
+        <button
+          type="button"
+          class="editor-tab-main"
+          role="tab"
+          aria-selected={tab.id === workspace.activeId}
+          tabindex={tab.id === workspace.activeId ? 0 : -1}
+          title={tab.path ?? tab.title}
+          onclick={() => workspace.switchTab(tab.id)}
+          onkeydown={(event) => void handleTabKey(event, tab.id)}
+        >
+          <Icon name="cpp" size={15} />
+          <span class="tab-title">{tab.title}{tab.deleted ? "（已删除）" : ""}</span>
+          {#if tab.loading}<span class="tab-loading" aria-label="正在加载"></span>{/if}
+          {#if tab.externalModified}<span class="external-marker" title="磁盘内容已更改">!</span>{/if}
+          {#if tab.dirty}<span class="dirty" aria-label="未保存的更改"></span>{/if}
+        </button>
+        <button
+          type="button"
           class="close-tab"
-          role="button"
-          tabindex="0"
+          tabindex="-1"
           aria-label={`关闭 ${tab.title}`}
           onclick={(event) => {
             event.stopPropagation();
             void closeTab(tab.id);
           }}
-          onkeydown={(event) => {
-            if (event.key === "Enter" || event.key === " ") void closeTab(tab.id);
-          }}
         >
           <Icon name="close" size={13} />
-        </span>
-      </button>
+        </button>
+      </div>
     {/each}
-    <button class="tab-action add-tab" aria-label="新建编辑器" title="新建编辑器" onclick={() => workspace.createTab()}>
+    <button class="tab-action add-tab" aria-label="新建 C++ 文件" title={`新建 C++ 文件 · ${keybindings.newFile}`} onclick={newFile}>
       <Icon name="plus" size={15} />
     </button>
   </div>
@@ -111,3 +145,34 @@
     </button>
   </div>
 </header>
+
+{#if menu}
+  {@const selected = workspace.tabs.find((tab) => tab.id === menu!.tabId)}
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    close={() => (menu = undefined)}
+    items={[
+      {
+        label: "保存",
+        action: () => void saveTab(menu!.tabId),
+        disabled: !selected?.dirty || !selected.path || selected.deleted,
+      },
+      {
+        label: "保存全部",
+        action: () => void saveAll(),
+        disabled: !workspace.tabs.some((tab) => tab.dirty && tab.path && !tab.deleted),
+      },
+      { label: "关闭", separatorBefore: true, action: () => void requestCloseTabs(workspace, ux, [menu!.tabId]) },
+      {
+        label: "关闭其他编辑器",
+        action: () => void requestCloseTabs(workspace, ux, workspace.tabs.filter((tab) => tab.id !== menu!.tabId).map((tab) => tab.id)),
+        disabled: workspace.tabs.length < 2,
+      },
+      {
+        label: "关闭全部编辑器",
+        action: () => void requestCloseTabs(workspace, ux, workspace.tabs.map((tab) => tab.id)),
+      },
+    ]}
+  />
+{/if}

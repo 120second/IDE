@@ -5,6 +5,18 @@ export interface HealthStatus {
   databaseSchemaVersion: number;
 }
 
+export interface ToolStatus {
+  available: boolean;
+  requested: string;
+  resolvedPath?: string;
+}
+
+export interface ToolchainStatus {
+  compiler: ToolStatus;
+  debugger: ToolStatus;
+  languageServer: ToolStatus;
+}
+
 export interface CommandError {
   category:
     | "FILE_SYSTEM"

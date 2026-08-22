@@ -111,6 +111,27 @@
         lspStore = new LspStore(editor, shell);
         archiveStore = new ArchiveStore(editor);
         fileWorkspace = new WorkspaceStore(editor, archiveStore);
+        fileWorkspace.setWorkspaceChangeGuard(async (nextPath) => {
+          const dirty = editor.tabs.filter((tab) => tab.dirty);
+          if (dirty.length === 0) return true;
+          const names = dirty.slice(0, 5).map((tab) => `“${tab.title}”`).join("、");
+          const remainder = dirty.length > 5 ? ` 等 ${dirty.length} 个文件` : "";
+          const choice = await ux.choose({
+            title: "切换工作区",
+            message: `${names}${remainder}包含未保存的更改。\n即将打开：${nextPath}`,
+            confirmLabel: "保存并切换",
+            secondaryLabel: "不保存",
+            secondaryDanger: true,
+          });
+          if (choice === "cancel") return false;
+          if (choice === "secondary") return true;
+          for (const tab of dirty) {
+            if (await editor.saveTab(tab.id)) continue;
+            ux.error(editor.notice || `无法保存 ${tab.title}，已取消切换工作区。`);
+            return false;
+          }
+          return true;
+        });
         templateStore = new TemplateStore(editor, ux);
         execution = new ExecutionStore(editor, settings, shell);
         debugStore = new DebugStore(editor, execution, settings, shell);

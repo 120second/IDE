@@ -28,6 +28,8 @@ interface DirectoryState {
   children: FileEntry[];
 }
 
+type WorkspaceChangeGuard = (nextPath: string) => Promise<boolean>;
+
 export class WorkspaceStore {
   info = $state<WorkspaceInfo>();
   recent = $state.raw<WorkspaceInfo[]>([]);
@@ -43,6 +45,7 @@ export class WorkspaceStore {
   private visibleRowsCache: TreeRow[] = [];
   private visibleRowsRevision = -1;
   private disposed = false;
+  private workspaceChangeGuard: WorkspaceChangeGuard | undefined;
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -86,6 +89,10 @@ export class WorkspaceStore {
     this.eventTimer = undefined;
   }
 
+  setWorkspaceChangeGuard(guard: WorkspaceChangeGuard | undefined): void {
+    this.workspaceChangeGuard = guard;
+  }
+
   async openFolderPicker(): Promise<void> {
     try {
       const path = await chooseWorkspaceFolder();
@@ -96,11 +103,16 @@ export class WorkspaceStore {
   }
 
   async openPath(path: string): Promise<void> {
+    if (this.info && samePath(this.info.path, path)) return;
+    if (this.editor.tabs.length > 0 && this.workspaceChangeGuard) {
+      if (!await this.workspaceChangeGuard(path)) return;
+    }
     const started = performance.now();
     this.loading = true;
     this.error = "";
     try {
       const info = await openWorkspace(path);
+      if (this.editor.tabs.length > 0) this.editor.closeAllTabs();
       this.info = info;
       this.selectedPath = info.path;
       this.directories.clear();

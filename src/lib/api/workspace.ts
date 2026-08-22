@@ -6,6 +6,8 @@ import type {
   FileRevision,
   PathResult,
   WriteTextResult,
+  WorkspaceSearchResponse,
+  WorkspaceFileResponse,
   WorkspaceInfo,
 } from "../types/workspace";
 
@@ -29,6 +31,18 @@ export function listRecentWorkspaces(): Promise<WorkspaceInfo[]> {
 
 export function listDirectory(path: string): Promise<FileEntry[]> {
   return invoke<FileEntry[]>("list_directory", { path });
+}
+
+export function searchWorkspace(
+  query: string,
+  caseSensitive: boolean,
+  wholeWord: boolean,
+): Promise<WorkspaceSearchResponse> {
+  return invoke<WorkspaceSearchResponse>("search_workspace", { query, caseSensitive, wholeWord });
+}
+
+export function findWorkspaceFiles(query: string): Promise<WorkspaceFileResponse> {
+  return invoke<WorkspaceFileResponse>("find_workspace_files", { query });
 }
 
 export function readTextFile(path: string): Promise<FileContent> {

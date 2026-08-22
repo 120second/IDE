@@ -70,9 +70,19 @@
       const row = rows[index];
       if (!row.expanded) void fileWorkspace.toggleDirectory(entry);
       else void focusRow(Math.min(rows.length - 1, index + 1));
-    } else if (event.key === "ArrowLeft" && entry.kind === "directory") {
+    } else if (event.key === "ArrowLeft") {
       event.preventDefault();
-      if (rows[index].expanded) void fileWorkspace.toggleDirectory(entry);
+      const row = rows[index];
+      if (entry.kind === "directory" && row.expanded) {
+        void fileWorkspace.toggleDirectory(entry);
+        return;
+      }
+      for (let parentIndex = index - 1; parentIndex >= 0; parentIndex -= 1) {
+        if (rows[parentIndex].depth < row.depth) {
+          void focusRow(parentIndex);
+          return;
+        }
+      }
     }
   }
 
@@ -188,6 +198,7 @@
           <button
             class="tree-chevron"
             class:expanded={row.expanded}
+            tabindex="-1"
             aria-label={row.expanded ? `收起 ${row.entry.name}` : `展开 ${row.entry.name}`}
             onclick={(event) => {
               event.stopPropagation();

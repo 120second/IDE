@@ -109,6 +109,13 @@ impl AppSettings {
 fn default_keybindings() -> BTreeMap<String, String> {
     [
         ("save", "Ctrl+S"),
+        ("newFile", "Ctrl+N"),
+        ("quickOpen", "Ctrl+P"),
+        ("commandPalette", "Ctrl+Shift+P"),
+        ("searchWorkspace", "Ctrl+Shift+F"),
+        ("closeEditor", "Ctrl+W"),
+        ("nextEditor", "Ctrl+Tab"),
+        ("previousEditor", "Ctrl+Shift+Tab"),
         ("toggleSidebar", "Ctrl+B"),
         ("quickTemplate", "Ctrl+Alt+T"),
         ("quickArchive", "Ctrl+Shift+A"),

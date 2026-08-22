@@ -61,3 +61,38 @@ pub struct WorkspaceChange {
     pub kind: &'static str,
     pub paths: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSearchMatch {
+    pub path: String,
+    pub relative_path: String,
+    pub line: usize,
+    pub column: usize,
+    pub preview: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSearchResponse {
+    pub results: Vec<WorkspaceSearchMatch>,
+    pub limit_hit: bool,
+    pub files_scanned: usize,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileMatch {
+    pub path: String,
+    pub relative_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceFileResponse {
+    pub results: Vec<WorkspaceFileMatch>,
+    pub limit_hit: bool,
+    pub files_scanned: usize,
+    pub duration_ms: u64,
+}

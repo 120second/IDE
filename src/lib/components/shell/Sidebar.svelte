@@ -16,6 +16,7 @@
   import TemplateSidebar from "../templates/TemplateSidebar.svelte";
   import Icon from "./Icon.svelte";
   import DebugPanel from "../debug/DebugPanel.svelte";
+  import SearchPanel from "../search/SearchPanel.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -89,8 +90,7 @@
     {:else if shell.activeActivity === "testcases"}
       <TestcasePanel {workspace} {execution} {generator} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "search"}
-      <div class="search-box"><Icon name="search" size={15} /><input aria-label="搜索" placeholder="搜索工作区" /></div>
-      <div class="empty-state"><p>搜索工作区文件</p><span>请先打开一个文件夹。</span></div>
+      <SearchPanel {fileWorkspace} editor={workspace} />
     {:else if shell.activeActivity === "templates"}
       <TemplateSidebar {templateStore} />
     {:else if shell.activeActivity === "debug"}
