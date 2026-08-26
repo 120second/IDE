@@ -12,7 +12,7 @@
     { id: "search", label: "搜索", icon: "search" },
     { id: "templates", label: "模板", icon: "templates" },
     { id: "debug", label: "调试", icon: "debug" },
-    { id: "judge", label: "压力测试", icon: "judge" },
+    { id: "judge", label: "对拍", icon: "judge" },
   ];
 
   let { shell }: Props = $props();

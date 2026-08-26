@@ -67,7 +67,7 @@
     command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent()),
     command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }),
     command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }),
-    command("stress.start", "开始压力测试", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
+    command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
     command("view.settings", "打开设置", "视图", undefined, () => showActivity("settings")),

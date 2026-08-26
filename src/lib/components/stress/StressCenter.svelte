@@ -37,9 +37,9 @@
 <main class="stress-center">
   <header class="stress-page-header">
     <div>
-      <span class="stress-eyebrow">第 8 批 · 压力测试</span>
-      <h1>压力测试</h1>
-      <p>使用相同随机输入并发运行待测程序与暴力程序，在首个差异处立即停止。</p>
+      <span class="stress-eyebrow">算法竞赛 · 随机对拍</span>
+      <h1>对拍</h1>
+      <p>持续生成随机输入，比较待测程序与暴力程序，并在发现首个反例时停止。</p>
     </div>
     <div class="stress-header-state" class:failed={stress.status === "failed"} class:running={stress.running}>
       <strong>{statusLabel()}</strong>
@@ -47,7 +47,7 @@
     </div>
   </header>
 
-  <section class="stress-config" aria-label="压力测试配置">
+  <section class="stress-config" aria-label="对拍配置">
     <div class="stress-source-card generator">
       <span>数据生成器</span>
       <strong>当前可视化随机规则</strong>
@@ -73,7 +73,7 @@
       </label>
       <label class="stress-infinite">
         <input type="checkbox" disabled={stress.running} bind:checked={stress.infinite} />
-        <span>无限压力测试，直到手动停止</span>
+        <span>持续对拍，直到手动停止</span>
       </label>
       <label class="stress-seed">
         <span>uint64 种子</span>
@@ -92,13 +92,13 @@
       {#if stress.running}
         <button class="stress-stop" disabled={stress.stopping} onclick={() => void stress.stop()}>{stress.stopping ? "正在停止…" : "停止"}</button>
       {:else}
-        <button class="primary-button" disabled={generator.loading} onclick={() => void stress.start()}>{generator.loading ? "正在加载生成器…" : "开始压力测试"}</button>
+        <button class="primary-button" disabled={generator.loading} onclick={() => void stress.start()}>{generator.loading ? "正在加载生成器…" : "开始对拍"}</button>
       {/if}
       <button class="secondary-button" disabled={stress.running || (!stress.logs.length && !stress.failure)} onclick={() => stress.clear()}>清空结果</button>
     </div>
   </section>
 
-  <section class="stress-stats" aria-label="压力测试统计">
+  <section class="stress-stats" aria-label="对拍统计">
     <div><span>总用例</span><strong>{stress.stats.totalCases}</strong></div>
     <div><span>通过</span><strong class="success">{stress.stats.passed}</strong></div>
     <div><span>失败</span><strong class="failure">{stress.stats.failed}</strong></div>
@@ -138,7 +138,7 @@
           <button class="primary-button" onclick={() => void stress.saveFailureAsTestcase()}>保存为测试点</button>
           <button class="secondary-button" disabled={stress.running} onclick={() => void stress.debugFailure()}>调试此用例</button>
           <button class="secondary-button" onclick={() => void stress.copyFailureInput()}>复制输入</button>
-          <button class="secondary-button" disabled={stress.running || (!stress.infinite && stress.failure.index >= stress.iterations)} onclick={() => void stress.continueAfterFailure()}>继续压力测试</button>
+          <button class="secondary-button" disabled={stress.running || (!stress.infinite && stress.failure.index >= stress.iterations)} onclick={() => void stress.continueAfterFailure()}>继续对拍</button>
         </div>
         <div class="stress-failure-meta">
           <span>待测程序：{stress.failure.solutionTimeMs}ms{stress.failure.solutionExitCode === undefined ? "" : ` · 退出码 ${stress.failure.solutionExitCode}`}</span>

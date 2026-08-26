@@ -143,7 +143,6 @@
   <div class="sidebar-tabs">
     <button class:active={activeTab === "fixed"} onclick={() => (activeTab = "fixed")}>固定测试点</button>
     <button class:active={activeTab === "random"} onclick={() => (activeTab = "random")}>随机生成</button>
-    <button disabled title="将在第 7 批次中提供">对拍</button>
   </div>
 
   {#if activeTab === "random"}

@@ -38,7 +38,7 @@
     search: "搜索",
     templates: "模板",
     debug: "运行与调试",
-    judge: "压力测试",
+    judge: "对拍",
     settings: "设置",
   };
 
@@ -99,8 +99,8 @@
     {:else if shell.activeActivity === "judge"}
       <div class="empty-state">
         <Icon name="judge" size={30} />
-        <p>压力测试</p>
-        <span>Generator、Solution 与 Brute 会在独立工作区中配置和运行。</span>
+        <p>对拍</p>
+        <span>使用随机数据比较待测程序与暴力程序，自动寻找反例。</span>
       </div>
     {/if}
   </div>

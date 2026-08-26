@@ -74,7 +74,7 @@ export const SHORTCUT_LABELS: Record<ShortcutId, string> = {
   quickArchive: "快速归档",
   runCurrent: "运行当前文件",
   runAll: "运行全部测试点",
-  stress: "开始压力测试",
+  stress: "开始对拍",
   debug: "开始调试",
   togglePanel: "切换底部面板",
 };

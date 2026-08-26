@@ -127,7 +127,7 @@ export class StressStore {
     const saved = await this.execution.saveTestcase({
       sourcePath: this.solutionPath,
       kind: "hack",
-      name: `压力测试失败 · #${failure.index} · 种子 ${failure.seed}`,
+      name: `对拍反例 · #${failure.index} · 种子 ${failure.seed}`,
       input: failure.input,
       expectedOutput: failure.bruteOutput,
       enabled: true,
@@ -143,7 +143,7 @@ export class StressStore {
     }
     this.shell.activeActivity = "debug";
     this.shell.sidebarVisible = true;
-    await this.debuggerStore.startInput(failure.input, `压力测试失败 #${failure.index}`);
+    await this.debuggerStore.startInput(failure.input, `对拍反例 #${failure.index}`);
   }
 
   async copyFailureInput(): Promise<void> {
@@ -212,7 +212,7 @@ export class StressStore {
     this.running = true;
     this.stopping = false;
     this.status = "compiling";
-    this.message = continuing ? "正在继续压力测试…" : "正在准备压力测试…";
+    this.message = continuing ? "正在继续对拍…" : "正在准备对拍…";
     this.error = "";
     this.notice = "";
     if (!continuing) {

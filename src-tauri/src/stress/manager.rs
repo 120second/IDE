@@ -167,12 +167,7 @@ impl StressManager {
             .executable_path
             .ok_or_else(|| stress_error("暴力程序编译器未返回可执行文件"))?;
 
-        emit_state(
-            emit,
-            &session.session_id,
-            StressStatus::Running,
-            "压力测试正在运行",
-        );
+        emit_state(emit, &session.session_id, StressStatus::Running, "正在对拍");
         let started = Instant::now();
         let mut current_seed = request
             .seed
@@ -193,12 +188,12 @@ impl StressManager {
                     emit,
                     &session.session_id,
                     StressStatus::Stopped,
-                    "压力测试已停止",
+                    "对拍已停止",
                 );
                 return Ok(summary(
                     request,
                     StressStatus::Stopped,
-                    "压力测试已停止",
+                    "对拍已停止",
                     current_seed,
                     stats,
                     None,
@@ -247,12 +242,12 @@ impl StressManager {
                     emit,
                     &session.session_id,
                     StressStatus::Stopped,
-                    "压力测试已停止",
+                    "对拍已停止",
                 );
                 return Ok(summary(
                     request,
                     StressStatus::Stopped,
-                    "压力测试已停止",
+                    "对拍已停止",
                     next_case_seed,
                     stats,
                     None,
@@ -288,7 +283,7 @@ impl StressManager {
                     emit,
                     &session.session_id,
                     StressStatus::Failed,
-                    "发现失败用例，压力测试已暂停",
+                    "发现反例，对拍已暂停",
                 );
                 return Ok(summary(
                     request,
@@ -321,12 +316,12 @@ impl StressManager {
             emit,
             &session.session_id,
             StressStatus::Completed,
-            "已完成全部压力测试",
+            "对拍已完成",
         );
         Ok(summary(
             request,
             StressStatus::Completed,
-            "已完成全部压力测试",
+            "对拍已完成",
             current_seed,
             stats,
             None,
