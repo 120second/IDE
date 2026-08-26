@@ -8,24 +8,16 @@
     fileWorkspace: WorkspaceStore;
     shell: ShellStore;
     keybindings: KeybindingMap;
+    newFile: () => void;
   }
 
-  let { fileWorkspace, shell, keybindings }: Props = $props();
+  let { fileWorkspace, shell, keybindings, newFile }: Props = $props();
 
   function showExplorer(): void {
     shell.activeActivity = "explorer";
     shell.sidebarVisible = true;
   }
 
-  async function createSourceFile(): Promise<void> {
-    if (!fileWorkspace.info) await fileWorkspace.openFolderPicker();
-    const root = fileWorkspace.info?.path;
-    if (!root) return;
-    const entered = window.prompt("新建 C++ 文件", "main.cpp")?.trim();
-    if (!entered) return;
-    const name = entered.includes(".") ? entered : `${entered}.cpp`;
-    await fileWorkspace.create(root, name, "file", "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n\n    return 0;\n}\n");
-  }
 </script>
 
 <section class="editor-welcome" aria-label="LightCP 欢迎页">
@@ -43,7 +35,7 @@
       <button onclick={() => void fileWorkspace.openFolderPicker()}>
         <Icon name="folder" size={17} /><span><strong>打开文件夹</strong><small>选择一个竞赛工作区</small></span>
       </button>
-      <button onclick={() => void createSourceFile()}>
+      <button onclick={newFile}>
         <Icon name="plus" size={17} /><span><strong>新建 C++ 文件</strong><small>{fileWorkspace.info ? `在 ${fileWorkspace.info.name} 中创建` : "先选择工作区"}</small></span>
       </button>
       <button onclick={showExplorer}>

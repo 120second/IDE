@@ -1,11 +1,9 @@
 <script lang="ts">
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ArchiveStore } from "../../stores/archive.svelte";
-  import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
   import type { FileEntry } from "../../types/workspace";
   import Icon from "../shell/Icon.svelte";
-  import FileTemplateDialog from "../templates/FileTemplateDialog.svelte";
   import FileTree from "./FileTree.svelte";
   import ArchivePanel from "../archive/ArchivePanel.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
@@ -15,10 +13,10 @@
   interface Props {
     fileWorkspace: WorkspaceStore;
     editor: EditorWorkspace;
-    templateStore: TemplateStore;
     archiveStore: ArchiveStore;
     ux: UxStore;
     keybindings: KeybindingMap;
+    newFile: (parent: string) => void;
   }
 
   interface ContextMenuState {
@@ -27,9 +25,8 @@
     entry: FileEntry;
   }
 
-  let { fileWorkspace, editor, templateStore, archiveStore, ux, keybindings }: Props = $props();
+  let { fileWorkspace, editor, archiveStore, ux, keybindings, newFile }: Props = $props();
   let menu = $state<ContextMenuState>();
-  let fileDialogParent = $state<string>();
   let view = $state<"files" | "archive">("files");
   let rootDropActive = $state(false);
   let selectedEntry = $derived(
@@ -45,7 +42,7 @@
     const parent = selectedDirectory(entry);
     if (!parent) return;
     if (kind === "file") {
-      fileDialogParent = parent;
+      newFile(parent);
       return;
     }
     const name = window.prompt("新文件夹名称", "新建文件夹")?.trim();
@@ -189,14 +186,5 @@
       { label: "重命名", separatorBefore: true, action: () => requestRename(menu!.entry) },
       { label: "删除", danger: true, action: () => void requestDelete(menu!.entry) },
     ]}
-  />
-{/if}
-
-{#if fileDialogParent}
-  <FileTemplateDialog
-    parent={fileDialogParent}
-    {templateStore}
-    {fileWorkspace}
-    close={() => (fileDialogParent = undefined)}
   />
 {/if}

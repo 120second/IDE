@@ -29,6 +29,7 @@
     archiveStore: ArchiveStore;
     debug: DebugStore;
     ux: UxStore;
+    newFile: (parent: string) => void;
   }
 
   const titles: Record<ActivityId, string> = {
@@ -41,7 +42,7 @@
     settings: "设置",
   };
 
-  let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug, ux }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug, ux, newFile }: Props = $props();
   let stopResize = () => {};
   onDestroy(() => stopResize());
 
@@ -86,7 +87,7 @@
     {#if shell.activeActivity === "settings"}
       <SettingsPanel {settings} />
     {:else if shell.activeActivity === "explorer"}
-      <ExplorerPanel {fileWorkspace} {templateStore} {archiveStore} editor={workspace} {ux} keybindings={settings.value.keybindings} />
+      <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "testcases"}
       <TestcasePanel {workspace} {execution} {generator} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "search"}

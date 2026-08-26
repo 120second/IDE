@@ -371,6 +371,39 @@ describe("editor save checkpoint", () => {
     expect(workspace.activeTab?.scrollTop).toBe(10);
   });
 
+  it("treats null recovery content as an unloaded clean file", async () => {
+    workspaceApi.readTextFile.mockResolvedValue({
+      path: "D:\\Code\\main.cpp",
+      content: "restored from disk",
+      revision: "disk-1",
+    });
+    const workspace = new EditorWorkspace(DEFAULT_SETTINGS);
+
+    await workspace.restoreRecoverySnapshot({
+      version: 1,
+      workspacePath: "D:\\Code",
+      activeTabId: "clean-null",
+      tabs: [{
+        id: "clean-null",
+        title: "main.cpp",
+        path: "D:\\Code\\main.cpp",
+        dirty: false,
+        deleted: false,
+        externalModified: false,
+        diskRevision: "disk-0",
+        eol: "lf",
+        content: null as unknown as string,
+        selection: { anchor: 4, head: 4 },
+        scrollTop: 12,
+      }],
+    });
+
+    expect(workspace.activeTab?.state.doc.toString()).toBe("restored from disk");
+    expect(workspace.activeTab?.state.selection.main.head).toBe(4);
+    expect(workspace.activeTab?.dirty).toBe(false);
+    expect(workspace.activeTab?.diskRevision).toBe("disk-1");
+  });
+
   it("does not rebuild tab state when breakpoint locations are unchanged", async () => {
     workspaceApi.readTextFile.mockResolvedValue({
       path: "D:\\Code\\main.cpp",

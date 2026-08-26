@@ -12,9 +12,10 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             {
+              // CodeMirror and Lezer contain package-level cycles. Keep them in
+              // one chunk so WebView2 never observes a half-initialized class.
               name: "codemirror",
               test: /node_modules[\\/](@codemirror|@lezer)[\\/]/,
-              maxSize: 400_000,
               priority: 10,
             },
           ],

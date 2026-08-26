@@ -1621,7 +1621,8 @@ input:focus-visible {
 .template-center-header > div,
 .template-editor-toolbar > div:first-child,
 .history-dialog > header > div,
-.file-template-dialog > header > div {
+.file-template-dialog > header > div,
+.confirmation-dialog > header > div {
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -1635,7 +1636,8 @@ input:focus-visible {
 .template-center-header span,
 .template-editor-toolbar span,
 .history-dialog > header span,
-.file-template-dialog > header span {
+.file-template-dialog > header span,
+.confirmation-dialog > header span {
   color: var(--text-muted);
   font-size: 9.5px;
 }
@@ -2011,7 +2013,8 @@ input:focus-visible {
 
 .history-dialog,
 .file-template-dialog,
-.template-quick-search {
+.template-quick-search,
+.confirmation-dialog {
   overflow: hidden;
   border: 1px solid var(--border-strong);
   border-radius: 9px;
@@ -2028,7 +2031,8 @@ input:focus-visible {
 }
 
 .history-dialog > header,
-.file-template-dialog > header {
+.file-template-dialog > header,
+.confirmation-dialog > header {
   display: flex;
   height: 50px;
   flex: 0 0 50px;
@@ -2038,8 +2042,21 @@ input:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 
+.file-template-dialog > header.dialog-drag-handle,
+.confirmation-dialog > header.dialog-drag-handle {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.file-template-dialog.dragging > header.dialog-drag-handle,
+.confirmation-dialog.dragging > header.dialog-drag-handle {
+  cursor: grabbing;
+}
+
 .history-dialog > header button,
-.file-template-dialog > header button {
+.file-template-dialog > header button,
+.confirmation-dialog > header button {
   display: grid;
   width: 26px;
   height: 26px;
@@ -3286,7 +3303,7 @@ kbd {
 .dirty {
   width: 7px;
   height: 7px;
-  flex: 0 0 auto;
+  flex: 0 0 7px;
   border-radius: 50%;
   background: var(--text-secondary);
 }
@@ -3298,6 +3315,8 @@ kbd {
   flex: 0 0 auto;
   place-items: center;
   border-radius: 4px;
+  color: var(--text-secondary);
+  background: transparent;
   opacity: 0;
 }
 
@@ -3306,20 +3325,9 @@ kbd {
   opacity: 1;
 }
 
-.editor-tab.dirty-tab .close-tab {
-  display: none;
-}
-
-.editor-tab.dirty-tab:hover .close-tab {
-  display: grid;
-}
-
-.editor-tab:hover .dirty {
-  display: none;
-}
-
 .close-tab:hover {
-  background: var(--hover-background);
+  color: var(--text-primary);
+  background: transparent;
 }
 
 .add-tab {
@@ -5863,18 +5871,18 @@ input[type="range"]:disabled {
 }
 
 .confirmation-dialog {
-  width: min(420px, calc(100vw - 32px));
-  padding: 18px;
-  border: 1px solid var(--border-strong);
-  border-radius: 9px;
-  color: var(--text-primary);
-  background: var(--panel-background);
-  box-shadow: 0 18px 55px rgb(0 0 0 / 50%);
+  display: flex;
+  width: min(520px, 82vw);
+  flex-direction: column;
 }
 
-.confirmation-dialog h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
+.confirmation-dialog > header strong {
+  font-size: 13px;
+}
+
+.confirmation-content {
+  min-height: 82px;
+  padding: 16px 18px;
 }
 
 .confirmation-dialog p {
@@ -5887,9 +5895,13 @@ input[type="range"]:disabled {
 
 .confirmation-actions {
   display: flex;
+  height: 49px;
+  flex: 0 0 49px;
+  align-items: center;
   justify-content: flex-end;
-  gap: 7px;
-  margin-top: 18px;
+  gap: 6px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
 }
 
 .context-menu button:focus-visible {

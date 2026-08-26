@@ -949,7 +949,8 @@ export class EditorWorkspace {
     const restored: EditorTab[] = [];
     for (const record of snapshot.tabs.slice(0, 64)) {
       if (!record.id || !record.title) continue;
-      if (record.content === undefined) {
+      const recoveredContent = typeof record.content === "string" ? record.content : undefined;
+      if (recoveredContent === undefined) {
         if (!record.path) continue;
         const state = this.createState("", undefined, this.currentAppearance, record.eol);
         restored.push({
@@ -973,7 +974,7 @@ export class EditorWorkspace {
 
       let eol = record.eol;
       let state = this.withBreakpointLines(
-        this.createState(record.content, undefined, this.currentAppearance, eol),
+        this.createState(recoveredContent, undefined, this.currentAppearance, eol),
         record.path,
       );
       state = restoreSelection(state, record.selection);

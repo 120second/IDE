@@ -35,13 +35,17 @@ pub struct EditorRecoverySelection {
 pub struct EditorRecoveryTab {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     pub dirty: bool,
     pub deleted: bool,
     pub external_modified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub external_revision: Option<String>,
     pub eol: LineEnding,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     pub selection: EditorRecoverySelection,
     pub scroll_top: f64,
@@ -51,7 +55,9 @@ pub struct EditorRecoveryTab {
 #[serde(rename_all = "camelCase")]
 pub struct EditorRecoverySnapshot {
     pub version: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub active_tab_id: Option<String>,
     pub tabs: Vec<EditorRecoveryTab>,
 }
@@ -295,6 +301,26 @@ mod tests {
             .expect("snapshot exists");
         assert_eq!(loaded.tabs[0].content.as_deref(), Some("saved"));
         fs::remove_dir_all(directory).expect("cleanup recovery directory");
+    }
+
+    #[test]
+    fn absent_optional_fields_are_omitted_from_json() {
+        let mut snapshot = sample_snapshot("clean");
+        snapshot.workspace_path = None;
+        snapshot.active_tab_id = None;
+        snapshot.tabs[0].dirty = false;
+        snapshot.tabs[0].disk_revision = None;
+        snapshot.tabs[0].external_revision = None;
+        snapshot.tabs[0].content = None;
+
+        let json = serde_json::to_value(snapshot).expect("serialize recovery snapshot");
+        let object = json.as_object().expect("snapshot object");
+        assert!(!object.contains_key("workspacePath"));
+        assert!(!object.contains_key("activeTabId"));
+        let tab = json["tabs"][0].as_object().expect("tab object");
+        assert!(!tab.contains_key("diskRevision"));
+        assert!(!tab.contains_key("externalRevision"));
+        assert!(!tab.contains_key("content"));
     }
 
     fn sample_snapshot(content: &str) -> EditorRecoverySnapshot {

@@ -12,10 +12,27 @@
   }
 
   let { parent, templateStore, fileWorkspace, close }: Props = $props();
+  let dialog: HTMLDivElement;
   let nameInput: HTMLInputElement;
   let name = $state("solution.cpp");
   let selectedId = $state<number>();
   let creating = $state(false);
+  let dragX = $state(0);
+  let dragY = $state(0);
+
+  interface DragState {
+    pointerId: number;
+    pointerX: number;
+    pointerY: number;
+    dialogLeft: number;
+    dialogTop: number;
+    dialogWidth: number;
+    dialogHeight: number;
+    offsetX: number;
+    offsetY: number;
+  }
+
+  let dragState = $state<DragState>();
 
   onMount(() => {
     let disposed = false;
@@ -62,11 +79,75 @@
     if (value === "Competitive programming entry point with multiple test cases.") return "适用于多组测试的竞赛程序入口。";
     return value;
   }
+
+  function beginDrag(event: PointerEvent): void {
+    if (event.button !== 0 || (event.target instanceof Element && event.target.closest("button"))) return;
+    event.preventDefault();
+    const bounds = dialog.getBoundingClientRect();
+    dragState = {
+      pointerId: event.pointerId,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      dialogLeft: bounds.left,
+      dialogTop: bounds.top,
+      dialogWidth: bounds.width,
+      dialogHeight: bounds.height,
+      offsetX: dragX,
+      offsetY: dragY,
+    };
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  function drag(event: PointerEvent): void {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    const margin = 8;
+    const desiredLeft = dragState.dialogLeft + event.clientX - dragState.pointerX;
+    const desiredTop = dragState.dialogTop + event.clientY - dragState.pointerY;
+    const maxLeft = Math.max(margin, window.innerWidth - dragState.dialogWidth - margin);
+    const maxTop = Math.max(margin, window.innerHeight - dragState.dialogHeight - margin);
+    const left = Math.max(margin, Math.min(desiredLeft, maxLeft));
+    const top = Math.max(margin, Math.min(desiredTop, maxTop));
+    dragX = dragState.offsetX + left - dragState.dialogLeft;
+    dragY = dragState.offsetY + top - dragState.dialogTop;
+  }
+
+  function endDrag(event: PointerEvent): void {
+    if (!dragState || event.pointerId !== dragState.pointerId) return;
+    const handle = event.currentTarget as HTMLElement;
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    dragState = undefined;
+  }
+
+  function handleDialogKey(event: KeyboardEvent): void {
+    event.stopPropagation();
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    close();
+  }
 </script>
 
 <div class="modal-backdrop" role="presentation" onclick={close}>
-  <div class="file-template-dialog" role="dialog" aria-modal="true" aria-label="从模板新建文件" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
-    <header><div><strong>新建 C++ 文件</strong><span>选择文件模板</span></div><button aria-label="关闭" onclick={close}><Icon name="close" size={14} /></button></header>
+  <div
+    class="file-template-dialog"
+    class:dragging={Boolean(dragState)}
+    role="dialog"
+    aria-modal="true"
+    aria-label="从模板新建文件"
+    tabindex="-1"
+    style:transform={`translate3d(${dragX}px, ${dragY}px, 0)`}
+    bind:this={dialog}
+    onclick={(event) => event.stopPropagation()}
+    onkeydown={handleDialogKey}
+  >
+    <header
+      class="dialog-drag-handle"
+      role="group"
+      aria-label="新建文件对话框标题栏，可拖动"
+      onpointerdown={beginDrag}
+      onpointermove={drag}
+      onpointerup={endDrag}
+      onpointercancel={endDrag}
+    ><div><strong>新建 C++ 文件</strong><span>选择文件模板</span></div><button aria-label="关闭" onclick={close}><Icon name="close" size={14} /></button></header>
     <label><span>文件名</span><input bind:this={nameInput} bind:value={name} onkeydown={(event) => { if (event.key === "Enter") void submit(); }} /></label>
     <div class="file-template-options" role="radiogroup" aria-label="文件模板">
       {#each templateStore.fileTemplates as template (template.id)}

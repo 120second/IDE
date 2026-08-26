@@ -31,6 +31,7 @@
   import { requestCloseTabs } from "../../editor/closeTabs";
   import CommandPalette from "./CommandPalette.svelte";
   import type { WorkbenchCommand } from "../../types/commands";
+  import FileTemplateDialog from "../templates/FileTemplateDialog.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -53,6 +54,7 @@
   let quickSearchOpen = $state(false);
   let quickFileOpen = $state(false);
   let commandPaletteOpen = $state(false);
+  let fileDialogParent = $state<string>();
   let workbenchCommands = $derived<WorkbenchCommand[]>([
     command("file.new", "新建 C++ 文件", "文件", "newFile", () => void createSourceFile()),
     command("file.openFolder", "打开文件夹", "文件", undefined, () => void fileWorkspace.openFolderPicker()),
@@ -272,14 +274,11 @@
     }
   }
 
-  async function createSourceFile(): Promise<void> {
+  async function createSourceFile(parent?: string): Promise<void> {
     if (!fileWorkspace.info) await fileWorkspace.openFolderPicker();
     const root = fileWorkspace.info?.path;
     if (!root) return;
-    const entered = window.prompt("新建 C++ 文件", "main.cpp")?.trim();
-    if (!entered) return;
-    const name = entered.includes(".") ? entered : `${entered}.cpp`;
-    await fileWorkspace.create(root, name, "file", "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n\n    return 0;\n}\n");
+    fileDialogParent = parent ?? root;
   }
 </script>
 
@@ -289,7 +288,19 @@
     {#if !shell.zenMode}<ActivityBar {shell} />{/if}
     <div class="workbench">
       {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge"}
-        <Sidebar {shell} {workspace} {fileWorkspace} {templateStore} {execution} {generator} {archiveStore} debug={debugStore} {settings} {ux} />
+        <Sidebar
+          {shell}
+          {workspace}
+          {fileWorkspace}
+          {templateStore}
+          {execution}
+          {generator}
+          {archiveStore}
+          debug={debugStore}
+          {settings}
+          {ux}
+          newFile={(parent) => void createSourceFile(parent)}
+        />
       {/if}
       <section class="editor-column" aria-label="编辑器工作台">
         {#if shell.activeActivity === "templates" && !shell.zenMode}
@@ -314,7 +325,12 @@
             {#if workspace.activeTab}
               <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
             {:else}
-              <WelcomeView {fileWorkspace} {shell} keybindings={settings.value.keybindings} />
+              <WelcomeView
+                {fileWorkspace}
+                {shell}
+                keybindings={settings.value.keybindings}
+                newFile={() => void createSourceFile()}
+              />
             {/if}
           </div>
           {#if shell.bottomPanelVisible && !shell.zenMode}
@@ -333,6 +349,18 @@
 </div>
 
 <UxOverlay {ux} />
+
+{#if fileDialogParent}
+  <FileTemplateDialog
+    parent={fileDialogParent}
+    {templateStore}
+    {fileWorkspace}
+    close={() => {
+      fileDialogParent = undefined;
+      workspace.focus();
+    }}
+  />
+{/if}
 
 {#if quickSearchOpen}
   <TemplateQuickSearch
