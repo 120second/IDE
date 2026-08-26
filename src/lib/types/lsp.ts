@@ -64,5 +64,9 @@ export type LspConnectionState =
 
 export type LspEvent =
   | { type: "state"; state: LspConnectionState; message: string }
-  | { type: "diagnostics"; path: string; diagnostics: Omit<LspDiagnostic, "path">[] };
-
+  | {
+      type: "diagnostics";
+      path: string;
+      version?: number;
+      diagnostics: Omit<LspDiagnostic, "path">[];
+    };

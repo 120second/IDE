@@ -687,6 +687,7 @@ impl ClangdSession {
         if !crate::paths::is_within(&self.workspace_root, &path) {
             return;
         }
+        let version = params.get("version").and_then(Value::as_i64);
         let diagnostics = params
             .get("diagnostics")
             .and_then(Value::as_array)
@@ -697,6 +698,7 @@ impl ClangdSession {
             .collect();
         (self.emit)(LspEvent::Diagnostics {
             path: path.to_string_lossy().into_owned(),
+            version,
             diagnostics,
         });
     }

@@ -36,6 +36,33 @@ const secondChange: LspTextChange = {
   text: "b",
 };
 
+function diagnosticEvent(
+  path: string,
+  message: string,
+  version?: number,
+  severity = 1,
+): Extract<LspEvent, { type: "diagnostics" }> {
+  return {
+    type: "diagnostics",
+    path,
+    version,
+    diagnostics: [{
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 1 },
+      },
+      severity,
+      message,
+      source: "clangd",
+      code: message,
+    }],
+  };
+}
+
+function publish(store: LspStore, event: LspEvent): void {
+  (store as unknown as { handleEvent(event: LspEvent): void }).handleEvent(event);
+}
+
 describe("LSP incremental batching", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -82,24 +109,76 @@ describe("LSP incremental batching", () => {
     store.didClose(path);
     editor.setLspDiagnostics.mockClear();
 
-    const event: LspEvent = {
-      type: "diagnostics",
-      path,
-      diagnostics: [{
-        range: {
-          start: { line: 0, character: 0 },
-          end: { line: 0, character: 1 },
-        },
-        severity: 1,
-        message: "late",
-        source: "clangd",
-        code: "late",
-      }],
-    };
-    (store as unknown as { handleEvent(event: LspEvent): void }).handleEvent(event);
+    publish(store, diagnosticEvent(path, "late"));
 
     expect(store.diagnosticsFor(path)).toEqual([]);
     expect(editor.setLspDiagnostics).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it("ignores diagnostics published for an older document version", () => {
+    const editor = {
+      setLspClient: vi.fn(),
+      setLspDiagnostics: vi.fn(),
+    };
+    const store = new LspStore(editor as never, {} as never);
+    store.state = "ready";
+    const path = "D:\\Code\\main.cpp";
+    store.didOpen(path, "");
+    store.didChange(path, [firstChange]);
+
+    publish(store, diagnosticEvent(path, "stale", 1));
+
+    expect(store.diagnosticsFor(path)).toEqual([]);
+    expect(editor.setLspDiagnostics).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it("accepts an empty current-version publication and clears editor diagnostics", () => {
+    const editor = {
+      setLspClient: vi.fn(),
+      setLspDiagnostics: vi.fn(),
+    };
+    const store = new LspStore(editor as never, {} as never);
+    store.state = "ready";
+    const path = "D:\\Code\\main.cpp";
+    store.didOpen(path, "");
+    publish(store, diagnosticEvent(path, "error", 1));
+    editor.setLspDiagnostics.mockClear();
+
+    publish(store, { type: "diagnostics", path, version: 1, diagnostics: [] });
+
+    expect(store.diagnosticsFor(path)).toEqual([]);
+    expect(editor.setLspDiagnostics).toHaveBeenCalledWith(path, []);
+    store.dispose();
+  });
+
+  it("removes stale errors after a successful compile but keeps warnings", () => {
+    const editor = {
+      setLspClient: vi.fn(),
+      setLspDiagnostics: vi.fn(),
+    };
+    const store = new LspStore(editor as never, {} as never);
+    store.state = "ready";
+    const path = "D:\\Code\\main.cpp";
+    store.didOpen(path, "");
+    const error = diagnosticEvent(path, "error", 1);
+    const warning = diagnosticEvent(path, "warning", 1, 2);
+    publish(store, {
+      type: "diagnostics",
+      path,
+      version: 1,
+      diagnostics: [...error.diagnostics, ...warning.diagnostics],
+    });
+
+    store.acceptSuccessfulCompile(path);
+
+    expect(store.errorCount).toBe(0);
+    expect(store.warningCount).toBe(1);
+    expect(editor.setLspDiagnostics).toHaveBeenLastCalledWith(
+      path,
+      [expect.objectContaining({ message: "warning", severity: 2 })],
+    );
     store.dispose();
   });
 });

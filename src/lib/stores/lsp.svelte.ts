@@ -240,6 +240,17 @@ export class LspStore implements LspClient {
     return this.diagnosticsByPath.get(pathKey(path)) ?? [];
   }
 
+  acceptSuccessfulCompile(path: string): void {
+    const key = pathKey(path);
+    const current = this.diagnosticsByPath.get(key);
+    if (!current?.some((diagnostic) => diagnostic.severity === 1)) return;
+    const remaining = current.filter((diagnostic) => diagnostic.severity !== 1);
+    if (remaining.length > 0) this.diagnosticsByPath.set(key, remaining);
+    else this.diagnosticsByPath.delete(key);
+    this.rebuildDiagnostics();
+    this.editor.setLspDiagnostics(path, remaining);
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.configureTimer) clearTimeout(this.configureTimer);
@@ -384,12 +395,19 @@ export class LspStore implements LspClient {
       return;
     }
     if (this.desiredWorkspace && !sameOrChildPath(event.path, this.desiredWorkspace)) return;
-    if (!this.openedDocuments.has(pathKey(event.path))) return;
+    const key = pathKey(event.path);
+    if (!this.openedDocuments.has(key)) return;
+    const currentVersion = this.documentVersions.get(key);
+    if (
+      event.version !== undefined
+      && currentVersion !== undefined
+      && event.version < currentVersion
+    ) return;
     const diagnostics = event.diagnostics.map((diagnostic) => ({
       ...diagnostic,
       path: event.path,
     }));
-    this.diagnosticsByPath.set(pathKey(event.path), diagnostics);
+    this.diagnosticsByPath.set(key, diagnostics);
     this.rebuildDiagnostics();
     this.editor.setLspDiagnostics(event.path, diagnostics);
   }

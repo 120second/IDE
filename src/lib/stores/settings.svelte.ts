@@ -184,6 +184,8 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   root.style.setProperty("--sidebar-opacity-percent", `${settings.sidebarOpacity * 100}%`);
   root.style.setProperty("--editor-opacity", `${settings.editorOpacity}`);
   root.style.setProperty("--editor-opacity-percent", `${settings.editorOpacity * 100}%`);
+  const controlOpacity = settings.performanceMode ? 1 : 0.6 + settings.sidebarOpacity * 0.4;
+  root.style.setProperty("--control-opacity-percent", `${controlOpacity * 100}%`);
   root.style.setProperty("--surface-blur", `${settings.performanceMode ? 0 : settings.blur}px`);
   root.style.setProperty("--editor-font-family", settings.fontFamily);
   root.style.setProperty("--editor-font-size", `${settings.fontSize}px`);

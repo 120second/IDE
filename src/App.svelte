@@ -133,7 +133,12 @@
           return true;
         });
         templateStore = new TemplateStore(editor, ux);
-        execution = new ExecutionStore(editor, settings, shell);
+        execution = new ExecutionStore(
+          editor,
+          settings,
+          shell,
+          (sourcePath) => lspStore?.acceptSuccessfulCompile(sourcePath),
+        );
         debugStore = new DebugStore(editor, execution, settings, shell);
         stressStore = new StressStore(editor, generator, execution, debugStore, settings, shell);
         sessionStore = new SessionStore(fileWorkspace, editor, shell, ux);

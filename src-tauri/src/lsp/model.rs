@@ -48,6 +48,8 @@ pub enum LspEvent {
     },
     Diagnostics {
         path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<i64>,
         diagnostics: Vec<LspDiagnostic>,
     },
 }

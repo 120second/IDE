@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #dce0e9;
   background: transparent;
@@ -38,6 +39,7 @@
   --sidebar-opacity-percent: 96%;
   --editor-opacity: 0.98;
   --editor-opacity-percent: 98%;
+  --control-opacity-percent: 100%;
   --surface-blur: 12px;
   --editor-font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   --editor-font-size: 14px;
@@ -1009,6 +1011,7 @@
 }
 
 :root[data-theme="light"] {
+  color-scheme: light;
   color: #232832;
   background: transparent;
   --background: #e9edf2;
@@ -1099,6 +1102,42 @@ textarea,
 select {
   color: inherit;
   font: inherit;
+}
+
+:where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select
+) {
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  outline: 0;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--input-background) var(--control-opacity-percent), transparent);
+  caret-color: var(--accent-strong);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-primary) 3%, transparent);
+}
+
+:where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select
+):focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+:where(input, textarea)::placeholder {
+  color: var(--text-muted);
+  opacity: 0.78;
+}
+
+:where(input, textarea, select):disabled {
+  opacity: 0.5;
+}
+
+:where(input[type="checkbox"], input[type="radio"], input[type="range"]) {
+  accent-color: var(--accent);
 }
 
 button {
@@ -3681,107 +3720,12 @@ button.status-item:hover {
   padding-bottom: 16px;
 }
 
-.appearance-preview {
-  position: relative;
-  display: grid;
-  height: 92px;
-  grid-template-columns: 31% 1fr;
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: 7px;
-  background:
-    radial-gradient(circle at 74% 18%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 55%),
-    var(--background);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 3%, transparent);
-}
-
-.appearance-preview > img {
+.background-image-probe {
   position: absolute;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: var(--background-opacity);
-}
-
-.appearance-preview-sidebar,
-.appearance-preview-editor {
-  position: relative;
-  z-index: 1;
-  backdrop-filter: blur(var(--surface-blur));
-}
-
-.appearance-preview-sidebar {
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--sidebar-background) var(--sidebar-opacity-percent), transparent);
-}
-
-.appearance-preview-sidebar::before,
-.appearance-preview-sidebar::after {
-  content: "";
-  position: absolute;
-  left: 10px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--text-muted);
-  opacity: 0.52;
-}
-
-.appearance-preview-sidebar::before {
-  top: 26px;
-  width: 54%;
-  box-shadow: 0 16px 0 color-mix(in srgb, var(--text-muted) 72%, transparent),
-    0 32px 0 color-mix(in srgb, var(--text-muted) 52%, transparent);
-}
-
-.appearance-preview-sidebar::after {
-  top: 10px;
-  width: 70%;
-  background: var(--accent);
-  opacity: 0.72;
-}
-
-.appearance-preview-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 20px 13px;
-  background: color-mix(in srgb, var(--editor-background) var(--editor-opacity-percent), transparent);
-}
-
-.appearance-preview-editor i {
-  width: 76%;
-  height: 4px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text-secondary) 50%, transparent);
-}
-
-.appearance-preview-editor i:nth-child(2) {
-  width: 54%;
-  margin-left: 12%;
-  background: color-mix(in srgb, var(--accent) 65%, transparent);
-}
-
-.appearance-preview-editor i:nth-child(3) {
-  width: 68%;
-  margin-left: 12%;
-}
-
-.appearance-preview-editor i:nth-child(4) {
-  width: 42%;
-}
-
-.appearance-preview-theme {
-  position: absolute;
-  z-index: 2;
-  top: 7px;
-  right: 8px;
-  padding: 2px 6px;
-  border: 1px solid color-mix(in srgb, var(--border-strong) 78%, transparent);
-  border-radius: 999px;
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--background-elevated) 78%, transparent);
-  font-size: 8px;
-  backdrop-filter: blur(8px);
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  pointer-events: none;
 }
 
 .settings-section {
@@ -4252,10 +4196,15 @@ input[type="range"]:disabled {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 7px;
-  padding: 8px;
-  border-top: 1px solid var(--border-strong);
-  background: color-mix(in srgb, var(--sidebar-background) 92%, transparent);
+  gap: 9px;
+  margin: 7px 8px 8px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--sidebar-background) var(--sidebar-opacity-percent), transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--shadow) 65%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--text-primary) 3%, transparent);
+  backdrop-filter: blur(var(--surface-blur));
 }
 
 .testcase-form header,
@@ -4266,29 +4215,38 @@ input[type="range"]:disabled {
 }
 
 .testcase-form header strong {
-  font-size: 10px;
+  color: var(--text-primary);
+  font-size: 10.5px;
+  font-weight: 680;
 }
 
 .testcase-form header button {
   width: 22px;
   height: 22px;
   padding: 0;
+  border-radius: 4px;
+  color: var(--text-muted);
   background: transparent;
+}
+
+.testcase-form header button:hover {
+  color: var(--text-primary);
+  background: var(--hover-background);
 }
 
 .testcase-form-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(82px, 1fr);
-  gap: 6px;
+  gap: 8px;
 }
 
 .testcase-form label {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   color: var(--text-muted);
-  font-size: 8.5px;
+  font-size: 9px;
 }
 
 .testcase-form input,
@@ -4299,26 +4257,38 @@ input[type="range"]:disabled {
 
 .testcase-form input,
 .testcase-form select {
-  height: 27px;
+  height: 30px;
+  padding: 0 8px;
 }
 
 .testcase-form textarea {
-  min-height: 67px;
+  min-height: 78px;
   resize: vertical;
+  padding: 8px 9px;
   font-family: var(--editor-font-family);
   font-size: 9.5px;
   line-height: 1.45;
 }
 
+.testcase-form footer {
+  margin-top: 2px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+}
+
 .testcase-form footer label.testcase-enabled {
   flex-direction: row;
   align-items: center;
+  gap: 6px;
 }
 
 .testcase-form footer input {
   width: auto;
   height: auto;
-  accent-color: var(--accent);
+}
+
+.testcase-form footer .primary-button {
+  min-width: 62px;
 }
 
 .testcase-error {

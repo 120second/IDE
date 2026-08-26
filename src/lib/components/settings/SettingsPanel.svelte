@@ -164,24 +164,6 @@
       </span>
     </div>
 
-    <div class="appearance-preview" aria-label="外观预览">
-      {#if previewUrl}
-        {#key previewUrl}
-          <img
-            src={previewUrl}
-            alt=""
-            onload={() => { loadedBackground = settings.value.backgroundImage; failedBackground = ""; }}
-            onerror={() => { failedBackground = settings.value.backgroundImage; loadedBackground = ""; }}
-          />
-        {/key}
-      {/if}
-      <div class="appearance-preview-sidebar"></div>
-      <div class="appearance-preview-editor">
-        <i></i><i></i><i></i><i></i>
-      </div>
-      <span class="appearance-preview-theme">{settings.value.theme === "dark" ? "深色" : "浅色"}</span>
-    </div>
-
     <div class="setting-row vertical">
       <span class="setting-label">外观预设</span>
       <div class="segmented appearance-presets" aria-label="外观预设">
@@ -205,20 +187,6 @@
         <button
           class:active={settings.value.theme === "light"}
           onclick={() => settings.update({ theme: "light" })}>浅色</button
-        >
-      </div>
-    </div>
-
-    <div class="setting-row vertical">
-      <span class="setting-label">窗口背景效果</span>
-      <div class="segmented" aria-label="窗口背景效果">
-        <button
-          class:active={settings.value.backgroundEffect === "transparent"}
-          onclick={() => settings.update({ backgroundEffect: "transparent" })}>透明</button
-        >
-        <button
-          class:active={settings.value.backgroundEffect === "acrylic"}
-          onclick={() => settings.update({ backgroundEffect: "acrylic" })}>毛玻璃</button
         >
       </div>
     </div>
@@ -252,6 +220,18 @@
         class:failed={(Boolean(settings.value.backgroundImage) && failedBackground === settings.value.backgroundImage) || Boolean(backgroundPickerError)}
         class="background-image-state"
       >
+        {#if previewUrl}
+          {#key previewUrl}
+            <img
+              class="background-image-probe"
+              src={previewUrl}
+              alt=""
+              aria-hidden="true"
+              onload={() => { loadedBackground = settings.value.backgroundImage; failedBackground = ""; }}
+              onerror={() => { failedBackground = settings.value.backgroundImage; loadedBackground = ""; }}
+            />
+          {/key}
+        {/if}
         {#if backgroundPickerError}
           选择失败：{backgroundPickerError}
         {:else if !settings.value.backgroundImage}

@@ -64,6 +64,7 @@ export class ExecutionStore {
     private readonly editor: EditorWorkspace,
     private readonly settings: SettingsStore,
     private readonly shell: ShellStore,
+    private readonly onSuccessfulCompile?: (sourcePath: string) => void,
   ) {}
 
   async initialize(): Promise<void> {
@@ -300,6 +301,7 @@ export class ExecutionStore {
         },
       });
       this.compileResult = result;
+      if (result.success) this.onSuccessfulCompile?.(sourcePath);
       this.appendOutput(result.stdout);
       this.appendOutput(result.stderr);
       this.appendOutput(
