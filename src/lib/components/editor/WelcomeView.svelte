@@ -46,7 +46,6 @@
     <section>
       <h2>常用快捷键</h2>
       <div class="welcome-shortcuts"><span>保存当前文件</span><kbd>{keybindings.save}</kbd></div>
-      <div class="welcome-shortcuts"><span>搜索工作区</span><kbd>{keybindings.searchWorkspace}</kbd></div>
       <div class="welcome-shortcuts"><span>快速打开文件</span><kbd>{keybindings.quickOpen}</kbd></div>
       <div class="welcome-shortcuts"><span>显示命令面板</span><kbd>{keybindings.commandPalette}</kbd></div>
       <div class="welcome-shortcuts"><span>编译并运行</span><kbd>{keybindings.runCurrent}</kbd></div>

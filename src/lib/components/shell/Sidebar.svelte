@@ -16,7 +16,6 @@
   import TemplateSidebar from "../templates/TemplateSidebar.svelte";
   import Icon from "./Icon.svelte";
   import DebugPanel from "../debug/DebugPanel.svelte";
-  import SearchPanel from "../search/SearchPanel.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -35,7 +34,6 @@
   const titles: Record<ActivityId, string> = {
     explorer: "资源管理器",
     testcases: "测试点",
-    search: "搜索",
     templates: "模板",
     debug: "运行与调试",
     judge: "对拍",
@@ -90,8 +88,6 @@
       <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "testcases"}
       <TestcasePanel {workspace} {execution} {generator} keybindings={settings.value.keybindings} />
-    {:else if shell.activeActivity === "search"}
-      <SearchPanel {fileWorkspace} editor={workspace} />
     {:else if shell.activeActivity === "templates"}
       <TemplateSidebar {templateStore} />
     {:else if shell.activeActivity === "debug"}

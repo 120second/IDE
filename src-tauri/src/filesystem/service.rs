@@ -11,16 +11,11 @@ use crate::paths::is_within;
 
 use super::{
     EntryKind, FileContent, FileEntry, FileRevision, PathResult, WorkspaceFileMatch,
-    WorkspaceFileResponse, WorkspaceInfo, WorkspaceSearchMatch, WorkspaceSearchResponse,
-    WriteTextResult,
+    WorkspaceFileResponse, WorkspaceInfo, WriteTextResult,
 };
 
 const MAX_TEXT_FILE_BYTES: u64 = 16 * 1024 * 1024;
-const MAX_SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_SEARCH_FILES: usize = 20_000;
-const MAX_SEARCH_RESULTS: usize = 500;
-const MAX_SEARCH_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
-const MAX_SEARCH_QUERY_CHARS: usize = 256;
 const MAX_FILE_RESULTS: usize = 200;
 const MAX_FILE_QUERY_CHARS: usize = 128;
 
@@ -103,129 +98,6 @@ pub fn list_directory(root: &Path, path: &str) -> AppResult<Vec<FileEntry>> {
     });
 
     Ok(entries)
-}
-
-pub fn search_workspace(
-    root: &Path,
-    query: &str,
-    case_sensitive: bool,
-    whole_word: bool,
-) -> AppResult<WorkspaceSearchResponse> {
-    let started = Instant::now();
-    let query = query.trim();
-    if query.is_empty() {
-        return Ok(WorkspaceSearchResponse {
-            results: Vec::new(),
-            limit_hit: false,
-            files_scanned: 0,
-            duration_ms: 0,
-        });
-    }
-    if query.chars().count() > MAX_SEARCH_QUERY_CHARS {
-        return Err(operation_error(format!(
-            "search query exceeds the {MAX_SEARCH_QUERY_CHARS} character limit"
-        )));
-    }
-
-    let canonical_root = dunce::canonicalize(root)?;
-    let mut pending = vec![canonical_root.clone()];
-    let mut results = Vec::new();
-    let mut files_scanned = 0usize;
-    let mut bytes_scanned = 0u64;
-    let mut limit_hit = false;
-
-    while let Some(directory) = pending.pop() {
-        let mut entries = match fs::read_dir(&directory) {
-            Ok(entries) => entries.filter_map(Result::ok).collect::<Vec<_>>(),
-            Err(error) => {
-                log::warn!(
-                    "failed to search directory {}: {error}",
-                    directory.display()
-                );
-                continue;
-            }
-        };
-        entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
-
-        for entry in entries {
-            let path = entry.path();
-            let metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(_) => continue,
-            };
-            if metadata.file_type().is_symlink() {
-                continue;
-            }
-            if metadata.is_dir() {
-                if !ignored_search_directory(&entry.file_name().to_string_lossy()) {
-                    pending.push(path);
-                }
-                continue;
-            }
-            if !metadata.is_file() || metadata.len() > MAX_SEARCH_FILE_BYTES {
-                continue;
-            }
-            if files_scanned >= MAX_SEARCH_FILES {
-                limit_hit = true;
-                break;
-            }
-            if bytes_scanned.saturating_add(metadata.len()) > MAX_SEARCH_TOTAL_BYTES {
-                limit_hit = true;
-                break;
-            }
-            files_scanned += 1;
-            bytes_scanned += metadata.len();
-
-            let mut bytes = Vec::with_capacity(metadata.len() as usize);
-            let read = fs::File::open(&path).and_then(|mut file| {
-                Read::by_ref(&mut file)
-                    .take(MAX_SEARCH_FILE_BYTES + 1)
-                    .read_to_end(&mut bytes)
-            });
-            if read.is_err() || bytes.len() as u64 > MAX_SEARCH_FILE_BYTES || bytes.contains(&0) {
-                continue;
-            }
-            let Ok(content) = String::from_utf8(bytes) else {
-                continue;
-            };
-            let relative_path = path
-                .strip_prefix(&canonical_root)
-                .map(path_text)
-                .unwrap_or_else(|_| path_text(&path));
-
-            for (line_index, line) in content.lines().enumerate() {
-                for match_start in search_match_offsets(line, query, case_sensitive, whole_word) {
-                    results.push(WorkspaceSearchMatch {
-                        path: path_text(&path),
-                        relative_path: relative_path.clone(),
-                        line: line_index + 1,
-                        column: line[..match_start].encode_utf16().count() + 1,
-                        preview: search_preview(line, match_start),
-                    });
-                    if results.len() >= MAX_SEARCH_RESULTS {
-                        limit_hit = true;
-                        break;
-                    }
-                }
-                if limit_hit {
-                    break;
-                }
-            }
-            if limit_hit {
-                break;
-            }
-        }
-        if limit_hit {
-            break;
-        }
-    }
-
-    Ok(WorkspaceSearchResponse {
-        results,
-        limit_hit,
-        files_scanned,
-        duration_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-    })
 }
 
 pub fn find_workspace_files(root: &Path, query: &str) -> AppResult<WorkspaceFileResponse> {
@@ -354,59 +226,6 @@ fn ignored_search_directory(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         ".git" | ".hg" | ".svn" | "node_modules" | "target" | "dist" | "build" | ".cache"
     ) || name.to_ascii_lowercase().starts_with("cmake-build-")
-}
-
-fn search_match_offsets(
-    line: &str,
-    query: &str,
-    case_sensitive: bool,
-    whole_word: bool,
-) -> Vec<usize> {
-    let offsets = if case_sensitive || !query.is_ascii() {
-        line.match_indices(query)
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>()
-    } else {
-        let query = query.as_bytes();
-        if query.is_empty() || query.len() > line.len() {
-            return Vec::new();
-        }
-        line.as_bytes()
-            .windows(query.len())
-            .enumerate()
-            .filter_map(|(index, candidate)| candidate.eq_ignore_ascii_case(query).then_some(index))
-            .collect()
-    };
-    if !whole_word {
-        return offsets;
-    }
-    offsets
-        .into_iter()
-        .filter(|offset| word_boundaries_match(line, *offset, query.len()))
-        .collect()
-}
-
-fn word_boundaries_match(line: &str, start: usize, byte_length: usize) -> bool {
-    let before = line[..start].chars().next_back();
-    let after = line[start + byte_length..].chars().next();
-    !before.is_some_and(word_character) && !after.is_some_and(word_character)
-}
-
-fn word_character(character: char) -> bool {
-    character.is_alphanumeric() || character == '_'
-}
-
-fn search_preview(line: &str, match_start: usize) -> String {
-    let match_character = line[..match_start].chars().count();
-    let start = match_character.saturating_sub(60);
-    let mut preview = line.chars().skip(start).take(220).collect::<String>();
-    if start > 0 {
-        preview.insert(0, '…');
-    }
-    if line.chars().count() > start + 220 {
-        preview.push('…');
-    }
-    preview.trim().to_owned()
 }
 
 pub fn read_text_file(root: &Path, path: &str) -> AppResult<FileContent> {
@@ -895,41 +714,6 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .starts_with(".lightcp-save-")));
-        fs::remove_dir_all(workspace).expect("temporary directory should be removed");
-    }
-
-    #[test]
-    fn workspace_search_is_bounded_case_aware_and_skips_build_output() {
-        let workspace = temporary_directory("workspace-search");
-        let source = workspace.join("src");
-        let target = workspace.join("target");
-        fs::create_dir(&source).expect("source directory");
-        fs::create_dir(&target).expect("ignored target directory");
-        fs::write(
-            source.join("main.cpp"),
-            "// 😀 NeedLe\nint needle_value = 1;\n",
-        )
-        .expect("searchable source");
-        fs::write(target.join("generated.cpp"), "needle\n").expect("ignored generated file");
-
-        let insensitive =
-            search_workspace(&workspace, "needle", false, false).expect("search result");
-        assert_eq!(insensitive.results.len(), 2);
-        assert!(insensitive.results[0].relative_path.ends_with("main.cpp"));
-        assert_eq!(insensitive.results[0].line, 1);
-        assert_eq!(insensitive.results[0].column, 7);
-        assert!(!insensitive.limit_hit);
-        assert_eq!(insensitive.files_scanned, 1);
-
-        let sensitive = search_workspace(&workspace, "needle", true, false).expect("case search");
-        assert_eq!(sensitive.results.len(), 1);
-        assert_eq!(sensitive.results[0].line, 2);
-
-        let whole_word =
-            search_workspace(&workspace, "needle", false, true).expect("whole-word search");
-        assert_eq!(whole_word.results.len(), 1);
-        assert_eq!(whole_word.results[0].line, 1);
-
         fs::remove_dir_all(workspace).expect("temporary directory should be removed");
     }
 

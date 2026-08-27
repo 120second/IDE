@@ -6,13 +6,12 @@ use std::path::PathBuf;
 
 pub use model::{
     EntryKind, FileContent, FileEntry, FileRevision, PathResult, WorkspaceChange,
-    WorkspaceFileMatch, WorkspaceFileResponse, WorkspaceInfo, WorkspaceSearchMatch,
-    WorkspaceSearchResponse, WriteTextResult,
+    WorkspaceFileMatch, WorkspaceFileResponse, WorkspaceInfo, WriteTextResult,
 };
 pub use service::{
     canonical_workspace, create_directory, create_file, delete_entry, find_workspace_files,
     get_text_file_revision, list_directory, move_entry, read_text_file, rename_entry,
-    search_workspace, write_text_file,
+    write_text_file,
 };
 pub use watcher::WorkspaceWatcher;
 

@@ -25,6 +25,52 @@ describe("editor save checkpoint", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it("keeps the workspace empty when a pending file read finishes after the final tab closes", async () => {
+    let finishRead: ((value: { path: string; content: string; revision: string }) => void) | undefined;
+    workspaceApi.readTextFile.mockImplementation(() => new Promise((resolve) => {
+      finishRead = resolve;
+    }));
+    const workspace = new EditorWorkspace(DEFAULT_SETTINGS);
+    workspace.createTab();
+
+    const opening = workspace.openFile("D:\\Code\\delayed.cpp");
+    workspace.closeTab(workspace.tabs[0].id);
+    finishRead?.({
+      path: "D:\\Code\\delayed.cpp",
+      content: "int main() {}",
+      revision: "disk-0",
+    });
+    await opening;
+
+    expect(workspace.tabs).toEqual([]);
+    expect(workspace.activeId).toBe("");
+    expect(workspace.activeTab).toBeUndefined();
+  });
+
+  it("ignores the stale half of concurrent opens for the same file", async () => {
+    const reads: Array<{
+      resolve: (value: { path: string; content: string; revision: string }) => void;
+    }> = [];
+    workspaceApi.readTextFile.mockImplementation(() => new Promise((resolve) => {
+      reads.push({ resolve });
+    }));
+    const workspace = new EditorWorkspace(DEFAULT_SETTINGS);
+
+    const first = workspace.openFile("D:\\Code\\main.cpp");
+    const second = workspace.openFile("D:\\Code\\main.cpp");
+    reads[0].resolve({ path: "D:\\Code\\main.cpp", content: "stale", revision: "disk-0" });
+    await first;
+
+    expect(workspace.tabs).toEqual([]);
+    expect(workspace.activeId).toBe("");
+
+    reads[1].resolve({ path: "D:\\Code\\main.cpp", content: "current", revision: "disk-1" });
+    await second;
+
+    expect(workspace.tabs).toHaveLength(1);
+    expect(workspace.activeTab?.state.doc.toString()).toBe("current");
+  });
+
   it("keeps edits made during a save dirty after the older snapshot completes", async () => {
     workspaceApi.readTextFile.mockResolvedValue({
       path: "D:\\Code\\main.cpp",

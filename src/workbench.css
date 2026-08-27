@@ -558,8 +558,7 @@ kbd {
 }
 
 .search-box,
-.archive-search,
-.workspace-search-box {
+.archive-search {
   min-height: 32px;
   border-color: var(--border-strong);
   border-radius: var(--radius);
@@ -567,8 +566,7 @@ kbd {
 }
 
 .search-box:focus-within,
-.archive-search:focus-within,
-.workspace-search-box:focus-within {
+.archive-search:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }

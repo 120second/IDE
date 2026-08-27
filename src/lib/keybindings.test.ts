@@ -35,11 +35,6 @@ describe("centralized keybindings", () => {
     expect(matchesShortcut(keyEvent("A", { ctrlKey: true }), "quickArchive")).toBe(false);
   });
 
-  it("maps workspace search without conflicting with editor search", () => {
-    expect(matchesShortcut(keyEvent("F", { ctrlKey: true, shiftKey: true }), "searchWorkspace")).toBe(true);
-    expect(matchesShortcut(keyEvent("F", { ctrlKey: true }), "searchWorkspace")).toBe(false);
-  });
-
   it("maps the new file shortcut", () => {
     expect(matchesShortcut(keyEvent("N", { ctrlKey: true }), "newFile")).toBe(true);
   });

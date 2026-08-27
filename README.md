@@ -123,7 +123,6 @@ npm run tauri build
 | `Ctrl+K`，然后 `Z` | 进入或退出 Zen Mode |
 | `Escape` | 退出 Zen Mode |
 | `Ctrl+F` | 在编辑器中搜索 |
-| `Ctrl+Shift+F` | 搜索整个工作区 |
 | `Ctrl+Alt+T` | 打开代码片段快速搜索 |
 | `Ctrl+Shift+A` | 归档当前 C++ 文件 |
 | `F5` | 编译并运行当前文件 |

@@ -217,6 +217,8 @@ export class EditorWorkspace {
   private templateCompletionPickedHandler: ((id: number) => void) | undefined;
   private signatureTimer: ReturnType<typeof setTimeout> | undefined;
   private openSequence = 0;
+  private openGeneration = 0;
+  private readonly latestOpenRequestByPath = new Map<string, number>();
   private readonly hydrationRequests = new Map<string, Promise<void>>();
   private readonly saveQueues = new Map<string, Promise<boolean>>();
   private readonly pendingSaveRevisions = new Map<string, { revision: number; promise: Promise<boolean> }>();
@@ -256,6 +258,8 @@ export class EditorWorkspace {
     if (this.signatureTimer) clearTimeout(this.signatureTimer);
     this.signatureTimer = undefined;
     this.detach();
+    this.openGeneration += 1;
+    this.latestOpenRequestByPath.clear();
     this.lspClient = undefined;
     this.sessionChangeHandler = undefined;
     this.templateReference = undefined;
@@ -521,6 +525,7 @@ export class EditorWorkspace {
 
   async openFile(path: string): Promise<void> {
     const request = ++this.openSequence;
+    const generation = this.openGeneration;
     const existing = this.tabs.find((tab) => tab.path && samePath(tab.path, path));
     if (existing) {
       this.switchTab(existing.id);
@@ -528,9 +533,15 @@ export class EditorWorkspace {
       return;
     }
 
+    const requestedPath = normalizedPath(path);
+    this.latestOpenRequestByPath.set(requestedPath, request);
     this.notice = `正在打开 ${fileName(path)}…`;
     try {
       const file = await readTextFile(path);
+      if (
+        generation !== this.openGeneration
+        || this.latestOpenRequestByPath.get(requestedPath) !== request
+      ) return;
       const duplicate = this.tabs.find(
         (tab) => tab.path && samePath(tab.path, file.path),
       );
@@ -573,8 +584,16 @@ export class EditorWorkspace {
       }
       this.notifySessionChange();
     } catch (error) {
+      if (
+        generation !== this.openGeneration
+        || this.latestOpenRequestByPath.get(requestedPath) !== request
+      ) return;
       this.saveState = "error";
       this.notice = errorMessage(error);
+    } finally {
+      if (this.latestOpenRequestByPath.get(requestedPath) === request) {
+        this.latestOpenRequestByPath.delete(requestedPath);
+      }
     }
   }
 
@@ -825,14 +844,13 @@ export class EditorWorkspace {
     const remaining = this.tabs.filter((tab) => tab.id !== id);
 
     if (remaining.length === 0) {
-      this.tabs = [];
-      this.activeId = "";
+      this.resetEmptyWorkspace();
       this.notifySessionChange();
       return;
     }
 
     this.tabs = remaining;
-    if (id === this.activeId) {
+    if (id === this.activeId || !remaining.some((tab) => tab.id === this.activeId)) {
       let next = remaining[Math.min(index, remaining.length - 1)];
       this.activeId = next.id;
       next = {
@@ -961,8 +979,7 @@ export class EditorWorkspace {
     for (const tab of this.tabs) {
       if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
     }
-    this.tabs = [];
-    this.activeId = "";
+    this.resetEmptyWorkspace();
     this.saveState = "idle";
     this.notice = "已关闭全部编辑器。";
     this.notifySessionChange();
@@ -1564,6 +1581,21 @@ export class EditorWorkspace {
     const tabs = this.tabs.slice();
     tabs[index] = replacement;
     this.tabs = tabs;
+  }
+
+  private resetEmptyWorkspace(): void {
+    this.openGeneration += 1;
+    this.latestOpenRequestByPath.clear();
+    this.templateReference = undefined;
+    this.tabs = [];
+    this.activeId = "";
+    this.cursorLine = 1;
+    this.cursorColumn = 1;
+    this.saveState = "idle";
+    this.notice = "";
+    this.debugLocationPath = "";
+    this.view?.destroy();
+    this.view = undefined;
   }
 
   private withBreakpointLines(state: EditorState, path?: string): EditorState {

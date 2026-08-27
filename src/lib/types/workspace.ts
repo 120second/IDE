@@ -40,21 +40,6 @@ export interface WorkspaceChange {
   paths: string[];
 }
 
-export interface WorkspaceSearchMatch {
-  path: string;
-  relativePath: string;
-  line: number;
-  column: number;
-  preview: string;
-}
-
-export interface WorkspaceSearchResponse {
-  results: WorkspaceSearchMatch[];
-  limitHit: boolean;
-  filesScanned: number;
-  durationMs: number;
-}
-
 export interface WorkspaceFileMatch {
   path: string;
   relativePath: string;

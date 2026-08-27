@@ -63,7 +63,6 @@
     command("file.new", "新建 C++ 文件", "文件", "newFile", () => void createSourceFile()),
     command("file.openFolder", "打开文件夹", "文件", undefined, () => void fileWorkspace.openFolderPicker()),
     command("file.quickOpen", "快速打开文件", "文件", "quickOpen", () => openQuickFile()),
-    command("file.search", "搜索整个工作区", "搜索", "searchWorkspace", () => showActivity("search")),
     command("file.save", "保存当前文件", "文件", "save", () => void saveCurrent()),
     { id: "file.saveAll", label: "保存全部文件", category: "文件", shortcut: "Ctrl+K S", run: () => void saveAll() },
     command("editor.close", "关闭当前编辑器", "编辑器", "closeEditor", () => void closeActiveEditor()),
@@ -120,13 +119,6 @@
       if (matchesShortcut(event, "quickTemplate", keybindings)) {
         event.preventDefault();
         quickSearchOpen = true;
-        return;
-      }
-      if (matchesShortcut(event, "searchWorkspace", keybindings)) {
-        event.preventDefault();
-        shell.activeActivity = "search";
-        shell.sidebarVisible = true;
-        queueMicrotask(() => window.dispatchEvent(new Event("lightcp-focus-search")));
         return;
       }
       if (matchesShortcut(event, "newFile", keybindings)) {
@@ -289,7 +281,6 @@
   function showActivity(activity: typeof shell.activeActivity): void {
     shell.activeActivity = activity;
     shell.sidebarVisible = true;
-    if (activity === "search") queueMicrotask(() => window.dispatchEvent(new Event("lightcp-focus-search")));
   }
 
   function openQuickFile(): void {

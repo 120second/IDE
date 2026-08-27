@@ -7,7 +7,6 @@ export type ShortcutId =
   | "newFile"
   | "quickOpen"
   | "commandPalette"
-  | "searchWorkspace"
   | "closeEditor"
   | "nextEditor"
   | "previousEditor"
@@ -46,7 +45,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
   newFile: "Ctrl+N",
   quickOpen: "Ctrl+P",
   commandPalette: "Ctrl+Shift+P",
-  searchWorkspace: "Ctrl+Shift+F",
   closeEditor: "Ctrl+W",
   nextEditor: "Ctrl+Tab",
   previousEditor: "Ctrl+Shift+Tab",
@@ -65,7 +63,6 @@ export const SHORTCUT_LABELS: Record<ShortcutId, string> = {
   newFile: "新建 C++ 文件",
   quickOpen: "快速打开文件",
   commandPalette: "显示命令面板",
-  searchWorkspace: "搜索工作区",
   closeEditor: "关闭当前编辑器",
   nextEditor: "下一个编辑器",
   previousEditor: "上一个编辑器",

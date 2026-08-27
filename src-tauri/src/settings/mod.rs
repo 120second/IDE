@@ -156,7 +156,6 @@ fn default_keybindings() -> BTreeMap<String, String> {
         ("newFile", "Ctrl+N"),
         ("quickOpen", "Ctrl+P"),
         ("commandPalette", "Ctrl+Shift+P"),
-        ("searchWorkspace", "Ctrl+Shift+F"),
         ("closeEditor", "Ctrl+W"),
         ("nextEditor", "Ctrl+Tab"),
         ("previousEditor", "Ctrl+Shift+Tab"),

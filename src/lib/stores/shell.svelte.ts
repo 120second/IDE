@@ -1,7 +1,6 @@
 export type ActivityId =
   | "explorer"
   | "testcases"
-  | "search"
   | "templates"
   | "debug"
   | "judge"

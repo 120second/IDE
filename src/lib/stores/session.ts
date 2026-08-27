@@ -14,7 +14,7 @@ import type { UxStore } from "./ux.svelte";
 import type { WorkspaceStore } from "./workspace.svelte";
 
 const STORAGE_KEY = "lightcp.session.v1";
-const ACTIVITIES = new Set<ActivityId>(["explorer", "testcases", "search", "templates", "debug", "judge", "settings"]);
+const ACTIVITIES = new Set<ActivityId>(["explorer", "testcases", "templates", "debug", "judge", "settings"]);
 const PANELS = new Set<BottomPanelId>(["problems", "output", "tests", "debugConsole"]);
 
 interface WindowGeometry {
