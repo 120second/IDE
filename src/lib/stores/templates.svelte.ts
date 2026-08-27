@@ -21,7 +21,6 @@ import {
 import type { EditorWorkspace } from "../editor/workspace.svelte";
 import type {
   TemplateCategory,
-  TemplateCategoryRow,
   TemplateCollection,
   TemplateDetail,
   TemplateFilter,
@@ -29,10 +28,11 @@ import type {
   TemplateKind,
   TemplateMetadata,
   TemplateSort,
+  TemplateTreeRow,
   TemplateVersionDetail,
   TemplateVersionMetadata,
 } from "../types/templates";
-import { buildTemplateCategoryRows } from "../templateTree";
+import { buildTemplateTreeRows } from "../templateTree";
 import type { UxStore } from "./ux.svelte";
 
 const EMPTY_DRAFT: TemplateInput = {
@@ -50,6 +50,7 @@ const EMPTY_DRAFT: TemplateInput = {
 export class TemplateStore {
   categories = $state.raw<TemplateCategory[]>([]);
   templates = $state.raw<TemplateMetadata[]>([]);
+  treeTemplates = $state.raw<TemplateMetadata[]>([]);
   fileTemplates = $state.raw<TemplateMetadata[]>([]);
   quickResults = $state.raw<TemplateMetadata[]>([]);
   versions = $state.raw<TemplateVersionMetadata[]>([]);
@@ -73,16 +74,17 @@ export class TemplateStore {
 
   private readonly expandedCategories = new Set<number>();
   private readonly createDrafts = new Map<TemplateKind, TemplateInput>();
-  private categoryRevision = $state(0);
+  private treeRevision = $state(0);
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
   private listRequest = 0;
+  private treeRequest = 0;
   private quickRequest = 0;
   private initialized = false;
   private initializePromise: Promise<void> | undefined;
   private fileTemplatesLoaded = false;
   private fileTemplatesPromise: Promise<void> | undefined;
-  private categoryRowsCache: TemplateCategoryRow[] = [];
-  private categoryRowsCacheRevision = -1;
+  private treeRowsCache: TemplateTreeRow[] = [];
+  private treeRowsCacheRevision = -1;
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -94,13 +96,13 @@ export class TemplateStore {
     );
   }
 
-  get categoryRows(): TemplateCategoryRow[] {
-    const revision = this.categoryRevision;
-    if (revision !== this.categoryRowsCacheRevision) {
-      this.categoryRowsCache = this.buildCategoryRows();
-      this.categoryRowsCacheRevision = revision;
+  get treeRows(): TemplateTreeRow[] {
+    const revision = this.treeRevision;
+    if (revision !== this.treeRowsCacheRevision) {
+      this.treeRowsCache = this.buildTreeRows();
+      this.treeRowsCacheRevision = revision;
     }
-    return this.categoryRowsCache;
+    return this.treeRowsCache;
   }
 
   async initialize(): Promise<void> {
@@ -112,6 +114,7 @@ export class TemplateStore {
 
   private async loadInitialMetadata(): Promise<void> {
     const initialListRequest = this.listRequest;
+    const initialTreeRequest = this.treeRequest;
     this.loading = true;
     try {
       const [categories, snippets] = await Promise.all([
@@ -119,10 +122,13 @@ export class TemplateStore {
         listTemplates(defaultFilter("snippet")),
       ]);
       this.categories = categories;
+      if (this.kind === "snippet" && this.treeRequest === initialTreeRequest) {
+        this.treeTemplates = snippets;
+      }
       if (this.kind === "snippet" && this.listRequest === initialListRequest) {
         this.templates = snippets;
       }
-      this.categoryRevision += 1;
+      this.treeRevision += 1;
       this.initialized = true;
     } catch (error) {
       this.error = errorMessage(error);
@@ -146,7 +152,9 @@ export class TemplateStore {
     this.selectedId = undefined;
     this.detail = undefined;
     this.mode = "empty";
-    await this.refreshTemplates();
+    this.treeTemplates = [];
+    this.treeRevision += 1;
+    await Promise.all([this.refreshTemplates(), this.refreshTreeTemplates()]);
   }
 
   async setCollection(collection: TemplateCollection): Promise<void> {
@@ -163,7 +171,7 @@ export class TemplateStore {
 
   async setSort(sort: TemplateSort): Promise<void> {
     this.sort = sort;
-    await this.refreshTemplates();
+    await Promise.all([this.refreshTemplates(), this.refreshTreeTemplates()]);
   }
 
   setSearch(search: string): void {
@@ -184,6 +192,21 @@ export class TemplateStore {
       if (request === this.listRequest) this.error = errorMessage(error);
     } finally {
       if (request === this.listRequest) this.loading = false;
+    }
+  }
+
+  async refreshTreeTemplates(): Promise<void> {
+    const request = ++this.treeRequest;
+    try {
+      const results = await listTemplates({
+        ...defaultFilter(this.kind),
+        sort: this.sort,
+      });
+      if (request !== this.treeRequest) return;
+      this.treeTemplates = results;
+      this.treeRevision += 1;
+    } catch (error) {
+      if (request === this.treeRequest) this.error = errorMessage(error);
     }
   }
 
@@ -210,7 +233,7 @@ export class TemplateStore {
   toggleCategory(id: number): void {
     if (this.expandedCategories.has(id)) this.expandedCategories.delete(id);
     else this.expandedCategories.add(id);
-    this.categoryRevision += 1;
+    this.treeRevision += 1;
   }
 
   async createCategory(parentId?: number): Promise<void> {
@@ -248,7 +271,11 @@ export class TemplateStore {
     try {
       await deleteTemplateCategory(category.id);
       this.selectedCategoryId = undefined;
-      await Promise.all([this.refreshCategories(), this.refreshTemplates()]);
+      await Promise.all([
+        this.refreshCategories(),
+        this.refreshTemplates(),
+        this.refreshTreeTemplates(),
+      ]);
       this.ux.success(`已删除分类“${category.name}”。`);
     } catch (error) {
       this.error = errorMessage(error);
@@ -284,7 +311,11 @@ export class TemplateStore {
           code: code ?? "",
         };
     this.mode = "create";
-    if (kindChanged) void this.refreshTemplates();
+    if (kindChanged) {
+      this.treeTemplates = [];
+      this.treeRevision += 1;
+      void Promise.all([this.refreshTemplates(), this.refreshTreeTemplates()]);
+    }
   }
 
   collapseEditor(): void {
@@ -338,7 +369,11 @@ export class TemplateStore {
       this.mode = "view";
       this.notice = `已保存 ${detail.name}`;
       this.versions = [];
-      await Promise.all([this.refreshTemplates(), this.refreshFileTemplates()]);
+      await Promise.all([
+        this.refreshTemplates(),
+        this.refreshTreeTemplates(),
+        this.refreshFileTemplates(),
+      ]);
     } catch (error) {
       this.error = errorMessage(error);
     } finally {
@@ -362,7 +397,11 @@ export class TemplateStore {
       this.detail = undefined;
       this.mode = "empty";
       this.versions = [];
-      await Promise.all([this.refreshTemplates(), this.refreshFileTemplates()]);
+      await Promise.all([
+        this.refreshTemplates(),
+        this.refreshTreeTemplates(),
+        this.refreshFileTemplates(),
+      ]);
       this.ux.success(`已删除模板“${detail.name}”。`);
     } catch (error) {
       this.error = errorMessage(error);
@@ -376,14 +415,19 @@ export class TemplateStore {
         this.detail = { ...this.detail, favorite: !template.favorite };
         this.draft.favorite = !template.favorite;
       }
-      await Promise.all([this.refreshTemplates(), this.refreshFileTemplates()]);
+      await Promise.all([
+        this.refreshTemplates(),
+        this.refreshTreeTemplates(),
+        this.refreshFileTemplates(),
+      ]);
     } catch (error) {
       this.error = errorMessage(error);
     }
   }
 
   async moveTemplate(id: number, categoryId: number | undefined, targetIndex: number): Promise<void> {
-    const source = this.templates.find((template) => template.id === id);
+    const source = this.templates.find((template) => template.id === id)
+      ?? this.treeTemplates.find((template) => template.id === id);
     const changesCategory = source?.categoryId !== categoryId;
     if (this.sort !== "manual" && !changesCategory) {
       this.notice = "请先切换到手动排序，再拖动模板。";
@@ -395,7 +439,11 @@ export class TemplateStore {
         this.detail = { ...this.detail, categoryId };
         this.draft.categoryId = categoryId;
       }
-      await Promise.all([this.refreshTemplates(), this.refreshFileTemplates()]);
+      await Promise.all([
+        this.refreshTemplates(),
+        this.refreshTreeTemplates(),
+        this.refreshFileTemplates(),
+      ]);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -407,7 +455,7 @@ export class TemplateStore {
       this.editor.insertSnippet(detail.code);
       await recordTemplateUse(template.id);
       this.notice = `已插入 ${template.name}`;
-      await this.refreshTemplates();
+      await Promise.all([this.refreshTemplates(), this.refreshTreeTemplates()]);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -427,7 +475,10 @@ export class TemplateStore {
     if (!detail) return undefined;
     try {
       await recordTemplateUse(id);
-      void this.refreshFileTemplates();
+      void Promise.all([
+        this.refreshFileTemplates(),
+        this.kind === "file" ? this.refreshTreeTemplates() : Promise.resolve(),
+      ]);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -514,7 +565,12 @@ export class TemplateStore {
       this.draft = inputFromDetail(detail);
       this.versionPreview = undefined;
       this.notice = `已恢复 ${detail.name}`;
-      await Promise.all([this.loadHistory(), this.refreshTemplates(), this.refreshFileTemplates()]);
+      await Promise.all([
+        this.loadHistory(),
+        this.refreshTemplates(),
+        this.refreshTreeTemplates(),
+        this.refreshFileTemplates(),
+      ]);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -533,11 +589,11 @@ export class TemplateStore {
 
   private async refreshCategories(): Promise<void> {
     this.categories = await listTemplateCategories();
-    this.categoryRevision += 1;
+    this.treeRevision += 1;
   }
 
-  private buildCategoryRows(): TemplateCategoryRow[] {
-    return buildTemplateCategoryRows(this.categories, this.expandedCategories);
+  private buildTreeRows(): TemplateTreeRow[] {
+    return buildTemplateTreeRows(this.categories, this.treeTemplates, this.expandedCategories);
   }
 
   private rememberCreateDraft(): void {

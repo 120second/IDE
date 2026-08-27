@@ -85,7 +85,7 @@
     class="sidebar-content"
   >
     {#if shell.activeActivity === "settings"}
-      <SettingsPanel {settings} />
+      <SettingsPanel {settings} {shell} />
     {:else if shell.activeActivity === "explorer"}
       <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "testcases"}

@@ -34,12 +34,15 @@ import { recordIpcEvent } from "../performance";
 import { BoundedOutputBuffer, OUTPUT_FLUSH_INTERVAL_MS } from "../outputBuffer";
 
 const CONSOLE_LIMIT = 2 * 1024 * 1024;
+type DebugStepKind = "over" | "into" | "out";
 
 export class DebugStore {
   state = $state<DebugSessionState>("idle");
   sessionId = $state("");
   reason = $state("");
   busy = $state(false);
+  breakpointBusy = $state(false);
+  pendingStep = $state<DebugStepKind>();
   error = $state("");
   console = $state("");
   selectedFrame = $state(0);
@@ -57,6 +60,9 @@ export class DebugStore {
   );
   private consoleTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
+  private debugSourcePath = "";
+  private relocatedBreakpoints = new Map<string, DebugBreakpointInput>();
+  private relocationTimer: ReturnType<typeof setTimeout> | undefined;
 
   get approximateOutputBytes(): number {
     return this.consoleBuffer.approximateLength(this.console) * 2;
@@ -75,7 +81,7 @@ export class DebugStore {
   }
 
   get active(): boolean {
-    return this.state !== "idle";
+    return this.state === "starting" || (Boolean(this.sessionId) && this.state !== "idle");
   }
 
   get stopped(): boolean {
@@ -102,7 +108,11 @@ export class DebugStore {
     this.unlisten = undefined;
     if (this.consoleTimer) clearTimeout(this.consoleTimer);
     this.consoleTimer = undefined;
+    if (this.relocationTimer) clearTimeout(this.relocationTimer);
+    this.relocationTimer = undefined;
+    this.relocatedBreakpoints.clear();
     this.consoleBuffer.clear();
+    this.editor.clearDebugLocation();
     if (this.active) void stopDebugSession();
   }
 
@@ -119,45 +129,54 @@ export class DebugStore {
   }
 
   async continueExecution(): Promise<void> {
+    if (!this.stopped) return;
+    this.pendingStep = undefined;
     await this.control(continueDebugSession);
   }
 
   async pause(): Promise<void> {
+    if (this.state !== "running") return;
     await this.control(pauseDebugSession);
   }
 
   async stepOver(): Promise<void> {
-    await this.control(stepOverDebugSession);
+    await this.requestStep("over");
   }
 
   async stepInto(): Promise<void> {
-    await this.control(stepIntoDebugSession);
+    await this.requestStep("into");
   }
 
   async stepOut(): Promise<void> {
-    await this.control(stepOutDebugSession);
+    await this.requestStep("out");
   }
 
   async restart(): Promise<void> {
+    if (!this.active) return;
+    this.pendingStep = undefined;
     await this.control(restartDebugSession, true);
   }
 
   async stop(): Promise<void> {
     if (this.busy || this.state === "idle") return;
+    this.pendingStep = undefined;
     this.busy = true;
     try {
       this.applySnapshot(await stopDebugSession());
       this.sessionId = "";
+      this.debugSourcePath = "";
       this.variables = [];
       this.frames = [];
+      this.error = "";
     } catch (error) {
       this.error = errorMessage(error);
     } finally {
+      this.editor.clearDebugLocation();
       this.busy = false;
     }
   }
 
-  async refresh(): Promise<void> {
+  async refresh(revealFrame = false): Promise<void> {
     if (!this.stopped || this.busy) return;
     const request = ++this.sequence;
     try {
@@ -165,16 +184,27 @@ export class DebugStore {
         this.selectedFrame,
         this.watches.map((watch) => watch.expression),
       );
-      if (request === this.sequence && this.state === "stopped") this.applySnapshot(snapshot);
+      if (request === this.sequence && this.state === "stopped") {
+        this.applySnapshot(snapshot);
+        if (revealFrame) await this.revealSelectedFrame();
+      }
     } catch (error) {
       if (request === this.sequence) this.error = errorMessage(error);
     }
   }
 
   async selectFrame(level: number): Promise<void> {
-    if (!this.stopped || level === this.selectedFrame) return;
+    if (!this.stopped) return;
+    if (level === this.selectedFrame) {
+      await this.revealSelectedFrame();
+      return;
+    }
     this.selectedFrame = level;
-    await this.refresh();
+    await this.refresh(true);
+  }
+
+  async revealBreakpoint(breakpoint: DebugBreakpoint): Promise<void> {
+    await this.editor.openSearchMatch(breakpoint.file, breakpoint.line, 1);
   }
 
   addWatch(expression: string): void {
@@ -210,17 +240,33 @@ export class DebugStore {
   }
 
   async toggleBreakpoint(file: string, line: number): Promise<void> {
-    const existing = this.breakpoints.find(
+    if (this.busy || this.breakpointBusy) return;
+    const existing = this.breakpoints.filter(
       (breakpoint) => samePath(breakpoint.file, file) && breakpoint.line === line,
     );
-    if (existing) {
-      this.breakpoints = this.breakpoints.filter((breakpoint) => breakpoint.id !== existing.id);
+    if (existing.length) {
+      const ids = new Set(existing.map((breakpoint) => breakpoint.id));
+      this.breakpoints = this.breakpoints.filter((breakpoint) => !ids.has(breakpoint.id));
       this.syncGutter();
       if (this.active) {
+        this.breakpointBusy = true;
+        const failed: DebugBreakpoint[] = [];
         try {
-          await removeDebugBreakpoint(existing.id);
-        } catch (error) {
-          this.error = errorMessage(error);
+          for (const breakpoint of existing) {
+            try {
+              await removeDebugBreakpoint(breakpoint.id);
+            } catch (error) {
+              const message = errorMessage(error);
+              this.error = message;
+              failed.push({ ...breakpoint, message });
+            }
+          }
+        } finally {
+          this.breakpointBusy = false;
+          if (failed.length) {
+            this.breakpoints = dedupeBreakpoints([...this.breakpoints, ...failed]);
+            this.syncGutter();
+          }
         }
       }
       return;
@@ -237,19 +283,79 @@ export class DebugStore {
       verified: false,
       message: "",
     };
-    this.breakpoints = [...this.breakpoints, breakpoint];
+    this.breakpoints = dedupeBreakpoints([...this.breakpoints, breakpoint]);
     this.syncGutter();
-    if (this.active) await this.pushBreakpoint(input);
+    if (this.active) {
+      this.breakpointBusy = true;
+      try {
+        await this.pushBreakpoint(input);
+      } finally {
+        this.breakpointBusy = false;
+      }
+    }
   }
 
   async updateBreakpoint(id: string, patch: Partial<Pick<DebugBreakpoint, "enabled" | "condition">>): Promise<void> {
+    if (this.busy || this.breakpointBusy) return;
     const existing = this.breakpoints.find((breakpoint) => breakpoint.id === id);
     if (!existing) return;
     const next = { ...existing, ...patch, verified: false, message: "" };
     if (sameBreakpoint(existing, next)) return;
     this.breakpoints = this.breakpoints.map((breakpoint) => breakpoint.id === id ? next : breakpoint);
     this.syncGutter();
-    if (this.active) await this.pushBreakpoint(next);
+    if (this.active) {
+      this.breakpointBusy = true;
+      try {
+        await this.pushBreakpoint(next);
+      } finally {
+        this.breakpointBusy = false;
+      }
+    }
+  }
+
+  async setAllBreakpointsEnabled(enabled: boolean): Promise<void> {
+    if (this.busy || this.breakpointBusy) return;
+    const changed = this.breakpoints
+      .filter((breakpoint) => breakpoint.enabled !== enabled)
+      .map((breakpoint) => ({ ...breakpoint, enabled, verified: false, message: "" }));
+    if (!changed.length) return;
+    const replacements = new Map(changed.map((breakpoint) => [breakpoint.id, breakpoint]));
+    this.breakpoints = this.breakpoints.map((breakpoint) => replacements.get(breakpoint.id) ?? breakpoint);
+    this.syncGutter();
+    if (!this.active) return;
+    this.breakpointBusy = true;
+    try {
+      for (const breakpoint of changed) await this.pushBreakpoint(breakpoint);
+    } finally {
+      this.breakpointBusy = false;
+    }
+  }
+
+  async clearBreakpoints(): Promise<void> {
+    if (this.busy || this.breakpointBusy || !this.breakpoints.length) return;
+    const removed = this.breakpoints;
+    this.breakpoints = [];
+    this.syncGutter();
+    if (!this.active) return;
+    this.breakpointBusy = true;
+    const failed: DebugBreakpoint[] = [];
+    try {
+      for (const breakpoint of removed) {
+        try {
+          await removeDebugBreakpoint(breakpoint.id);
+        } catch (error) {
+          const message = errorMessage(error);
+          this.error = message;
+          failed.push({ ...breakpoint, message });
+        }
+      }
+    } finally {
+      this.breakpointBusy = false;
+      if (failed.length) {
+        this.breakpoints = dedupeBreakpoints([...this.breakpoints, ...failed]);
+        this.syncGutter();
+      }
+    }
   }
 
   clearConsole(): void {
@@ -261,12 +367,18 @@ export class DebugStore {
 
   private async start(stdin: string, testcaseName = ""): Promise<void> {
     if (this.active || this.busy) return;
+    this.pendingStep = undefined;
+    this.breakpoints = dedupeBreakpoints(this.breakpoints);
+    this.syncGutter();
     this.busy = true;
     this.error = "";
     this.clearConsole();
+    this.editor.clearDebugLocation();
+    this.sessionId = "";
     this.state = "starting";
     this.reason = testcaseName ? `正在调试测试点“${testcaseName}”` : "正在准备调试";
     const sourcePath = this.editor.activeTab?.path;
+    this.debugSourcePath = sourcePath ?? "";
     try {
       const compiled = await this.execution.compileCurrent("debug");
       if (!compiled?.success || !compiled.executablePath || !sourcePath) {
@@ -276,6 +388,7 @@ export class DebugStore {
       }
       this.shell.activeActivity = "debug";
       this.shell.sidebarVisible = true;
+      this.shell.showBottomPanel("debugConsole");
       const snapshot = await startDebugSession({
         gdbPath: this.settings.value.gdbPath,
         executablePath: compiled.executablePath,
@@ -287,7 +400,7 @@ export class DebugStore {
         })),
       });
       this.applySnapshot(snapshot);
-      if (snapshot.state === "stopped") queueMicrotask(() => void this.refresh());
+      if (snapshot.state === "stopped") queueMicrotask(() => void this.refresh(true));
     } catch (error) {
       this.state = "error";
       this.error = errorMessage(error);
@@ -298,8 +411,8 @@ export class DebugStore {
     }
   }
 
-  private async control(action: () => Promise<DebugSessionSnapshot>, restarting = false): Promise<void> {
-    if (this.busy || !this.active) return;
+  private async control(action: () => Promise<DebugSessionSnapshot>, restarting = false): Promise<boolean> {
+    if (this.busy || !this.active) return false;
     this.busy = true;
     this.error = "";
     if (restarting) {
@@ -308,19 +421,60 @@ export class DebugStore {
     }
     try {
       this.applySnapshot(await action());
+      return true;
     } catch (error) {
       this.error = errorMessage(error);
+      return false;
     } finally {
       this.busy = false;
     }
   }
 
-  private async pushBreakpoint(input: DebugBreakpointInput): Promise<void> {
+  private async requestStep(kind: DebugStepKind): Promise<void> {
+    if (this.busy || this.pendingStep || !this.active) return;
+    if (this.stopped) {
+      await this.performStep(kind);
+      return;
+    }
+    if (this.state !== "running") return;
+    this.pendingStep = kind;
+    this.reason = `正在暂停，以执行${stepLabel(kind)}`;
+    const paused = await this.control(pauseDebugSession);
+    if (!paused) {
+      this.pendingStep = undefined;
+      return;
+    }
+    await this.consumePendingStep();
+  }
+
+  private async consumePendingStep(): Promise<void> {
+    if (this.busy || !this.stopped || !this.pendingStep) return;
+    const kind = this.pendingStep;
+    this.pendingStep = undefined;
+    this.reason = `正在执行${stepLabel(kind)}`;
+    await this.performStep(kind);
+  }
+
+  private async performStep(kind: DebugStepKind): Promise<void> {
+    const action = kind === "over"
+      ? stepOverDebugSession
+      : kind === "into"
+        ? stepIntoDebugSession
+        : stepOutDebugSession;
+    await this.control(action);
+  }
+
+  private async pushBreakpoint(input: DebugBreakpointInput): Promise<boolean> {
     try {
       const saved = await setDebugBreakpoint(input);
       this.mergeBreakpoints([saved]);
+      return true;
     } catch (error) {
       this.error = errorMessage(error);
+      this.breakpoints = this.breakpoints.map((breakpoint) => breakpoint.id === input.id
+        ? { ...breakpoint, verified: false, message: this.error }
+        : breakpoint);
+      return false;
     }
   }
 
@@ -332,19 +486,23 @@ export class DebugStore {
       return;
     }
     if (event.kind === "breakpoints") {
-      this.mergeBreakpoints(event.breakpoints);
+      this.replaceBreakpoints(event.breakpoints);
       return;
     }
     this.state = event.state;
     this.reason = event.reason;
     if (event.state === "stopped") {
       this.selectedFrame = 0;
-      queueMicrotask(() => void this.refresh());
+      if (this.pendingStep) queueMicrotask(() => void this.consumePendingStep());
+      else queueMicrotask(() => void this.refresh(true));
     } else if (event.state === "running") {
       this.error = "";
-    } else if (event.state === "exited") {
+      this.editor.clearDebugLocation();
+    } else if (event.state === "exited" || event.state === "error") {
+      this.pendingStep = undefined;
       this.variables = [];
       this.frames = [];
+      this.editor.clearDebugLocation();
     }
   }
 
@@ -355,29 +513,34 @@ export class DebugStore {
     this.selectedFrame = snapshot.selectedFrame;
     this.frames = snapshot.frames;
     this.variables = snapshot.variables;
+    if (snapshot.state === "exited" || snapshot.state === "error") this.pendingStep = undefined;
+    if (snapshot.state !== "stopped") this.editor.clearDebugLocation();
     this.mergeBreakpoints(snapshot.breakpoints);
     const values = new Map(snapshot.watches.map((watch) => [watch.expression, watch]));
     this.watches = this.watches.map((watch) => ({ ...watch, ...(values.get(watch.expression) ?? {}) }));
   }
 
   private mergeBreakpoints(incoming: DebugBreakpoint[]): void {
-    if (!incoming.length) return;
     const byId = new Map(incoming.map((breakpoint) => [breakpoint.id, breakpoint]));
-    let changed = false;
     const existingIds = new Set(this.breakpoints.map((breakpoint) => breakpoint.id));
     const next = this.breakpoints.map((breakpoint) => {
       const replacement = byId.get(breakpoint.id);
-      if (!replacement || sameBreakpoint(breakpoint, replacement)) return breakpoint;
-      changed = true;
-      return replacement;
+      return replacement ?? breakpoint;
     });
     for (const breakpoint of incoming) {
       if (existingIds.has(breakpoint.id)) continue;
       existingIds.add(breakpoint.id);
       next.push(breakpoint);
-      changed = true;
     }
-    if (!changed) return;
+    const deduped = dedupeBreakpoints(next);
+    if (sameBreakpointLists(this.breakpoints, deduped)) return;
+    this.breakpoints = deduped;
+    this.syncGutter();
+  }
+
+  private replaceBreakpoints(incoming: DebugBreakpoint[]): void {
+    const next = dedupeBreakpoints(incoming);
+    if (sameBreakpointLists(this.breakpoints, next)) return;
     this.breakpoints = next;
     this.syncGutter();
   }
@@ -396,12 +559,44 @@ export class DebugStore {
       changed = true;
       return { ...breakpoint, line };
     });
-    if (changed) this.breakpoints = next;
+    if (changed) {
+      this.breakpoints = dedupeBreakpoints(next);
+      if (this.active) {
+        this.scheduleRelocatedBreakpoints(
+          this.breakpoints.filter((breakpoint) => replacements.has(breakpoint.id)),
+        );
+      }
+    }
+  }
+
+  private scheduleRelocatedBreakpoints(breakpoints: DebugBreakpointInput[]): void {
+    for (const breakpoint of breakpoints) this.relocatedBreakpoints.set(breakpoint.id, breakpoint);
+    if (this.relocationTimer) clearTimeout(this.relocationTimer);
+    this.relocationTimer = setTimeout(() => {
+      this.relocationTimer = undefined;
+      const pending = [...this.relocatedBreakpoints.values()];
+      this.relocatedBreakpoints.clear();
+      void this.syncRelocatedBreakpoints(pending);
+    }, 120);
+  }
+
+  private async syncRelocatedBreakpoints(breakpoints: DebugBreakpointInput[]): Promise<void> {
+    if (!breakpoints.length || !this.active) return;
+    if (this.busy || this.breakpointBusy) {
+      this.scheduleRelocatedBreakpoints(breakpoints);
+      return;
+    }
+    this.breakpointBusy = true;
+    try {
+      for (const breakpoint of breakpoints) await this.pushBreakpoint(breakpoint);
+    } finally {
+      this.breakpointBusy = false;
+    }
   }
 
   private syncGutter(): void {
     this.editor.setBreakpointLocations(
-      this.breakpoints.filter((breakpoint) => breakpoint.enabled),
+      dedupeBreakpoints(this.breakpoints).filter((breakpoint) => breakpoint.enabled),
     );
   }
 
@@ -415,10 +610,29 @@ export class DebugStore {
       }, OUTPUT_FLUSH_INTERVAL_MS);
     }
   }
+
+  private async revealSelectedFrame(): Promise<void> {
+    if (!this.stopped) return;
+    const frame = this.frames.find((candidate) => candidate.level === this.selectedFrame);
+    const path = debugFramePath(frame?.fullName || frame?.file || "", this.debugSourcePath);
+    if (!path || !frame?.line) return;
+    await this.editor.revealDebugLocation(path, frame.line);
+  }
 }
 
 function parentDirectory(path: string): string {
   return path.replace(/[\\/][^\\/]+$/, "") || path;
+}
+
+function debugFramePath(path: string, sourcePath: string): string {
+  if (!path || !sourcePath || /^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\") || path.startsWith("/")) {
+    return path;
+  }
+  if (path.split(/[\\/]/).pop()?.toLocaleLowerCase() === sourcePath.split(/[\\/]/).pop()?.toLocaleLowerCase()) {
+    return sourcePath;
+  }
+  const separator = sourcePath.includes("\\") ? "\\" : "/";
+  return `${parentDirectory(sourcePath)}${separator}${path.replace(/^[\\/]+/, "")}`;
 }
 
 function samePath(left: string, right: string): boolean {
@@ -435,6 +649,36 @@ function sameBreakpoint(left: DebugBreakpoint, right: DebugBreakpoint): boolean 
     && left.verified === right.verified
     && left.message === right.message
     && left.gdbNumber === right.gdbNumber;
+}
+
+function sameBreakpointLists(left: DebugBreakpoint[], right: DebugBreakpoint[]): boolean {
+  return left.length === right.length
+    && left.every((breakpoint, index) => sameBreakpoint(breakpoint, right[index]));
+}
+
+function breakpointLocationKey(
+  breakpoint: Pick<DebugBreakpointInput, "file" | "line">,
+): string {
+  return `${breakpoint.file.replaceAll("/", "\\").toLocaleLowerCase()}:${breakpoint.line}`;
+}
+
+function dedupeBreakpoints(breakpoints: readonly DebugBreakpoint[]): DebugBreakpoint[] {
+  const locations = new Set<string>();
+  const result: DebugBreakpoint[] = [];
+  for (let index = breakpoints.length - 1; index >= 0; index -= 1) {
+    const breakpoint = breakpoints[index];
+    const location = breakpointLocationKey(breakpoint);
+    if (locations.has(location)) continue;
+    locations.add(location);
+    result.unshift(breakpoint);
+  }
+  return result;
+}
+
+function stepLabel(kind: DebugStepKind): string {
+  if (kind === "over") return "单步跳过";
+  if (kind === "into") return "单步进入";
+  return "单步跳出";
 }
 
 function errorMessage(error: unknown): string {

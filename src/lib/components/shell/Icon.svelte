@@ -13,6 +13,10 @@
     | "zen"
     | "file"
     | "folder"
+    | "folder-open"
+    | "edit"
+    | "star"
+    | "clock"
     | "cpp"
     | "check"
     | "terminal"
@@ -21,7 +25,14 @@
     | "command"
     | "chevron-right"
     | "folder-plus"
-    | "refresh";
+    | "refresh"
+    | "play"
+    | "pause"
+    | "step-over"
+    | "step-into"
+    | "step-out"
+    | "stop"
+    | "trash";
 
   interface Props {
     name: IconName;
@@ -69,6 +80,14 @@
     <path d="M6 3.5h8l4 4v13H6zM14 3.5V8h4" />
   {:else if name === "folder"}
     <path d="M3.5 5.5h6l2 2h9v11h-17z" />
+  {:else if name === "folder-open"}
+    <path d="M3.5 7V5.5h6l2 2h8.8" /><path d="m4 9.5h17l-2.2 9H3z" />
+  {:else if name === "edit"}
+    <path d="M4.5 19.5h4l10-10-4-4-10 10zM12.8 7.2l4 4M4.5 19.5l.8-4.2" />
+  {:else if name === "star"}
+    <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z" />
+  {:else if name === "clock"}
+    <circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" />
   {:else if name === "cpp"}
     <path d="M8.5 7.5a5 5 0 1 0 0 9M14 9v6M11 12h6M20 9v6M17 12h6" />
   {:else if name === "check"}
@@ -87,5 +106,19 @@
     <path d="M3.5 6h6l2 2h9v10.5h-17zM15.5 11v5M13 13.5h5" />
   {:else if name === "refresh"}
     <path d="M19 7v5h-5M5 17v-5h5M18 12a6.5 6.5 0 0 0-11-4.5L5 10M6 12a6.5 6.5 0 0 0 11 4.5l2-2.5" />
+  {:else if name === "play"}
+    <path d="m8 5 11 7-11 7z" />
+  {:else if name === "pause"}
+    <path d="M8 5v14M16 5v14" />
+  {:else if name === "step-over"}
+    <path d="M5 16v-1a7 7 0 0 1 11.8-5.1L20 13" /><path d="M20 7v6h-6M5 19h14" />
+  {:else if name === "step-into"}
+    <path d="M12 4v12M7 11l5 5 5-5M5 20h14" />
+  {:else if name === "step-out"}
+    <path d="M12 20V8M7 13l5-5 5 5M5 4h14" />
+  {:else if name === "stop"}
+    <rect x="6" y="6" width="12" height="12" rx="1.5" />
+  {:else if name === "trash"}
+    <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
   {/if}
 </svg>

@@ -5,7 +5,6 @@
   import type { EditorWorkspace } from "./lib/editor/workspace.svelte";
   import {
     applyDocumentAppearance,
-    applyNativeWindowAppearance,
     SettingsStore,
   } from "./lib/stores/settings.svelte";
   import { ShellStore } from "./lib/stores/shell.svelte";
@@ -47,7 +46,6 @@
   $effect(() => {
     const appearance = settings.value;
     applyDocumentAppearance(appearance);
-    void applyNativeWindowAppearance(appearance);
     untrack(() => workspace?.updateAppearance(appearance));
   });
 
@@ -93,6 +91,13 @@
 
   onMount(() => {
     let disposed = false;
+    const systemTheme = window.matchMedia("(prefers-color-scheme: light)");
+    const refreshSystemTheme = () => {
+      if (settings.value.theme !== "system") return;
+      applyDocumentAppearance(settings.value);
+      workspace?.updateAppearance(settings.value);
+    };
+    systemTheme.addEventListener("change", refreshSystemTheme);
     installPerformanceConsole();
     void Promise.all([
       settings.initialize(),
@@ -177,6 +182,7 @@
 
     return () => {
       disposed = true;
+      systemTheme.removeEventListener("change", refreshSystemTheme);
       sessionStore?.dispose();
       fileWorkspace?.dispose();
       templateStore?.dispose();

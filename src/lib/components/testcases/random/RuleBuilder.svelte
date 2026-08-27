@@ -25,6 +25,12 @@
   }
 
   let { nodes, diagnostics, change }: Props = $props();
+  const quickTemplates: Array<{ id: GeneratorTemplateId; label: string }> = [
+    { id: "nArray", label: "n + 数组" },
+    { id: "nmEdges", label: "n m + 边" },
+    { id: "multiTest", label: "T 组测试" },
+    { id: "tree", label: "树" },
+  ];
 
   function add(kind: AddRuleKind): void {
     const scope = scopeBefore(nodes, nodes.length);
@@ -66,10 +72,26 @@
 </script>
 
 <section class="rule-builder">
-  <header>
-    <div><strong>生成规则</strong><span>按照题目的输入格式，从上到下搭建。</span></div>
-    <div><AddRuleMenu depth={0} {add} compact /><TemplateMenu apply={applyTemplate} /></div>
+  <header class="generator-step-header">
+    <span class="generator-step-index" aria-hidden="true">1</span>
+    <div class="generator-step-copy"><strong>输入格式</strong><span>按程序读取数据的顺序，从上到下搭建。</span></div>
+    <span class="rule-count">{nodes.length} 项</span>
   </header>
+
+  <div class="template-launcher">
+    <span>常用结构</span>
+    <div class="template-shortcuts" aria-label="常用输入格式模板">
+      {#each quickTemplates as template}
+        <button type="button" onclick={() => applyTemplate(template.id)}>{template.label}</button>
+      {/each}
+      <TemplateMenu apply={applyTemplate} label="更多…" />
+    </div>
+  </div>
+
+  <div class="rule-builder-toolbar">
+    <span>每一项对应输入中的一行或一组结构</span>
+    <AddRuleMenu depth={0} {add} compact />
+  </div>
 
   <div class="rule-list">
     {#each nodes as node, index (node.id)}
@@ -79,6 +101,7 @@
         total={nodes.length}
         scope={scopeBefore(nodes, index)}
         depth={0}
+        position={String(index + 1)}
         {diagnostics}
         change={(updated) => update(index, updated)}
         duplicate={() => duplicate(index)}
@@ -86,7 +109,7 @@
         remove={() => change(nodes.filter((_, candidateIndex) => candidateIndex !== index))}
       />
     {/each}
-    {#if nodes.length === 0}<div class="rule-list-empty">尚未添加规则。可以从常用模板开始。</div>{/if}
+    {#if nodes.length === 0}<div class="rule-list-empty"><strong>还没有输入结构</strong><span>选择上方模板，或者添加第一项输入内容。</span></div>{/if}
   </div>
-  <button class="add-line-button" onclick={() => add("integer")}>＋ 添加一行</button>
+  <button class="add-line-button" onclick={() => add("integer")}>＋ 添加输入内容</button>
 </section>

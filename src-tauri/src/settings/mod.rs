@@ -1,36 +1,82 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreference {
     #[default]
+    System,
     Dark,
     Light,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum BackgroundEffect {
+pub enum ColorTheme {
     #[default]
-    Transparent,
-    Acrylic,
+    Signal,
+    Graphite,
+    Forest,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UiDensity {
+    #[default]
+    Compact,
+    Standard,
+    Comfortable,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CustomThemeVariant {
+    pub colors: BTreeMap<String, String>,
+    pub syntax: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CustomThemeVariants {
+    pub dark: CustomThemeVariant,
+    pub light: CustomThemeVariant,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CustomThemeDefinition {
+    pub id: String,
+    pub name: String,
+    pub inherits: ColorTheme,
+    pub variants: CustomThemeVariants,
+}
+
+impl Default for CustomThemeDefinition {
+    fn default() -> Self {
+        Self {
+            id: "custom-theme".to_owned(),
+            name: "自定义主题".to_owned(),
+            inherits: ColorTheme::Signal,
+            variants: CustomThemeVariants::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppSettings {
     pub theme: ThemePreference,
-    pub background_image: String,
-    pub background_opacity: f64,
-    pub background_effect: BackgroundEffect,
-    pub window_opacity: f64,
-    pub sidebar_opacity: f64,
-    pub editor_opacity: f64,
-    pub blur: f64,
+    pub color_theme: ColorTheme,
+    pub active_custom_theme: String,
+    pub custom_themes: Vec<CustomThemeDefinition>,
+    pub ui_density: UiDensity,
     pub font_family: String,
     pub font_size: f64,
     pub line_height: f64,
@@ -49,17 +95,14 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            theme: ThemePreference::Dark,
-            background_image: String::new(),
-            background_opacity: 0.18,
-            background_effect: BackgroundEffect::Transparent,
-            window_opacity: 0.32,
-            sidebar_opacity: 0.96,
-            editor_opacity: 0.98,
-            blur: 12.0,
-            font_family: "JetBrains Mono, Cascadia Code, Consolas, monospace".to_owned(),
+            theme: ThemePreference::System,
+            color_theme: ColorTheme::Signal,
+            active_custom_theme: String::new(),
+            custom_themes: Vec::new(),
+            ui_density: UiDensity::Compact,
+            font_family: "Cascadia Code, JetBrains Mono, Consolas, monospace".to_owned(),
             font_size: 14.0,
-            line_height: 1.62,
+            line_height: 1.55,
             performance_mode: false,
             compiler_path: "g++".to_owned(),
             gdb_path: "gdb".to_owned(),
@@ -76,14 +119,8 @@ impl Default for AppSettings {
 
 impl AppSettings {
     pub fn sanitize(mut self) -> Self {
-        self.background_image = self.background_image.trim().chars().take(2048).collect();
-        self.background_opacity = finite_clamp(self.background_opacity, 0.0, 1.0, 0.18);
-        self.window_opacity = finite_clamp(self.window_opacity, 0.0, 1.0, 0.32);
-        self.sidebar_opacity = finite_clamp(self.sidebar_opacity, 0.0, 1.0, 0.96);
-        self.editor_opacity = finite_clamp(self.editor_opacity, 0.0, 1.0, 0.98);
-        self.blur = finite_clamp(self.blur, 0.0, 24.0, 12.0);
         self.font_size = finite_clamp(self.font_size, 11.0, 24.0, 14.0);
-        self.line_height = finite_clamp(self.line_height, 1.2, 2.0, 1.62);
+        self.line_height = finite_clamp(self.line_height, 1.2, 2.0, 1.55);
         self.run_timeout_ms = self.run_timeout_ms.clamp(100, 60_000);
         self.max_output_bytes = self.max_output_bytes.clamp(64 * 1024, 16 * 1024 * 1024);
 
@@ -101,6 +138,13 @@ impl AppSettings {
         self.release_args = sanitize_arguments(self.release_args, &["-O2"]);
         self.debug_args = sanitize_arguments(self.debug_args, &["-g", "-O0"]);
         self.keybindings = sanitize_keybindings(self.keybindings);
+        self.custom_themes = sanitize_custom_themes(self.custom_themes);
+        self.active_custom_theme = self
+            .custom_themes
+            .iter()
+            .find(|theme| theme.id == self.active_custom_theme)
+            .map(|theme| theme.id.clone())
+            .unwrap_or_default();
 
         self
     }
@@ -212,11 +256,6 @@ mod tests {
     #[test]
     fn settings_are_sanitized_to_supported_ranges() {
         let settings = AppSettings {
-            background_opacity: -2.0,
-            window_opacity: -1.0,
-            sidebar_opacity: 4.0,
-            editor_opacity: f64::NAN,
-            blur: 100.0,
             font_size: 3.0,
             line_height: 9.0,
             font_family: "   ".to_owned(),
@@ -225,11 +264,6 @@ mod tests {
         }
         .sanitize();
 
-        assert_eq!(settings.background_opacity, 0.0);
-        assert_eq!(settings.window_opacity, 0.0);
-        assert_eq!(settings.sidebar_opacity, 1.0);
-        assert_eq!(settings.editor_opacity, 0.98);
-        assert_eq!(settings.blur, 24.0);
         assert_eq!(settings.font_size, 11.0);
         assert_eq!(settings.line_height, 2.0);
         assert!(!settings.font_family.is_empty());
@@ -256,10 +290,24 @@ mod tests {
                 .as_nanos()
         );
         let path = std::env::temp_dir().join(file_name);
+        let custom_theme = CustomThemeDefinition {
+            id: "contest".to_owned(),
+            name: "Contest".to_owned(),
+            inherits: ColorTheme::Forest,
+            variants: CustomThemeVariants {
+                dark: CustomThemeVariant {
+                    colors: BTreeMap::from([("accent".to_owned(), "#ff3366".to_owned())]),
+                    syntax: BTreeMap::from([("keyword".to_owned(), "#ffcc00".to_owned())]),
+                },
+                light: CustomThemeVariant::default(),
+            },
+        };
         let expected = AppSettings {
             theme: ThemePreference::Light,
-            background_effect: BackgroundEffect::Acrylic,
-            window_opacity: 0.44,
+            color_theme: ColorTheme::Forest,
+            active_custom_theme: custom_theme.id.clone(),
+            custom_themes: vec![custom_theme],
+            ui_density: UiDensity::Comfortable,
             font_size: 17.0,
             line_height: 1.74,
             performance_mode: true,
@@ -270,12 +318,20 @@ mod tests {
         save(&path, expected).expect("settings should save");
         let loaded = load(&path).expect("settings should load");
 
-        assert!(matches!(loaded.theme, ThemePreference::Light));
-        assert!(matches!(
-            loaded.background_effect,
-            BackgroundEffect::Acrylic
-        ));
-        assert_eq!(loaded.window_opacity, 0.44);
+        assert_eq!(loaded.theme, ThemePreference::Light);
+        assert_eq!(loaded.color_theme, ColorTheme::Forest);
+        assert_eq!(loaded.active_custom_theme, "contest");
+        assert_eq!(loaded.custom_themes.len(), 1);
+        assert_eq!(
+            loaded.custom_themes[0]
+                .variants
+                .dark
+                .colors
+                .get("accent")
+                .map(String::as_str),
+            Some("#ff3366")
+        );
+        assert_eq!(loaded.ui_density, UiDensity::Comfortable);
         assert_eq!(loaded.font_size, 17.0);
         assert_eq!(loaded.line_height, 1.74);
         assert!(loaded.performance_mode);
@@ -289,17 +345,169 @@ mod tests {
     }
 
     #[test]
-    fn transparent_appearance_values_remain_available() {
+    fn legacy_appearance_fields_migrate_to_new_defaults() {
+        let legacy = r#"{
+            "theme": "dark",
+            "backgroundImage": "C:\\\\wallpaper.png",
+            "windowOpacity": 0.16,
+            "sidebarOpacity": 0.42,
+            "editorOpacity": 0.5,
+            "blur": 14,
+            "fontFamily": "Consolas",
+            "fontSize": 15,
+            "lineHeight": 1.55
+        }"#;
+        let settings = serde_json::from_str::<AppSettings>(legacy)
+            .expect("legacy settings should remain readable")
+            .sanitize();
+
+        assert_eq!(settings.theme, ThemePreference::Dark);
+        assert_eq!(settings.color_theme, ColorTheme::Signal);
+        assert_eq!(settings.ui_density, UiDensity::Compact);
+        assert_eq!(settings.font_family, "Consolas");
+    }
+
+    #[test]
+    fn custom_theme_values_are_bounded_and_invalid_colors_are_removed() {
         let settings = AppSettings {
-            window_opacity: 0.0,
-            sidebar_opacity: 0.0,
-            editor_opacity: 0.0,
+            active_custom_theme: "contest".to_owned(),
+            custom_themes: vec![CustomThemeDefinition {
+                id: " Contest !! ".to_owned(),
+                name: "  My Theme  ".to_owned(),
+                variants: CustomThemeVariants {
+                    dark: CustomThemeVariant {
+                        colors: BTreeMap::from([
+                            ("accent".to_owned(), "#AABBCC".to_owned()),
+                            ("unknown".to_owned(), "#ffffff".to_owned()),
+                            ("danger".to_owned(), "red".to_owned()),
+                        ]),
+                        syntax: BTreeMap::new(),
+                    },
+                    light: CustomThemeVariant::default(),
+                },
+                ..CustomThemeDefinition::default()
+            }],
             ..AppSettings::default()
         }
         .sanitize();
 
-        assert_eq!(settings.window_opacity, 0.0);
-        assert_eq!(settings.sidebar_opacity, 0.0);
-        assert_eq!(settings.editor_opacity, 0.0);
+        assert_eq!(settings.custom_themes[0].id, "contest");
+        assert_eq!(settings.custom_themes[0].name, "My Theme");
+        assert_eq!(
+            settings.custom_themes[0]
+                .variants
+                .dark
+                .colors
+                .get("accent")
+                .map(String::as_str),
+            Some("#aabbcc")
+        );
+        assert_eq!(settings.custom_themes[0].variants.dark.colors.len(), 1);
+        assert_eq!(settings.active_custom_theme, "contest");
     }
+}
+
+const THEME_COLOR_KEYS: &[&str] = &[
+    "background",
+    "backgroundElevated",
+    "activityBackground",
+    "sidebarBackground",
+    "panelBackground",
+    "editorBackground",
+    "tabBackground",
+    "tabActiveBackground",
+    "inputBackground",
+    "surface",
+    "surfaceRaised",
+    "surfaceSunken",
+    "hoverBackground",
+    "activeBackground",
+    "textPrimary",
+    "textSecondary",
+    "textMuted",
+    "accent",
+    "accentStrong",
+    "accentSoft",
+    "accentContrast",
+    "border",
+    "borderSubtle",
+    "borderStrong",
+    "success",
+    "warning",
+    "danger",
+    "focusRing",
+];
+
+const SYNTAX_COLOR_KEYS: &[&str] = &[
+    "text",
+    "muted",
+    "activeLine",
+    "selection",
+    "cursor",
+    "keyword",
+    "type",
+    "string",
+    "number",
+    "comment",
+    "function",
+    "variable",
+];
+
+fn sanitize_custom_themes(themes: Vec<CustomThemeDefinition>) -> Vec<CustomThemeDefinition> {
+    let mut ids = BTreeSet::new();
+    themes
+        .into_iter()
+        .take(24)
+        .filter_map(|mut theme| {
+            theme.id = sanitize_theme_id(&theme.id);
+            if !ids.insert(theme.id.clone()) {
+                return None;
+            }
+            theme.name = bounded_nonempty(&theme.name, "自定义主题", 48);
+            theme.variants.dark.colors =
+                sanitize_color_map(theme.variants.dark.colors, THEME_COLOR_KEYS);
+            theme.variants.dark.syntax =
+                sanitize_color_map(theme.variants.dark.syntax, SYNTAX_COLOR_KEYS);
+            theme.variants.light.colors =
+                sanitize_color_map(theme.variants.light.colors, THEME_COLOR_KEYS);
+            theme.variants.light.syntax =
+                sanitize_color_map(theme.variants.light.syntax, SYNTAX_COLOR_KEYS);
+            Some(theme)
+        })
+        .collect()
+}
+
+fn sanitize_theme_id(value: &str) -> String {
+    let id = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .take(64)
+        .collect::<String>();
+    if id.is_empty() {
+        "custom-theme".to_owned()
+    } else {
+        id
+    }
+}
+
+fn sanitize_color_map(
+    colors: BTreeMap<String, String>,
+    allowed: &[&str],
+) -> BTreeMap<String, String> {
+    colors
+        .into_iter()
+        .filter(|(key, value)| allowed.contains(&key.as_str()) && is_theme_color(value))
+        .take(allowed.len())
+        .map(|(key, value)| (key, value.to_ascii_lowercase()))
+        .collect()
+}
+
+fn is_theme_color(value: &str) -> bool {
+    matches!(value.len(), 4 | 5 | 7 | 9)
+        && value.starts_with('#')
+        && value[1..]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
 }

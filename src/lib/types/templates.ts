@@ -92,3 +92,14 @@ export interface TemplateCategoryRow {
   hasChildren: boolean;
 }
 
+export interface TemplateTreeCategoryRow extends TemplateCategoryRow {
+  kind: "category";
+}
+
+export interface TemplateTreeFileRow {
+  kind: "template";
+  template: TemplateMetadata;
+  depth: number;
+}
+
+export type TemplateTreeRow = TemplateTreeCategoryRow | TemplateTreeFileRow;

@@ -73,6 +73,8 @@ pub fn run() {
             commands::lsp::cancel_lsp_request,
             commands::settings::load_settings,
             commands::settings::save_settings,
+            commands::themes::read_theme_file,
+            commands::themes::write_theme_file,
             commands::recovery::load_editor_recovery,
             commands::recovery::save_editor_recovery,
             commands::workspace::open_workspace,

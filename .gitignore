@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .vite/
+.tauri-build-target/
+.codex/ui-qa/
 
 src-tauri/target/
 src-tauri/gen/
@@ -8,4 +10,3 @@ src-tauri/gen/
 .idea/
 .vscode/
 *.log
-

@@ -32,6 +32,7 @@
   import CommandPalette from "./CommandPalette.svelte";
   import type { WorkbenchCommand } from "../../types/commands";
   import FileTemplateDialog from "../templates/FileTemplateDialog.svelte";
+  import ThemeStudio from "../settings/ThemeStudio.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -55,6 +56,9 @@
   let quickFileOpen = $state(false);
   let commandPaletteOpen = $state(false);
   let fileDialogParent = $state<string>();
+  let TemplateReferenceWindow = $state.raw<
+    (typeof import("../editor/TemplateReferenceWindow.svelte"))["default"]
+  >();
   let workbenchCommands = $derived<WorkbenchCommand[]>([
     command("file.new", "新建 C++ 文件", "文件", "newFile", () => void createSourceFile()),
     command("file.openFolder", "打开文件夹", "文件", undefined, () => void fileWorkspace.openFolderPicker()),
@@ -67,6 +71,16 @@
     command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent()),
     command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }),
     command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }),
+    { id: "debug.continue", label: "继续调试", category: "调试", shortcut: "F5", run: () => void debugStore.continueExecution() },
+    { id: "debug.toggleBreakpoint", label: "切换当前行断点", category: "调试", shortcut: "F9", run: () => {
+      const path = workspace.activeTab?.path;
+      if (path) void debugStore.toggleBreakpoint(path, workspace.cursorLine);
+    } },
+    { id: "debug.stepOver", label: "单步跳过", category: "调试", shortcut: "F10", run: () => void debugStore.stepOver() },
+    { id: "debug.stepInto", label: "单步进入", category: "调试", shortcut: "F11", run: () => void debugStore.stepInto() },
+    { id: "debug.stepOut", label: "单步跳出", category: "调试", shortcut: "Shift+F11", run: () => void debugStore.stepOut() },
+    { id: "debug.restart", label: "重新启动调试", category: "调试", shortcut: "Ctrl+Shift+F5", run: () => void debugStore.restart() },
+    { id: "debug.stop", label: "停止调试", category: "调试", shortcut: "Shift+F5", run: () => void debugStore.stop() },
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
@@ -78,6 +92,13 @@
 
   $effect(() => {
     if (shell.activeActivity === "templates") void templateStore.initialize();
+  });
+
+  $effect(() => {
+    if (!workspace.templateReference || TemplateReferenceWindow) return;
+    void import("../editor/TemplateReferenceWindow.svelte").then((module) => {
+      TemplateReferenceWindow = module.default;
+    });
   });
 
   onMount(() => {
@@ -142,6 +163,36 @@
         event.preventDefault();
         shell.toggleZenMode();
         return;
+      }
+      const shortcutKey = event.key.toUpperCase();
+      const formControlFocused = event.target instanceof HTMLInputElement
+        || event.target instanceof HTMLTextAreaElement
+        || event.target instanceof HTMLSelectElement;
+      if (!formControlFocused && !event.altKey && !event.metaKey) {
+        if (shortcutKey === "F9" && !event.ctrlKey && !event.shiftKey) {
+          event.preventDefault();
+          const path = workspace.activeTab?.path;
+          if (path) void debugStore.toggleBreakpoint(path, workspace.cursorLine);
+          return;
+        }
+        if (debugStore.active && shortcutKey === "F5") {
+          event.preventDefault();
+          if (event.ctrlKey && event.shiftKey) void debugStore.restart();
+          else if (!event.ctrlKey && event.shiftKey) void debugStore.stop();
+          else if (!event.ctrlKey && !event.shiftKey && debugStore.stopped) void debugStore.continueExecution();
+          return;
+        }
+        if (debugStore.active && shortcutKey === "F10" && !event.ctrlKey && !event.shiftKey) {
+          event.preventDefault();
+          void debugStore.stepOver();
+          return;
+        }
+        if (debugStore.active && shortcutKey === "F11" && !event.ctrlKey) {
+          event.preventDefault();
+          if (event.shiftKey) void debugStore.stepOut();
+          else void debugStore.stepInto();
+          return;
+        }
       }
       if (matchesShortcut(event, "toggleSidebar", keybindings)) {
         event.preventDefault();
@@ -303,7 +354,13 @@
         />
       {/if}
       <section class="editor-column" aria-label="编辑器工作台">
-        {#if shell.activeActivity === "templates" && !shell.zenMode}
+        {#if shell.themeStudioOpen && !shell.zenMode}
+          <ThemeStudio
+            {settings}
+            close={() => shell.closeThemeStudio()}
+            setDirty={(dirty) => shell.setThemeStudioDirty(dirty)}
+          />
+        {:else if shell.activeActivity === "templates" && !shell.zenMode}
           <TemplateCenter {templateStore} />
         {:else if shell.activeActivity === "judge" && !shell.zenMode}
           <StressCenter stress={stressStore} {generator} {workspace} />
@@ -331,6 +388,15 @@
                 keybindings={settings.value.keybindings}
                 newFile={() => void createSourceFile()}
               />
+            {/if}
+            {#if workspace.templateReference && TemplateReferenceWindow}
+              {#key workspace.templateReference.template.id}
+                <TemplateReferenceWindow
+                  {workspace}
+                  {settings}
+                  reference={workspace.templateReference.template}
+                />
+              {/key}
             {/if}
           </div>
           {#if shell.bottomPanelVisible && !shell.zenMode}

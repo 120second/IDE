@@ -13,10 +13,8 @@ import {
   bracketMatching,
   foldGutter,
   foldKeymap,
-  HighlightStyle,
   indentOnInput,
   indentUnit,
-  syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import {
@@ -31,6 +29,8 @@ import {
 } from "@codemirror/state";
 import {
   crosshairCursor,
+  Decoration,
+  type DecorationSet,
   drawSelection,
   dropCursor,
   EditorView,
@@ -45,7 +45,6 @@ import {
   type Tooltip,
   type ViewUpdate,
 } from "@codemirror/view";
-import { tags } from "@lezer/highlight";
 import { getTextFileRevision, readTextFile, writeTextFile } from "../api/workspace";
 import type { AppSettings } from "../types/settings";
 import type { LspClient } from "../lsp/client";
@@ -62,6 +61,7 @@ import type {
   EditorRecoveryTab,
 } from "../types/session";
 import { documentRevision, documentRevisionExtension } from "./documentRevision";
+import { createAppearanceExtension } from "./appearance";
 import {
   detectLineEnding,
   editorDocument,
@@ -106,6 +106,13 @@ export interface EditorBreakpointLocation {
   line: number;
 }
 
+export interface TemplateReferenceDraft {
+  template: TemplateDetail;
+  tabId: string;
+  from: number;
+  to: number;
+}
+
 type TemplateCompletionProvider = (
   query: string,
   signal: AbortSignal,
@@ -138,12 +145,16 @@ class BreakpointGutterMarker extends GutterMarker {
 
   toDOM(): HTMLElement {
     const marker = document.createElement("span");
+    marker.className = "cm-breakpoint-dot";
     marker.setAttribute("aria-hidden", "true");
     return marker;
   }
 }
 
 const breakpointMarker = new BreakpointGutterMarker();
+const breakpointSpacer = new class extends GutterMarker {
+  elementClass = "cm-breakpoint-spacer";
+}();
 const setBreakpointLines = StateEffect.define<readonly number[]>();
 const breakpointField = StateField.define<RangeSet<GutterMarker>>({
   create: () => RangeSet.empty,
@@ -160,6 +171,28 @@ const breakpointField = StateField.define<RangeSet<GutterMarker>>({
   },
 });
 
+const setDebugLocation = StateEffect.define<number | null>({
+  map(value, changes) {
+    return value === null ? null : changes.mapPos(value);
+  },
+});
+const debugLocationField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(decoration, transaction) {
+    decoration = decoration.map(transaction.changes);
+    for (const effect of transaction.effects) {
+      if (!effect.is(setDebugLocation)) continue;
+      decoration = effect.value === null
+        ? Decoration.none
+        : Decoration.set([
+            Decoration.line({ class: "cm-debug-current-line" }).range(effect.value),
+          ]);
+    }
+    return decoration;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 export class EditorWorkspace {
   tabs = $state.raw<EditorTab[]>([]);
   activeId = $state("");
@@ -167,6 +200,7 @@ export class EditorWorkspace {
   cursorColumn = $state(1);
   saveState = $state<"idle" | "saving" | "saved" | "error">("idle");
   notice = $state("");
+  templateReference = $state.raw<TemplateReferenceDraft>();
 
   private view: EditorView | undefined;
   private readonly appearance = new Compartment();
@@ -177,6 +211,7 @@ export class EditorWorkspace {
   private breakpointToggleHandler: ((file: string, line: number) => void) | undefined;
   private breakpointMoveHandler: ((file: string, lines: number[]) => void) | undefined;
   private readonly breakpointLinesByPath = new Map<string, readonly number[]>();
+  private debugLocationPath = "";
   private lspClient: LspClient | undefined;
   private templateCompletionProvider: TemplateCompletionProvider | undefined;
   private templateCompletionPickedHandler: ((id: number) => void) | undefined;
@@ -223,6 +258,7 @@ export class EditorWorkspace {
     this.detach();
     this.lspClient = undefined;
     this.sessionChangeHandler = undefined;
+    this.templateReference = undefined;
   }
 
   setLspClient(client: LspClient | undefined): void {
@@ -243,6 +279,35 @@ export class EditorWorkspace {
   ): void {
     this.templateCompletionProvider = provider;
     this.templateCompletionPickedHandler = onPicked;
+    if (!provider) this.templateReference = undefined;
+  }
+
+  closeTemplateReference(): void {
+    this.templateReference = undefined;
+    this.focus();
+  }
+
+  insertTemplateReference(code: string, edited: boolean): boolean {
+    const reference = this.templateReference;
+    if (!reference || !this.view || reference.tabId !== this.activeId) return false;
+
+    const from = Math.min(this.view.state.doc.length, Math.max(0, reference.from));
+    const to = Math.min(this.view.state.doc.length, Math.max(from, reference.to));
+    this.templateReference = undefined;
+    if (edited) {
+      this.view.dispatch({
+        changes: { from, to, insert: code },
+        selection: { anchor: from + code.length },
+      });
+    } else {
+      snippet(normalizeSnippetTemplate(reference.template.code))(this.view, null, from, to);
+    }
+    this.templateCompletionPickedHandler?.(reference.template.id);
+    this.view.focus();
+    this.notice = edited
+      ? "已插入当前临时副本；原模板未修改。"
+      : "已插入代码片段。使用 Tab 和 Shift+Tab 在字段间移动。";
+    return true;
   }
 
   openLspDocuments(): { path: string; text: string }[] {
@@ -320,6 +385,46 @@ export class EditorWorkspace {
     }
   }
 
+  async revealDebugLocation(path: string, line: number): Promise<void> {
+    if (!path || !Number.isSafeInteger(line) || line < 1) return;
+    this.clearDebugLocation();
+    await this.openFile(path);
+    const tab = this.activeTab;
+    if (!tab?.path || !samePath(tab.path, path)) return;
+    const state = this.view?.state ?? tab.state;
+    const targetLine = state.doc.line(Math.min(line, state.doc.lines));
+    this.debugLocationPath = tab.path;
+    if (this.view) {
+      this.view.dispatch({
+        selection: { anchor: targetLine.from },
+        effects: [
+          setDebugLocation.of(targetLine.from),
+          EditorView.scrollIntoView(targetLine.from, { y: "center" }),
+        ],
+      });
+      this.view.focus();
+      return;
+    }
+    this.replaceTab(tab.id, {
+      ...tab,
+      state: tab.state.update({ effects: setDebugLocation.of(targetLine.from) }).state,
+    });
+  }
+
+  clearDebugLocation(): void {
+    const path = this.debugLocationPath;
+    if (!path) return;
+    this.debugLocationPath = "";
+    const active = this.activeTab;
+    if (active?.path && samePath(active.path, path) && this.view) {
+      this.view.dispatch({ effects: setDebugLocation.of(null) });
+    }
+    this.tabs = this.tabs.map((tab) => {
+      if (!tab.path || tab.id === this.activeId && this.view || !samePath(tab.path, path)) return tab;
+      return { ...tab, state: tab.state.update({ effects: setDebugLocation.of(null) }).state };
+    });
+  }
+
   getSelectedText(): string {
     const state = this.view?.state ?? this.activeTab?.state;
     if (!state) return "";
@@ -366,6 +471,7 @@ export class EditorWorkspace {
       if (this.activeTab?.deferred) void this.hydrateTab(id);
       return;
     }
+    this.templateReference = undefined;
     this.captureActiveView();
     this.activeId = id;
 
@@ -388,6 +494,7 @@ export class EditorWorkspace {
   }
 
   createTab(): void {
+    this.templateReference = undefined;
     this.captureActiveView();
     const id = `untitled-${Date.now()}-${this.nextTabNumber}`;
     const title = `未命名-${this.nextTabNumber++}.cpp`;
@@ -457,6 +564,7 @@ export class EditorWorkspace {
         this.lspClient?.didOpen(file.path, state.doc.toString());
       }
       if (request === this.openSequence) {
+        this.templateReference = undefined;
         this.activeId = tab.id;
         this.view?.setState(tab.state);
         this.restoreScroll(0);
@@ -708,7 +816,10 @@ export class EditorWorkspace {
     const index = this.tabs.findIndex((tab) => tab.id === id);
     if (index < 0) return;
 
-    if (id === this.activeId) this.captureActiveView();
+    if (id === this.activeId) {
+      this.templateReference = undefined;
+      this.captureActiveView();
+    }
     const closing = this.tabs[index];
     if (closing.path && !closing.deleted && !closing.deferred) this.lspClient?.didClose(closing.path);
     const remaining = this.tabs.filter((tab) => tab.id !== id);
@@ -1138,6 +1249,7 @@ export class EditorWorkspace {
           }
           this.breakpointToggleHandler?.(path, line);
         }),
+        debugLocationField,
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightSpecialChars(),
@@ -1178,6 +1290,14 @@ export class EditorWorkspace {
   private handleViewUpdate(update: ViewUpdate): void {
     const id = this.activeId;
     const tab = this.activeTab;
+    const reference = this.templateReference;
+    if (reference && reference.tabId === id && update.docChanged) {
+      this.templateReference = {
+        ...reference,
+        from: update.changes.mapPos(reference.from, -1),
+        to: update.changes.mapPos(reference.to, 1),
+      };
+    }
     if (tab && update.docChanged && !this.suppressDirty) {
       const dirty = documentRevision(update.state) !== tab.savedRevision;
       if (dirty !== tab.dirty) this.replaceTab(id, { ...tab, dirty });
@@ -1403,7 +1523,19 @@ export class EditorWorkspace {
     return buildTemplateCompletionResult(
       word.from,
       templates,
-      (id) => this.templateCompletionPickedHandler?.(id),
+      (template, completionFrom, completionTo) => {
+        this.templateReference = {
+          template,
+          tabId: this.activeId,
+          from: completionFrom,
+          to: completionTo,
+        };
+      },
+      (id) => this.templateReference?.template.id === id,
+      (id) => {
+        this.templateReference = undefined;
+        this.templateCompletionPickedHandler?.(id);
+      },
     );
   }
 
@@ -1453,7 +1585,7 @@ function createBreakpointGutter(toggle: (line: number) => void): Extension {
     gutter({
       class: "cm-breakpoint-gutter",
       markers: (view) => view.state.field(breakpointField),
-      initialSpacer: () => breakpointMarker,
+      initialSpacer: () => breakpointSpacer,
       domEventHandlers: {
         mousedown(view, line, event) {
           if (!(event instanceof MouseEvent) || event.button !== 0) return false;
@@ -1512,104 +1644,4 @@ function errorMessage(error: unknown): string {
     if (typeof commandError.technicalMessage === "string") return commandError.technicalMessage;
   }
   return error instanceof Error ? error.message : String(error);
-}
-
-function createAppearanceExtension(settings: Partial<AppSettings>): Extension {
-  const light = settings.theme === "light";
-  const fontFamily = settings.fontFamily ?? "JetBrains Mono, Consolas, monospace";
-  const fontSize = settings.fontSize ?? 14;
-  const lineHeight = settings.lineHeight ?? 1.62;
-
-  const colors = light
-    ? {
-        text: "#20242c",
-        muted: "#7b8291",
-        activeLine: "rgba(59, 130, 246, 0.075)",
-        selection: "rgba(55, 116, 205, 0.22)",
-        cursor: "#2563eb",
-        keyword: "#8b3fc7",
-        type: "#096f78",
-        string: "#9b4b12",
-        number: "#2266a8",
-        comment: "#71806c",
-        function: "#2459a5",
-        variable: "#20242c",
-      }
-    : {
-        text: "#d9dde7",
-        muted: "#626a79",
-        activeLine: "rgba(103, 155, 235, 0.08)",
-        selection: "rgba(78, 133, 209, 0.3)",
-        cursor: "#82b7ff",
-        keyword: "#c78bdf",
-        type: "#68c8c0",
-        string: "#d7a86e",
-        number: "#75b7e8",
-        comment: "#788775",
-        function: "#82aef2",
-        variable: "#d9dde7",
-      };
-
-  const editorTheme = EditorView.theme(
-    {
-      "&": {
-        height: "100%",
-        color: colors.text,
-        backgroundColor: "transparent",
-        fontSize: `${fontSize}px`,
-      },
-      ".cm-scroller": {
-        overflow: "auto",
-        fontFamily,
-        lineHeight: String(lineHeight),
-      },
-      ".cm-content": {
-        minHeight: "100%",
-        padding: "12px 0 32px",
-        caretColor: colors.cursor,
-      },
-      ".cm-cursor, .cm-dropCursor": { borderLeftColor: colors.cursor },
-      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-        backgroundColor: colors.selection,
-      },
-      ".cm-activeLine": { backgroundColor: colors.activeLine },
-      ".cm-gutters": {
-        minWidth: "46px",
-        color: colors.muted,
-        backgroundColor: "transparent",
-        borderRight: "1px solid var(--border)",
-      },
-      ".cm-activeLineGutter": {
-        color: colors.text,
-        backgroundColor: colors.activeLine,
-      },
-      ".cm-foldPlaceholder": {
-        color: colors.muted,
-        backgroundColor: "transparent",
-        border: "0",
-      },
-      ".cm-panels": {
-        color: colors.text,
-        backgroundColor: "var(--panel-background)",
-      },
-      ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
-      ".cm-searchMatch": { backgroundColor: "rgba(231, 175, 75, 0.28)" },
-      ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "rgba(78, 133, 209, 0.38)" },
-    },
-    { dark: !light },
-  );
-
-  const highlightStyle = HighlightStyle.define([
-    { tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword], color: colors.keyword },
-    { tag: [tags.typeName, tags.className, tags.namespace], color: colors.type },
-    { tag: [tags.string, tags.character, tags.special(tags.string)], color: colors.string },
-    { tag: [tags.number, tags.bool, tags.null], color: colors.number },
-    { tag: [tags.lineComment, tags.blockComment], color: colors.comment, fontStyle: "italic" },
-    { tag: [tags.function(tags.variableName), tags.labelName], color: colors.function },
-    { tag: [tags.variableName, tags.propertyName], color: colors.variable },
-    { tag: [tags.definition(tags.variableName), tags.definition(tags.propertyName)], color: colors.function },
-    { tag: tags.meta, color: colors.keyword },
-  ]);
-
-  return [editorTheme, syntaxHighlighting(highlightStyle)];
 }

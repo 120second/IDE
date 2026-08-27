@@ -1,11 +1,13 @@
 <script lang="ts">
   import type { SettingsStore } from "../../stores/settings.svelte";
+  import type { ShellStore } from "../../stores/shell.svelte";
   import {
-    APPEARANCE_PRESETS,
-    backgroundImageUrl,
-    type AppearancePresetId,
+    COLOR_THEMES,
+    EDITOR_FONT_PRESETS,
+    EDITOR_LINE_HEIGHTS,
+    UI_DENSITIES,
   } from "../../stores/settings.svelte";
-  import { chooseBackgroundImage } from "../../api/appearance";
+  import type { ThemePreference } from "../../types/settings";
   import { diagnoseToolchain } from "../../api/health";
   import type { ToolStatus, ToolchainStatus } from "../../types/health";
   import {
@@ -19,18 +21,13 @@
 
   interface Props {
     settings: SettingsStore;
+    shell: ShellStore;
   }
 
-  let { settings }: Props = $props();
+  let { settings, shell }: Props = $props();
 
-  const percent = (value: number) => `${Math.round(value * 100)}%`;
   const parseArguments = (value: string) => value.split(/\s+/).map((argument) => argument.trim()).filter(Boolean);
   let conflicts = $derived(shortcutConflicts(settings.value.keybindings));
-  let choosingBackground = $state(false);
-  let loadedBackground = $state("");
-  let failedBackground = $state("");
-  let backgroundPickerError = $state("");
-  let previewUrl = $derived(backgroundImageUrl(settings.value.backgroundImage));
   let toolchain = $state<ToolchainStatus>();
   let checkingToolchain = $state(false);
   let toolchainError = $state("");
@@ -41,34 +38,27 @@
     { label: "智能提示", tool: toolchain?.languageServer },
   ]);
 
-  const appearancePresets: { id: AppearancePresetId; label: string }[] = [
-    { id: "solid", label: "不透明" },
-    { id: "balanced", label: "毛玻璃" },
-    { id: "glass", label: "透明" },
+  const themeModes: { id: ThemePreference; label: string; description: string }[] = [
+    { id: "system", label: "跟随系统", description: "随 Windows 外观自动切换" },
+    { id: "dark", label: "深色", description: "固定使用深色版本" },
+    { id: "light", label: "浅色", description: "固定使用浅色版本" },
   ];
 
-  function presetActive(id: AppearancePresetId): boolean {
-    const preset = APPEARANCE_PRESETS[id];
-    return Math.abs(settings.value.backgroundOpacity - preset.backgroundOpacity) < 0.001
-      && settings.value.backgroundEffect === preset.backgroundEffect
-      && Math.abs(settings.value.windowOpacity - preset.windowOpacity) < 0.001
-      && Math.abs(settings.value.sidebarOpacity - preset.sidebarOpacity) < 0.001
-      && Math.abs(settings.value.editorOpacity - preset.editorOpacity) < 0.001
-      && Math.abs(settings.value.blur - preset.blur) < 0.001;
+  function fontPresetActive(value: string): boolean {
+    return settings.value.fontFamily === value;
   }
 
-  async function browseBackground(): Promise<void> {
-    if (choosingBackground) return;
-    choosingBackground = true;
-    backgroundPickerError = "";
-    try {
-      const selected = await chooseBackgroundImage();
-      if (selected) settings.update({ backgroundImage: selected });
-    } catch (error) {
-      backgroundPickerError = error instanceof Error ? error.message : String(error);
-    } finally {
-      choosingBackground = false;
-    }
+  function lineHeightActive(value: number): boolean {
+    return Math.abs(settings.value.lineHeight - value) < 0.001;
+  }
+
+  function adjustFontSize(delta: number): void {
+    settings.update({ fontSize: Math.max(11, Math.min(24, settings.value.fontSize + delta)) });
+  }
+
+  function openThemeStudio(): void {
+    if (!settings.value.activeCustomTheme) settings.createCustomTheme();
+    shell.openThemeStudio();
   }
 
   function captureShortcut(event: KeyboardEvent, id: ShortcutId): void {
@@ -121,6 +111,152 @@
 </script>
 
 <div class="settings-panel">
+  <section class="settings-section">
+    <div class="section-heading">
+      <div>
+        <h3>外观</h3>
+        <p>修改会立即应用到整个工作台。</p>
+      </div>
+      <span class:failed={settings.saveState === "error"} class="save-state">
+        {#if settings.saveState === "saving"}正在保存…
+        {:else if settings.saveState === "saved"}已保存
+        {:else if settings.saveState === "error"}保存失败
+        {:else if settings.saveState === "loading"}正在加载…
+        {/if}
+      </span>
+    </div>
+
+    <div class="appearance-block">
+      <div class="appearance-block-heading">
+        <strong>显示模式</strong>
+        <span>每套颜色主题都包含匹配的浅色和深色版本。</span>
+      </div>
+      <div class="appearance-mode-picker" role="group" aria-label="显示模式">
+        {#each themeModes as mode}
+          <button
+            aria-pressed={settings.value.theme === mode.id}
+            class:active={settings.value.theme === mode.id}
+            title={mode.description}
+            onclick={() => settings.update({ theme: mode.id })}
+          >{mode.label}</button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="appearance-block">
+      <div class="appearance-block-heading">
+        <strong>颜色主题</strong>
+        <span>选择后立即应用到编辑器、侧栏、面板和弹窗。</span>
+      </div>
+      <div class="appearance-theme-grid" role="group" aria-label="颜色主题">
+        {#each COLOR_THEMES as theme}
+          <button
+            class:active={!settings.value.activeCustomTheme && settings.value.colorTheme === theme.id}
+            class="appearance-theme-card"
+            data-preview-theme={theme.id}
+            aria-pressed={!settings.value.activeCustomTheme && settings.value.colorTheme === theme.id}
+            onclick={() => settings.selectBuiltinTheme(theme.id)}
+          >
+            <span class="theme-color-rail" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <span><strong>{theme.label}</strong><small>{theme.description}</small></span>
+            <span class="theme-selected" aria-hidden="true">{!settings.value.activeCustomTheme && settings.value.colorTheme === theme.id ? "✓" : ""}</span>
+          </button>
+        {/each}
+        {#each settings.value.customThemes as theme}
+          <button
+            class:active={settings.value.activeCustomTheme === theme.id}
+            class="appearance-theme-card custom-theme-card"
+            data-preview-theme={theme.inherits}
+            aria-pressed={settings.value.activeCustomTheme === theme.id}
+            onclick={() => settings.selectCustomTheme(theme.id)}
+          >
+            <span class="theme-color-rail" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            <span><strong>{theme.name}</strong><small>继承 {COLOR_THEMES.find((item) => item.id === theme.inherits)?.label}</small></span>
+            <span class="theme-selected custom-mark" aria-hidden="true">{settings.value.activeCustomTheme === theme.id ? "✓" : "◆"}</span>
+          </button>
+        {/each}
+      </div>
+      <button class="primary-button open-theme-studio" onclick={openThemeStudio}>
+        {settings.value.activeCustomTheme ? "编辑当前自定义主题" : "创建副本并自定义"}
+      </button>
+    </div>
+
+    <div class="appearance-block">
+      <div class="appearance-block-heading">
+        <strong>界面密度</strong>
+        <span>同时调整导航、标签、列表和表单的空间。</span>
+      </div>
+      <div class="density-picker" role="group" aria-label="界面密度">
+        {#each UI_DENSITIES as density}
+          <button
+            class:active={settings.value.uiDensity === density.id}
+            aria-pressed={settings.value.uiDensity === density.id}
+            title={density.description}
+            onclick={() => settings.update({ uiDensity: density.id })}
+          >{density.label}</button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="appearance-block editor-typography-block">
+      <div class="appearance-block-heading">
+        <strong>编辑器字体</strong>
+        <span>只影响代码区，界面文字继续使用系统字体。</span>
+      </div>
+      <div class="font-preset-list" role="group" aria-label="编辑器字体">
+        {#each EDITOR_FONT_PRESETS as font}
+          <button
+            class:active={fontPresetActive(font.value)}
+            data-font={font.id}
+            aria-pressed={fontPresetActive(font.value)}
+            onclick={() => settings.update({ fontFamily: font.value })}
+          ><span>{font.label}</span><code>Aa 01 {'{}'}</code></button>
+        {/each}
+      </div>
+
+      <div class="font-metrics-row">
+        <div>
+          <span>字号</span>
+          <div class="font-size-stepper">
+            <button aria-label="减小编辑器字号" disabled={settings.value.fontSize <= 11} onclick={() => adjustFontSize(-1)}>−</button>
+            <output aria-live="polite">{settings.value.fontSize.toFixed(0)} px</output>
+            <button aria-label="增大编辑器字号" disabled={settings.value.fontSize >= 24} onclick={() => adjustFontSize(1)}>+</button>
+          </div>
+        </div>
+        <div>
+          <span>行距</span>
+          <div class="line-height-picker" role="group" aria-label="编辑器行距">
+            {#each EDITOR_LINE_HEIGHTS as option}
+              <button
+                class:active={lineHeightActive(option.value)}
+                aria-pressed={lineHeightActive(option.value)}
+                onclick={() => settings.update({ lineHeight: option.value })}
+              >{option.label}</button>
+            {/each}
+          </div>
+        </div>
+      </div>
+
+      <details class="appearance-advanced">
+        <summary>自定义字体族</summary>
+        <label>
+          <span>CSS 字体族</span>
+          <input
+            class="text-input"
+            name="editor-font-family"
+            autocomplete="off"
+            value={settings.value.fontFamily}
+            oninput={(event) => settings.update({ fontFamily: event.currentTarget.value })}
+          />
+        </label>
+      </details>
+    </div>
+
+    <button class="secondary-button reset-appearance" onclick={() => settings.resetAppearance()}>
+      恢复默认外观
+    </button>
+  </section>
+
   <section class="settings-section shortcut-settings">
     <div class="section-heading">
       <div>
@@ -147,171 +283,6 @@
         />
       </label>
     {/each}
-  </section>
-
-  <section class="settings-section">
-    <div class="section-heading">
-      <div>
-        <h3>外观</h3>
-        <p>修改会立即应用到整个工作台。</p>
-      </div>
-      <span class:failed={settings.saveState === "error"} class="save-state">
-        {#if settings.saveState === "saving"}正在保存…
-        {:else if settings.saveState === "saved"}已保存
-        {:else if settings.saveState === "error"}保存失败
-        {:else if settings.saveState === "loading"}正在加载…
-        {/if}
-      </span>
-    </div>
-
-    <div class="setting-row vertical">
-      <span class="setting-label">外观预设</span>
-      <div class="segmented appearance-presets" aria-label="外观预设">
-        {#each appearancePresets as preset}
-          <button
-            class:active={presetActive(preset.id)}
-            onclick={() => settings.applyAppearancePreset(preset.id)}>{preset.label}</button
-          >
-        {/each}
-      </div>
-      <span class="setting-hint">“透明”保留桌面细节；“毛玻璃”会使用 Windows Acrylic 强模糊。</span>
-    </div>
-
-    <div class="setting-row vertical">
-      <span class="setting-label">主题</span>
-      <div class="segmented" aria-label="主题">
-        <button
-          class:active={settings.value.theme === "dark"}
-          onclick={() => settings.update({ theme: "dark" })}>深色</button
-        >
-        <button
-          class:active={settings.value.theme === "light"}
-          onclick={() => settings.update({ theme: "light" })}>浅色</button
-        >
-      </div>
-    </div>
-
-    <div class="setting-row vertical">
-      <span class="setting-label">背景图片路径</span>
-      <div class="background-input-row">
-        <input
-          class="text-input"
-          aria-label="背景图片路径"
-          value={settings.value.backgroundImage}
-          placeholder="本地图片路径或 HTTPS 地址"
-          oninput={(event) => {
-            backgroundPickerError = "";
-            settings.update({ backgroundImage: event.currentTarget.value });
-          }}
-        />
-        <button class="secondary-button" disabled={choosingBackground} onclick={() => void browseBackground()}>
-          {choosingBackground ? "选择中…" : "浏览"}
-        </button>
-        <button
-          class="secondary-button"
-          disabled={!settings.value.backgroundImage}
-          onclick={() => {
-            backgroundPickerError = "";
-            settings.update({ backgroundImage: "" });
-          }}>清除</button
-        >
-      </div>
-      <span
-        class:failed={(Boolean(settings.value.backgroundImage) && failedBackground === settings.value.backgroundImage) || Boolean(backgroundPickerError)}
-        class="background-image-state"
-      >
-        {#if previewUrl}
-          {#key previewUrl}
-            <img
-              class="background-image-probe"
-              src={previewUrl}
-              alt=""
-              aria-hidden="true"
-              onload={() => { loadedBackground = settings.value.backgroundImage; failedBackground = ""; }}
-              onerror={() => { failedBackground = settings.value.backgroundImage; loadedBackground = ""; }}
-            />
-          {/key}
-        {/if}
-        {#if backgroundPickerError}
-          选择失败：{backgroundPickerError}
-        {:else if !settings.value.backgroundImage}
-          未设置背景图片
-        {:else if failedBackground === settings.value.backgroundImage}
-          图片无法加载；本地图片需位于 Windows 用户目录内
-        {:else if loadedBackground === settings.value.backgroundImage}
-          图片已加载
-        {:else}
-          正在检查图片…
-        {/if}
-      </span>
-      <span class="setting-hint">支持用户目录内的 PNG、JPG、WebP、GIF、BMP、SVG，或 HTTPS 图片地址。</span>
-    </div>
-
-    <label class="setting-row vertical">
-      <span class="range-heading"><span>背景图片可见度</span><output>{percent(settings.value.backgroundOpacity)}</output></span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={settings.value.backgroundOpacity}
-        oninput={(event) => settings.update({ backgroundOpacity: Number(event.currentTarget.value) })}
-      />
-    </label>
-
-    <label class="setting-row vertical">
-      <span class="range-heading"><span>窗口底色不透明度</span><output>{percent(settings.value.windowOpacity)}</output></span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={settings.value.windowOpacity}
-        oninput={(event) => settings.update({ windowOpacity: Number(event.currentTarget.value) })}
-      />
-      <span class="setting-hint">数值越低，桌面透出越明显；设为 0% 时不再叠加窗口底色。</span>
-    </label>
-
-    <label class="setting-row vertical">
-      <span class="range-heading"><span>侧栏不透明度</span><output>{percent(settings.value.sidebarOpacity)}</output></span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={settings.value.sidebarOpacity}
-        oninput={(event) => settings.update({ sidebarOpacity: Number(event.currentTarget.value) })}
-      />
-    </label>
-
-    <label class="setting-row vertical">
-      <span class="range-heading"><span>编辑区不透明度</span><output>{percent(settings.value.editorOpacity)}</output></span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value={settings.value.editorOpacity}
-        oninput={(event) => settings.update({ editorOpacity: Number(event.currentTarget.value) })}
-      />
-    </label>
-
-    <label class="setting-row vertical">
-      <span class="range-heading"><span>界面模糊</span><output>{Math.round(settings.value.blur)}px</output></span>
-      <input
-        type="range"
-        min="0"
-        max="24"
-        step="1"
-        value={settings.value.blur}
-        disabled={settings.value.performanceMode}
-        oninput={(event) => settings.update({ blur: Number(event.currentTarget.value) })}
-      />
-    </label>
-
-    <button class="secondary-button reset-appearance" onclick={() => settings.resetAppearance()}>
-      恢复默认外观
-    </button>
   </section>
 
   <section class="settings-section">
@@ -428,52 +399,10 @@
   </section>
 
   <section class="settings-section">
-    <div class="section-heading">
-      <div>
-        <h3>编辑器字体</h3>
-        <p>适合长时间竞赛使用。</p>
-      </div>
-    </div>
-
-    <label class="setting-row vertical">
-      <span class="setting-label">字体</span>
-      <input
-        class="text-input"
-        value={settings.value.fontFamily}
-        oninput={(event) => settings.update({ fontFamily: event.currentTarget.value })}
-      />
-    </label>
-
-    <label class="setting-row vertical">
-      <span class="range-heading"><span>字号</span><output>{settings.value.fontSize.toFixed(0)}px</output></span>
-      <input
-        type="range"
-        min="11"
-        max="24"
-        step="1"
-        value={settings.value.fontSize}
-        oninput={(event) => settings.update({ fontSize: Number(event.currentTarget.value) })}
-      />
-    </label>
-
-    <label class="setting-row vertical">
-      <span class="range-heading"><span>行高</span><output>{settings.value.lineHeight.toFixed(2)}</output></span>
-      <input
-        type="range"
-        min="1.2"
-        max="2"
-        step="0.02"
-        value={settings.value.lineHeight}
-        oninput={(event) => settings.update({ lineHeight: Number(event.currentTarget.value) })}
-      />
-    </label>
-  </section>
-
-  <section class="settings-section">
     <label class="toggle-row">
       <span>
         <strong>性能模式</strong>
-        <small>关闭系统毛玻璃、界面模糊、过渡动画和装饰效果。</small>
+        <small>关闭过渡动画和非必要阴影，降低低配置设备的绘制负担。</small>
       </span>
       <input
         type="checkbox"

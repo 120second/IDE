@@ -1,32 +1,70 @@
 import { describe, expect, it } from "vitest";
-import { APPEARANCE_PRESETS, acrylicColor, backgroundImageCssValue } from "./settings.svelte";
+import { resolveThemePreference } from "../types/settings";
+import type { AppSettings, CustomThemeDefinition } from "../types/settings";
+import {
+  contrastRatio,
+  createCustomTheme,
+  resolveEditorThemeColors,
+  resolveThemeColors,
+} from "../theme/themes";
+import {
+  COLOR_THEMES,
+  DEFAULT_SETTINGS,
+  EDITOR_FONT_PRESETS,
+  EDITOR_LINE_HEIGHTS,
+  UI_DENSITIES,
+} from "./settings.svelte";
 
 describe("appearance settings", () => {
-  it("offers progressively more transparent appearance presets", () => {
-    expect(APPEARANCE_PRESETS.balanced.backgroundEffect).toBe("acrylic");
-    expect(APPEARANCE_PRESETS.glass.backgroundEffect).toBe("transparent");
-    expect(APPEARANCE_PRESETS.glass.backgroundOpacity).toBeGreaterThan(
-      APPEARANCE_PRESETS.balanced.backgroundOpacity,
-    );
-    expect(APPEARANCE_PRESETS.glass.windowOpacity).toBeLessThan(
-      APPEARANCE_PRESETS.balanced.windowOpacity,
-    );
-    expect(APPEARANCE_PRESETS.glass.sidebarOpacity).toBeLessThan(
-      APPEARANCE_PRESETS.balanced.sidebarOpacity,
-    );
-    expect(APPEARANCE_PRESETS.glass.editorOpacity).toBeLessThan(
-      APPEARANCE_PRESETS.balanced.editorOpacity,
-    );
+  it("offers paired color themes instead of transparency presets", () => {
+    expect(COLOR_THEMES.map((theme) => theme.id)).toEqual(["signal", "graphite", "forest"]);
+    expect(new Set(COLOR_THEMES.map((theme) => theme.label)).size).toBe(COLOR_THEMES.length);
   });
 
-  it("maps the window tint opacity into an acrylic color", () => {
-    expect(acrylicColor({ theme: "dark", windowOpacity: 0.5 })).toEqual([16, 18, 23, 95]);
-    expect(acrylicColor({ theme: "light", windowOpacity: 0 })).toEqual([238, 242, 247, 1]);
+  it("resolves system, dark, and light modes deterministically", () => {
+    expect(resolveThemePreference("system", true)).toBe("light");
+    expect(resolveThemePreference("system", false)).toBe("dark");
+    expect(resolveThemePreference("dark", true)).toBe("dark");
+    expect(resolveThemePreference("light", false)).toBe("light");
   });
 
-  it("escapes background URLs before inserting them into CSS", () => {
-    expect(backgroundImageCssValue("https://example.com/a\"b.png"))
-      .toBe('url("https://example.com/a\\"b.png")');
-    expect(backgroundImageCssValue("  ")).toBe("none");
+  it("keeps density and editor typography choices bounded", () => {
+    expect(UI_DENSITIES.map((density) => density.id)).toEqual(["compact", "standard", "comfortable"]);
+    expect(EDITOR_FONT_PRESETS.some((font) => font.value === DEFAULT_SETTINGS.fontFamily)).toBe(true);
+    expect(EDITOR_LINE_HEIGHTS.some((option) => option.value === DEFAULT_SETTINGS.lineHeight)).toBe(true);
+  });
+
+  it("creates inherited custom themes without copying the full palette", () => {
+    const theme = createCustomTheme("forest", "我的主题", ["forest-custom"]);
+    expect(theme.id).toBe("forest-custom-2");
+    expect(theme.inherits).toBe("forest");
+    expect(theme.variants.dark.colors).toEqual({});
+    expect(theme.variants.light.syntax).toEqual({});
+  });
+
+  it("merges only the active custom theme overrides", () => {
+    const custom: CustomThemeDefinition = {
+      id: "contest",
+      name: "Contest",
+      inherits: "graphite",
+      variants: {
+        dark: { colors: { accent: "#ff3366" }, syntax: { keyword: "#ffcc00" } },
+        light: { colors: {}, syntax: {} },
+      },
+    };
+    const settings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      colorTheme: "signal",
+      activeCustomTheme: custom.id,
+      customThemes: [custom],
+    };
+    expect(resolveThemeColors(settings, "dark").accent).toBe("#ff3366");
+    expect(resolveThemeColors(settings, "dark").background).toBe("#0e1014");
+    expect(resolveEditorThemeColors(settings, "dark").keyword).toBe("#ffcc00");
+  });
+
+  it("calculates readable contrast for theme editor warnings", () => {
+    expect(contrastRatio("#ffffff", "#000000")).toBeCloseTo(21, 3);
+    expect(contrastRatio("#777777", "#ffffff")).toBeLessThan(4.5);
   });
 });

@@ -378,8 +378,20 @@ impl DebugSession {
             mi_quote(&self.request.executable_path)
         ))?;
 
-        let mut installed = Vec::with_capacity(self.request.breakpoints.len());
+        let mut unique: Vec<DebugBreakpointInput> =
+            Vec::with_capacity(self.request.breakpoints.len());
         for input in &self.request.breakpoints {
+            if let Some(index) = unique
+                .iter()
+                .position(|existing| same_breakpoint_input_location(existing, input))
+            {
+                unique[index] = input.clone();
+            } else {
+                unique.push(input.clone());
+            }
+        }
+        let mut installed = Vec::with_capacity(unique.len());
+        for input in &unique {
             installed.push(self.insert_breakpoint_unlocked(input));
         }
         *self
@@ -595,14 +607,17 @@ impl DebugSession {
 
     fn set_breakpoint(&self, input: DebugBreakpointInput) -> AppResult<DebugBreakpoint> {
         let _operation = self.lock_operation()?;
-        let old_number = self
+        let old_numbers = self
             .breakpoints
             .lock()
             .map_err(|_| debugger_error("breakpoint lock was poisoned"))?
             .iter()
-            .find(|breakpoint| breakpoint.id == input.id)
-            .and_then(|breakpoint| breakpoint.gdb_number.clone());
-        if let Some(number) = old_number {
+            .filter(|breakpoint| {
+                breakpoint.id == input.id || same_breakpoint_location(breakpoint, &input)
+            })
+            .filter_map(|breakpoint| breakpoint.gdb_number.clone())
+            .collect::<Vec<_>>();
+        for number in old_numbers {
             let _ = self.command_unlocked(&format!("-break-delete {}", mi_quote(&number)));
         }
         let breakpoint = self.insert_breakpoint_unlocked(&input);
@@ -610,14 +625,10 @@ impl DebugSession {
             .breakpoints
             .lock()
             .map_err(|_| debugger_error("breakpoint lock was poisoned"))?;
-        if let Some(existing) = breakpoints
-            .iter_mut()
-            .find(|candidate| candidate.id == input.id)
-        {
-            *existing = breakpoint.clone();
-        } else {
-            breakpoints.push(breakpoint.clone());
-        }
+        breakpoints.retain(|candidate| {
+            candidate.id != input.id && !same_breakpoint_location(candidate, &input)
+        });
+        breakpoints.push(breakpoint.clone());
         drop(breakpoints);
         self.emit_breakpoints();
         Ok(breakpoint)
@@ -1036,6 +1047,23 @@ fn slash_text(value: &str) -> String {
     value.replace('\\', "/")
 }
 
+fn normalized_debug_path(value: &str) -> String {
+    slash_text(value).to_lowercase()
+}
+
+fn same_breakpoint_input_location(
+    left: &DebugBreakpointInput,
+    right: &DebugBreakpointInput,
+) -> bool {
+    left.line == right.line
+        && normalized_debug_path(&left.file) == normalized_debug_path(&right.file)
+}
+
+fn same_breakpoint_location(breakpoint: &DebugBreakpoint, input: &DebugBreakpointInput) -> bool {
+    breakpoint.line == input.line
+        && normalized_debug_path(&breakpoint.file) == normalized_debug_path(&input.file)
+}
+
 fn debugger_error(message: impl Into<String>) -> AppError {
     AppError::Process(format!("debugger: {}", message.into()))
 }
@@ -1072,6 +1100,25 @@ mod tests {
         assert_eq!(child_expression("a", "12"), "a[12]");
         assert_eq!(child_expression("node", "next"), "node.next");
         assert_eq!(child_expression("node", "->value"), "node->value");
+    }
+
+    #[test]
+    fn breakpoint_locations_ignore_path_separator_and_case() {
+        let left = DebugBreakpointInput {
+            id: "left".to_owned(),
+            file: "D:\\Code\\Main.cpp".to_owned(),
+            line: 24,
+            enabled: true,
+            condition: String::new(),
+        };
+        let right = DebugBreakpointInput {
+            id: "right".to_owned(),
+            file: "d:/code/main.cpp".to_owned(),
+            line: 24,
+            enabled: true,
+            condition: String::new(),
+        };
+        assert!(same_breakpoint_input_location(&left, &right));
     }
 
     #[test]
@@ -1170,6 +1217,18 @@ mod tests {
             .iter()
             .any(|variable| variable.name == "n"));
         assert_eq!(snapshot.watches[0].value, "42");
+        manager
+            .set_breakpoint(DebugBreakpointInput {
+                id: "bp-replacement".to_owned(),
+                file: source.to_string_lossy().into_owned(),
+                line: 6,
+                enabled: true,
+                condition: String::new(),
+            })
+            .unwrap();
+        let replaced = manager.snapshot(0, &[]).unwrap();
+        assert_eq!(replaced.breakpoints.len(), 1);
+        assert_eq!(replaced.breakpoints[0].id, "bp-replacement");
         manager.stop().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
