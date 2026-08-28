@@ -64,7 +64,58 @@ describe("workspace switching", () => {
     expect(editor.closeAllTabs).toHaveBeenCalledTimes(1);
     expect(workspace.info?.path).toBe("D:\\New");
   });
+
+  it("serializes rapid workspace changes so frontend and backend end on the latest path", async () => {
+    const editor = editorStub();
+    editor.tabs = [];
+    const workspace = new WorkspaceStore(editor as never);
+    let resolveFirst!: (info: { name: string; path: string }) => void;
+    api.openWorkspace
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ name: "Second", path: "D:\\Second" });
+
+    const first = workspace.openPath("D:\\First");
+    const second = workspace.openPath("D:\\Second");
+    await vi.waitFor(() => expect(api.openWorkspace).toHaveBeenCalledTimes(1));
+    resolveFirst({ name: "First", path: "D:\\First" });
+    await Promise.all([first, second]);
+
+    expect(api.openWorkspace.mock.calls.map(([path]) => path)).toEqual(["D:\\First", "D:\\Second"]);
+    expect(workspace.info).toEqual({ name: "Second", path: "D:\\Second" });
+  });
+
+  it("expands lazy parent directories when revealing the active editor file", async () => {
+    const editor = editorStub();
+    const workspace = new WorkspaceStore(editor as never);
+    workspace.info = { name: "Contest", path: "D:\\Contest" };
+    api.listDirectory.mockImplementation(async (path: string) => {
+      if (path === "D:\\Contest") return [directory("src", `${path}\\src`)];
+      if (path === "D:\\Contest\\src") return [directory("graph", `${path}\\graph`)];
+      if (path === "D:\\Contest\\src\\graph") {
+        return [{ name: "main.cpp", path: `${path}\\main.cpp`, kind: "file" }];
+      }
+      return [];
+    });
+
+    await workspace.revealPath("D:\\Contest\\src\\graph\\main.cpp");
+
+    expect(api.listDirectory.mock.calls.map(([path]) => path)).toEqual([
+      "D:\\Contest",
+      "D:\\Contest\\src",
+      "D:\\Contest\\src\\graph",
+    ]);
+    expect(workspace.selectedPath).toBe("D:\\Contest\\src\\graph\\main.cpp");
+    expect(workspace.visibleRows.map((row) => row.entry.name)).toEqual([
+      "src",
+      "graph",
+      "main.cpp",
+    ]);
+  });
 });
+
+function directory(name: string, path: string) {
+  return { name, path, kind: "directory" as const };
+}
 
 function editorStub() {
   return {

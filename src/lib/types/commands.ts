@@ -3,6 +3,8 @@ export interface WorkbenchCommand {
   label: string;
   category: string;
   shortcut?: string;
+  enabled?: boolean;
+  disabledReason?: string;
   run: () => void;
 }
 

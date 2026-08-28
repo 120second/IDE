@@ -7,8 +7,10 @@
   let { ux }: Props = $props();
   let dialog = $state<HTMLDivElement>();
   let cancelButton = $state<HTMLButtonElement>();
+  let promptInput = $state<HTMLInputElement>();
+  let promptValue = $state("");
   let previousFocus: HTMLElement | null = null;
-  let previousConfirmationId: number | undefined;
+  let previousDialogKey: string | undefined;
   let dragX = $state(0);
   let dragY = $state(0);
 
@@ -27,29 +29,50 @@
   let dragState = $state<DragState>();
 
   $effect(() => {
-    const id = ux.confirmation?.id;
-    if (id && id !== previousConfirmationId) {
-      previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      previousConfirmationId = id;
+    const key = ux.confirmation
+      ? `confirmation-${ux.confirmation.id}`
+      : ux.textPrompt
+        ? `prompt-${ux.textPrompt.id}`
+        : undefined;
+    if (key && key !== previousDialogKey) {
+      if (!previousDialogKey) {
+        previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      }
+      previousDialogKey = key;
+      promptValue = ux.textPrompt?.value ?? "";
       dragX = 0;
       dragY = 0;
       dragState = undefined;
-      void tick().then(() => cancelButton?.focus());
-    } else if (!id && previousConfirmationId) {
-      previousConfirmationId = undefined;
+      void tick().then(() => {
+        if (promptInput) {
+          promptInput.focus();
+          promptInput.select();
+        } else {
+          cancelButton?.focus();
+        }
+      });
+    } else if (!key && previousDialogKey) {
+      previousDialogKey = undefined;
       previousFocus?.focus();
       previousFocus = null;
     }
   });
 
+  function cancelDialog(): void {
+    if (ux.textPrompt) ux.cancelTextPrompt();
+    else ux.cancelConfirmation();
+  }
+
   function handleDialogKey(event: KeyboardEvent): void {
     if (event.key === "Escape") {
       event.preventDefault();
-      ux.cancelConfirmation();
+      cancelDialog();
       return;
     }
     if (event.key !== "Tab") return;
-    const focusable = [...(dialog?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? [])];
+    const focusable = [...(dialog?.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])",
+    ) ?? [])];
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable.at(-1)!;
@@ -149,6 +172,56 @@
         {/if}
         <button class:danger-button={ux.confirmation.danger} class:primary-button={!ux.confirmation.danger} onclick={() => ux.acceptConfirmation()}>{ux.confirmation.confirmLabel}</button>
       </footer>
+    </div>
+  </div>
+{/if}
+
+{#if ux.textPrompt}
+  <div class="modal-backdrop confirmation-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) ux.cancelTextPrompt(); }}>
+    <div
+      class="confirmation-dialog text-prompt-dialog"
+      class:dragging={Boolean(dragState)}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="text-prompt-title"
+      aria-describedby={ux.textPrompt.message ? "text-prompt-message" : undefined}
+      tabindex="-1"
+      style:transform={`translate3d(${dragX}px, ${dragY}px, 0)`}
+      bind:this={dialog}
+      onkeydown={handleDialogKey}
+    >
+      <header
+        class="dialog-drag-handle"
+        role="group"
+        aria-label="输入对话框标题栏，可拖动"
+        onpointerdown={beginDrag}
+        onpointermove={drag}
+        onpointerup={endDrag}
+        onpointercancel={endDrag}
+      >
+        <div><strong id="text-prompt-title">{ux.textPrompt.title}</strong><span>输入后按 Enter 确认</span></div>
+        <button type="button" aria-label="关闭" onclick={() => ux.cancelTextPrompt()}><Icon name="close" size={14} /></button>
+      </header>
+      <form onsubmit={(event) => { event.preventDefault(); ux.acceptTextPrompt(promptValue); }}>
+        <div class="confirmation-content text-prompt-content">
+          {#if ux.textPrompt.message}<p id="text-prompt-message">{ux.textPrompt.message}</p>{/if}
+          <label>
+            <span>{ux.textPrompt.label}</span>
+            <input
+              bind:this={promptInput}
+              bind:value={promptValue}
+              maxlength={ux.textPrompt.maxLength}
+              placeholder={ux.textPrompt.placeholder}
+              required={ux.textPrompt.required}
+              autocomplete="off"
+            />
+          </label>
+        </div>
+        <footer class="confirmation-actions">
+          <button type="button" class="secondary-button" bind:this={cancelButton} onclick={() => ux.cancelTextPrompt()}>取消</button>
+          <button type="submit" class="primary-button" disabled={ux.textPrompt.required && !promptValue.trim()}>{ux.textPrompt.confirmLabel}</button>
+        </footer>
+      </form>
     </div>
   </div>
 {/if}

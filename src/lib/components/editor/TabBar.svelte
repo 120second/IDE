@@ -6,6 +6,7 @@
   import type { KeybindingMap } from "../../keybindings";
   import ContextMenu from "../ux/ContextMenu.svelte";
   import { requestCloseTabs } from "../../editor/closeTabs";
+  import type { LspStore } from "../../stores/lsp.svelte";
 
   interface Props {
     workspace: EditorWorkspace;
@@ -19,9 +20,10 @@
     ux: UxStore;
     keybindings: KeybindingMap;
     newFile: () => void;
+    lsp: LspStore;
   }
 
-  let { workspace, togglePanel, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile }: Props = $props();
+  let { workspace, togglePanel, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile, lsp }: Props = $props();
   let tabStrip: HTMLDivElement;
   let menu = $state<{ x: number; y: number; tabId: string }>();
 
@@ -81,6 +83,9 @@
 <header class="tab-bar">
   <div class="tab-strip" role="tablist" aria-label="已打开的编辑器" bind:this={tabStrip}>
     {#each workspace.tabs as tab (tab.id)}
+      {@const diagnostics = tab.path ? lsp.diagnosticsFor(tab.path) : []}
+      {@const errorCount = diagnostics.filter((diagnostic) => diagnostic.severity === 1).length}
+      {@const warningCount = diagnostics.filter((diagnostic) => diagnostic.severity === 2).length}
       <div
         class="editor-tab"
         role="presentation"
@@ -110,6 +115,15 @@
           <span class="tab-title">{tab.title}{tab.deleted ? "（已删除）" : ""}</span>
           {#if tab.loading}<span class="tab-loading" aria-label="正在加载"></span>{/if}
           {#if tab.externalModified}<span class="external-marker" title="磁盘内容已更改">!</span>{/if}
+          {#if errorCount || warningCount}
+            <span
+              class:error={errorCount > 0}
+              class:warning={errorCount === 0 && warningCount > 0}
+              class="tab-diagnostic"
+              title={`${errorCount} 个错误，${warningCount} 个警告`}
+              aria-label={`${errorCount} 个错误，${warningCount} 个警告`}
+            >{errorCount || warningCount}</span>
+          {/if}
           {#if tab.dirty}<span class="dirty" aria-label="未保存的更改"></span>{/if}
         </button>
         <button
@@ -131,7 +145,7 @@
     </button>
   </div>
   <div class="editor-actions">
-    <button class="tab-run-action" disabled={busy && !running} title="编译当前文件" onclick={compile}>编译</button>
+    <button class="tab-run-action" disabled={busy} title="编译当前文件" onclick={compile}>编译</button>
     {#if running}
       <button class="tab-run-action stop" title="停止" onclick={stop}>停止</button>
     {:else}

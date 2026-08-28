@@ -237,7 +237,11 @@ export class TemplateStore {
   }
 
   async createCategory(parentId?: number): Promise<void> {
-    const name = window.prompt("分类名称")?.trim();
+    const name = (await this.ux.requestText({
+      title: "新建模板分类",
+      label: "分类名称",
+      confirmLabel: "创建",
+    }))?.trim();
     if (!name) return;
     this.error = "";
     try {
@@ -250,7 +254,12 @@ export class TemplateStore {
   }
 
   async renameCategory(category: TemplateCategory): Promise<void> {
-    const name = window.prompt("重命名分类", category.name)?.trim();
+    const name = (await this.ux.requestText({
+      title: "重命名模板分类",
+      label: "分类名称",
+      value: category.name,
+      confirmLabel: "重命名",
+    }))?.trim();
     if (!name || name === category.name) return;
     try {
       await renameTemplateCategory(category.id, name);
@@ -558,7 +567,13 @@ export class TemplateStore {
   }
 
   async restoreVersion(versionId: number): Promise<void> {
-    if (!this.selectedId || !window.confirm("确定将此版本恢复为当前模板吗？")) return;
+    if (!this.selectedId) return;
+    const accepted = await this.ux.confirm({
+      title: "恢复模板版本",
+      message: "当前模板内容将替换为所选历史版本，并保留新的历史记录。",
+      confirmLabel: "恢复版本",
+    });
+    if (!accepted) return;
     try {
       const detail = await restoreTemplateVersion(this.selectedId, versionId);
       this.detail = detail;

@@ -8,15 +8,17 @@
   import RandomGenerator from "./random/RandomGenerator.svelte";
   import type { KeybindingMap } from "../../keybindings";
   import { testcaseEditorToggle } from "./testcaseEditorState";
+  import type { UxStore } from "../../stores/ux.svelte";
 
   interface Props {
     workspace: EditorWorkspace;
     execution: ExecutionStore;
     generator: GeneratorStore;
     keybindings: KeybindingMap;
+    ux: UxStore;
   }
 
-  let { workspace, execution, generator, keybindings }: Props = $props();
+  let { workspace, execution, generator, keybindings, ux }: Props = $props();
   let activeTab = $state<"fixed" | "random">("fixed");
   let editingId = $state<number>();
   let formOpen = $state(false);
@@ -93,6 +95,16 @@
     await execution.saveTestcase({ ...inputFromTestcase(testcase), enabled }, testcase.id);
   }
 
+  async function removeTestcase(testcase: Testcase): Promise<void> {
+    if (!await ux.confirm({
+      title: "删除测试点",
+      message: `确定删除“${testcase.name}”吗？此操作无法撤销。`,
+      confirmLabel: "删除测试点",
+      danger: true,
+    })) return;
+    await execution.remove(testcase.id);
+  }
+
   function beginDrag(event: DragEvent, testcase: Testcase): void {
     event.dataTransfer?.setData("application/x-lightcp-testcase", String(testcase.id));
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
@@ -146,7 +158,7 @@
   </div>
 
   {#if activeTab === "random"}
-    <RandomGenerator {workspace} {execution} {generator} />
+    <RandomGenerator {workspace} {execution} {generator} {ux} />
   {:else if !workspace.activeTab?.path}
     <div class="empty-state compact">
       <Icon name="testcases" size={28} />
@@ -195,7 +207,7 @@
             </button>
             <button title="运行测试点" aria-label={`运行 ${testcase.name}`} disabled={execution.running || execution.compiling} onclick={() => void execution.runOne(testcase)}>▶</button>
             <button title="复制" aria-label={`复制 ${testcase.name}`} onclick={() => void execution.duplicate(testcase.id)}>⧉</button>
-            <button title="删除" aria-label={`删除 ${testcase.name}`} onclick={() => { if (window.confirm(`确定删除“${testcase.name}”吗？`)) void execution.remove(testcase.id); }}>×</button>
+            <button title="删除" aria-label={`删除 ${testcase.name}`} onclick={() => void removeTestcase(testcase)}>×</button>
           </div>
           {#if formOpen && editingId === testcase.id}
             {@render testcaseEditor()}

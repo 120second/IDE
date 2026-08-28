@@ -17,14 +17,16 @@
   import AddRuleMenu, { type AddRuleKind } from "./AddRuleMenu.svelte";
   import RuleNode from "./RuleNode.svelte";
   import TemplateMenu from "./TemplateMenu.svelte";
+  import type { UxStore } from "../../../stores/ux.svelte";
 
   interface Props {
     nodes: VisualNode[];
     diagnostics: VisualDiagnostic[];
     change: (nodes: VisualNode[]) => void;
+    ux: UxStore;
   }
 
-  let { nodes, diagnostics, change }: Props = $props();
+  let { nodes, diagnostics, change, ux }: Props = $props();
   const quickTemplates: Array<{ id: GeneratorTemplateId; label: string }> = [
     { id: "nArray", label: "n + 数组" },
     { id: "nmEdges", label: "n m + 边" },
@@ -65,8 +67,13 @@
     change(next);
   }
 
-  function applyTemplate(template: GeneratorTemplateId): void {
-    if (!window.confirm("应用模板会替换当前生成规则，是否继续？")) return;
+  async function applyTemplate(template: GeneratorTemplateId): Promise<void> {
+    if (!await ux.confirm({
+      title: "替换输入格式",
+      message: "应用模板会替换当前生成规则。已保存的固定测试点不会受到影响。",
+      confirmLabel: "应用模板",
+      danger: true,
+    })) return;
     change(createTemplate(template));
   }
 </script>
@@ -103,6 +110,7 @@
         depth={0}
         position={String(index + 1)}
         {diagnostics}
+        {ux}
         change={(updated) => update(index, updated)}
         duplicate={() => duplicate(index)}
         move={(direction) => move(index, direction)}

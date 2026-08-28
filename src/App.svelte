@@ -114,7 +114,7 @@
         }));
         workspace = editor;
         lspStore = new LspStore(editor, shell);
-        archiveStore = new ArchiveStore(editor);
+        archiveStore = new ArchiveStore(editor, ux);
         fileWorkspace = new WorkspaceStore(editor, archiveStore);
         fileWorkspace.setWorkspaceChangeGuard(async (nextPath) => {
           const dirty = editor.tabs.filter((tab) => tab.dirty);

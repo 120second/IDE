@@ -33,4 +33,34 @@ describe("UX confirmations", () => {
     await expect(accepted).resolves.toBe(false);
     ux.dispose();
   });
+
+  it("resolves application text prompts and cancels a previous dialog", async () => {
+    const ux = new UxStore();
+    const confirmation = ux.confirm({ title: "确认", message: "继续吗？" });
+    const input = ux.requestText({
+      title: "重命名",
+      value: "main.cpp",
+      confirmLabel: "保存",
+    });
+
+    await expect(confirmation).resolves.toBe(false);
+    expect(ux.textPrompt).toMatchObject({ value: "main.cpp", confirmLabel: "保存" });
+    ux.acceptTextPrompt("solution.cpp");
+
+    await expect(input).resolves.toBe("solution.cpp");
+    expect(ux.textPrompt).toBeUndefined();
+    ux.dispose();
+  });
+
+  it("does not submit required prompts with blank text", async () => {
+    const ux = new UxStore();
+    const input = ux.requestText({ title: "新建文件夹" });
+
+    ux.acceptTextPrompt("   ");
+    expect(ux.textPrompt).toBeDefined();
+    ux.cancelTextPrompt();
+
+    await expect(input).resolves.toBeNull();
+    ux.dispose();
+  });
 });

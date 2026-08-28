@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
   build: {
+    // The intentionally unified CodeMirror/Lezer chunk is about 517 kB.
+    // Keep warnings useful for unexpected growth without flagging that known-safe bundle.
+    chunkSizeWarningLimit: 550,
     rolldownOptions: {
       output: {
         codeSplitting: {

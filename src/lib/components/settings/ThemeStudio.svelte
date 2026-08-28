@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SettingsStore } from "../../stores/settings.svelte";
+  import type { UxStore } from "../../stores/ux.svelte";
   import type {
     ColorThemeId,
     CustomThemeDefinition,
@@ -23,11 +24,12 @@
 
   interface Props {
     settings: SettingsStore;
+    ux: UxStore;
     close: () => void;
     setDirty: (dirty: boolean) => void;
   }
 
-  let { settings, close, setDirty }: Props = $props();
+  let { settings, ux, close, setDirty }: Props = $props();
 
   type StudioTab = "interface" | "syntax" | "json";
   let activeTab = $state<StudioTab>("interface");
@@ -73,8 +75,13 @@
     }
   }
 
-  function attemptClose(): void {
-    if (jsonDirty && !window.confirm("主题 JSON 还有未应用的修改，确定要放弃并返回工作台吗？")) return;
+  async function attemptClose(): Promise<void> {
+    if (jsonDirty && !await ux.confirm({
+      title: "放弃主题 JSON 修改",
+      message: "主题 JSON 还有未应用的修改。返回工作台将放弃这些内容。",
+      confirmLabel: "放弃修改",
+      danger: true,
+    })) return;
     setDirty(false);
     close();
   }
@@ -119,13 +126,25 @@
 
   async function importTheme(): Promise<void> {
     if (transferring) return;
-    if (jsonDirty && !window.confirm("导入主题会放弃当前未应用的 JSON 修改，是否继续？")) return;
+    if (jsonDirty && !await ux.confirm({
+      title: "放弃主题 JSON 修改",
+      message: "导入主题会放弃当前尚未应用的 JSON 内容。",
+      confirmLabel: "继续导入",
+      danger: true,
+    })) return;
     transferring = true;
     clearFeedback();
     try {
       const content = await importThemeDocument();
       if (!content) return;
       const theme = parseThemeDocument(content);
+      const existing = settings.value.customThemes.find((candidate) => candidate.id === theme.id);
+      if (existing && !await ux.confirm({
+        title: "覆盖同名主题标识",
+        message: `导入文件的标识与“${existing.name}”相同。继续将覆盖现有主题配置。`,
+        confirmLabel: "覆盖并导入",
+        danger: true,
+      })) return;
       settings.importCustomTheme(theme);
       jsonDirty = false;
       jsonDraft = serializeTheme(theme);
@@ -152,9 +171,14 @@
     }
   }
 
-  function deleteTheme(): void {
+  async function deleteTheme(): Promise<void> {
     if (!activeTheme) return;
-    if (!window.confirm(`删除自定义主题“${activeTheme.name}”？此操作无法撤销。`)) return;
+    if (!await ux.confirm({
+      title: "删除自定义主题",
+      message: `确定删除“${activeTheme.name}”吗？此操作无法撤销。`,
+      confirmLabel: "删除主题",
+      danger: true,
+    })) return;
     settings.deleteCustomTheme(activeTheme.id);
     close();
   }
@@ -265,7 +289,7 @@
   function handleWindowKeydown(event: KeyboardEvent): void {
     if (event.key !== "Escape") return;
     event.preventDefault();
-    attemptClose();
+    void attemptClose();
   }
 </script>
 
@@ -291,7 +315,7 @@
       <div class="theme-studio-header-actions">
         <button class="secondary-button" disabled={transferring} onclick={() => void importTheme()}>导入</button>
         <button class="secondary-button" disabled={transferring} onclick={() => void exportTheme()}>导出</button>
-        <button class="secondary-button" onclick={attemptClose}>查看工作台</button>
+        <button class="secondary-button" onclick={() => void attemptClose()}>查看工作台</button>
       </div>
     </header>
 
@@ -460,7 +484,7 @@
 
     <footer class="theme-studio-footer">
       <span>内置主题保持只读；当前自定义主题会自动保存。</span>
-      <button class="danger-text-button" onclick={deleteTheme}>删除此自定义主题</button>
+      <button class="danger-text-button" onclick={() => void deleteTheme()}>删除此自定义主题</button>
     </footer>
   {:else}
     <div class="theme-studio-empty">

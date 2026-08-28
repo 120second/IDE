@@ -9,12 +9,14 @@
     fileWorkspace: WorkspaceStore;
     editor: EditorWorkspace;
     openMenu: (event: MouseEvent, entry: FileEntry) => void;
+    renameEntry: (entry: FileEntry) => void | Promise<void>;
+    deleteEntry: (entry: FileEntry) => void | Promise<void>;
   }
 
   const ROW_HEIGHT = 25;
   const OVERSCAN = 10;
 
-  let { fileWorkspace, editor, openMenu }: Props = $props();
+  let { fileWorkspace, editor, openMenu, renameEntry, deleteEntry }: Props = $props();
   let viewport: HTMLDivElement;
   let scrollTop = $state(0);
   let viewportHeight = $state(300);
@@ -39,6 +41,13 @@
     };
   });
 
+  $effect(() => {
+    const selectedPath = fileWorkspace.selectedPath;
+    const index = rows.findIndex((row) => row.entry.path === selectedPath);
+    if (index < 0) return;
+    void tick().then(() => revealRow(index));
+  });
+
   function activate(entry: FileEntry): void {
     fileWorkspace.select(entry.path);
     if (entry.kind === "directory") {
@@ -50,7 +59,15 @@
 
   function onKeyDown(event: KeyboardEvent, entry: FileEntry): void {
     const index = rows.findIndex((row) => row.entry.path === entry.path);
-    if (event.key === "Enter" || event.key === " ") {
+    if (event.key === "F2") {
+      event.preventDefault();
+      event.stopPropagation();
+      void renameEntry(entry);
+    } else if (event.key === "Delete") {
+      event.preventDefault();
+      event.stopPropagation();
+      void deleteEntry(entry);
+    } else if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       activate(entry);
     } else if (event.key === "ArrowDown") {
@@ -98,6 +115,16 @@
     scrollTop = viewport.scrollTop;
     await tick();
     viewport.querySelector<HTMLElement>(`[data-row-index="${index}"]`)?.focus();
+  }
+
+  function revealRow(index: number): void {
+    if (!viewport) return;
+    const top = index * ROW_HEIGHT;
+    if (top < viewport.scrollTop) viewport.scrollTop = top;
+    else if (top + ROW_HEIGHT > viewport.scrollTop + viewportHeight) {
+      viewport.scrollTop = Math.max(0, top - viewportHeight + ROW_HEIGHT);
+    }
+    scrollTop = viewport.scrollTop;
   }
 
   function beginDrag(event: DragEvent, entry: FileEntry): void {
@@ -178,6 +205,7 @@
         aria-level={row.depth + 1}
         aria-selected={fileWorkspace.selectedPath === row.entry.path}
         aria-expanded={row.entry.kind === "directory" ? row.expanded : undefined}
+        aria-keyshortcuts="F2 Delete"
         tabindex={fileWorkspace.selectedPath === row.entry.path ? 0 : -1}
         data-row-index={start + index}
         draggable="true"
@@ -194,6 +222,11 @@
         ondragend={clearDrag}
         ondrop={(event) => drop(event, row.entry)}
       >
+        {#if row.depth > 0}
+          <span class="tree-indent-guides" aria-hidden="true">
+            {#each Array(row.depth) as _}<i></i>{/each}
+          </span>
+        {/if}
         {#if row.entry.kind === "directory"}
           <button
             class="tree-chevron"

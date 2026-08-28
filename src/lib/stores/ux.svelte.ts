@@ -16,6 +16,18 @@ export interface ConfirmationRequest {
   secondaryDanger: boolean;
 }
 
+export interface TextPromptRequest {
+  id: number;
+  title: string;
+  message?: string;
+  label: string;
+  value: string;
+  placeholder?: string;
+  confirmLabel: string;
+  required: boolean;
+  maxLength: number;
+}
+
 interface ConfirmOptions {
   title: string;
   message: string;
@@ -25,14 +37,27 @@ interface ConfirmOptions {
   secondaryDanger?: boolean;
 }
 
+interface TextPromptOptions {
+  title: string;
+  message?: string;
+  label?: string;
+  value?: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  required?: boolean;
+  maxLength?: number;
+}
+
 export type ConfirmationChoice = "confirm" | "secondary" | "cancel";
 
 export class UxStore {
   toasts = $state.raw<ToastMessage[]>([]);
   confirmation = $state<ConfirmationRequest>();
+  textPrompt = $state<TextPromptRequest>();
 
   private nextId = 1;
   private confirmResolver: ((choice: ConfirmationChoice) => void) | undefined;
+  private textPromptResolver: ((value: string | null) => void) | undefined;
   private readonly timers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly recentMessages = new Map<string, number>();
 
@@ -41,6 +66,7 @@ export class UxStore {
   }
 
   choose(options: ConfirmOptions): Promise<ConfirmationChoice> {
+    this.resolveTextPrompt(null);
     this.resolveConfirmation("cancel");
     const id = this.nextId++;
     this.confirmation = {
@@ -69,6 +95,35 @@ export class UxStore {
     this.resolveConfirmation("cancel");
   }
 
+  requestText(options: TextPromptOptions): Promise<string | null> {
+    this.resolveConfirmation("cancel");
+    this.resolveTextPrompt(null);
+    const id = this.nextId++;
+    this.textPrompt = {
+      id,
+      title: options.title,
+      message: options.message,
+      label: options.label ?? "名称",
+      value: options.value ?? "",
+      placeholder: options.placeholder,
+      confirmLabel: options.confirmLabel ?? "确定",
+      required: options.required ?? true,
+      maxLength: Math.max(1, Math.min(255, options.maxLength ?? 120)),
+    };
+    return new Promise((resolve) => {
+      this.textPromptResolver = resolve;
+    });
+  }
+
+  acceptTextPrompt(value: string): void {
+    if (this.textPrompt?.required && !value.trim()) return;
+    this.resolveTextPrompt(value);
+  }
+
+  cancelTextPrompt(): void {
+    this.resolveTextPrompt(null);
+  }
+
   success(message: string): void {
     this.toast("success", message);
   }
@@ -90,6 +145,7 @@ export class UxStore {
 
   dispose(): void {
     this.resolveConfirmation("cancel");
+    this.resolveTextPrompt(null);
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
     this.toasts = [];
@@ -112,5 +168,12 @@ export class UxStore {
     this.confirmResolver = undefined;
     this.confirmation = undefined;
     resolve?.(choice);
+  }
+
+  private resolveTextPrompt(value: string | null): void {
+    const resolve = this.textPromptResolver;
+    this.textPromptResolver = undefined;
+    this.textPrompt = undefined;
+    resolve?.(value);
   }
 }

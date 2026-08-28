@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SettingsStore } from "../../stores/settings.svelte";
   import type { ShellStore } from "../../stores/shell.svelte";
+  import type { UxStore } from "../../stores/ux.svelte";
   import {
     COLOR_THEMES,
     EDITOR_FONT_PRESETS,
@@ -22,9 +23,10 @@
   interface Props {
     settings: SettingsStore;
     shell: ShellStore;
+    ux: UxStore;
   }
 
-  let { settings, shell }: Props = $props();
+  let { settings, shell, ux }: Props = $props();
 
   const parseArguments = (value: string) => value.split(/\s+/).map((argument) => argument.trim()).filter(Boolean);
   let conflicts = $derived(shortcutConflicts(settings.value.keybindings));
@@ -99,6 +101,18 @@
   function toolLabel(tool: ToolStatus | undefined): string {
     if (!tool) return "尚未检查";
     return tool.available ? "可用" : "未找到";
+  }
+
+  async function resetSettings(): Promise<void> {
+    const accepted = await ux.confirm({
+      title: "恢复默认设置",
+      message: "这会重置外观、快捷键、工具链路径和运行参数，并删除所有自定义主题。",
+      confirmLabel: "恢复默认设置",
+      danger: true,
+    });
+    if (!accepted) return;
+    settings.reset();
+    ux.success("已恢复默认设置。");
   }
 
   $effect(() => {
@@ -416,7 +430,7 @@
     <p class="settings-error">{settings.errorMessage}</p>
   {/if}
 
-  <button class="secondary-button reset-settings" onclick={() => settings.reset()}>
+  <button class="secondary-button reset-settings" onclick={() => void resetSettings()}>
     恢复默认设置
   </button>
 </div>
