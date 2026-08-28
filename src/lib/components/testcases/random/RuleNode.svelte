@@ -26,6 +26,7 @@
   import LineRule from "./LineRule.svelte";
   import RecursiveRuleNode from "./RuleNode.svelte";
   import ValueExpressionInput from "./ValueExpressionInput.svelte";
+  import type { UxStore } from "../../../stores/ux.svelte";
 
   interface Props {
     node: VisualNode;
@@ -39,9 +40,10 @@
     duplicate: () => void;
     move: (direction: -1 | 1) => void;
     remove: () => void;
+    ux: UxStore;
   }
 
-  let { node, index, total, scope, depth, position, diagnostics, change, duplicate, move, remove }: Props = $props();
+  let { node, index, total, scope, depth, position, diagnostics, change, duplicate, move, remove, ux }: Props = $props();
   let expanded = $state(false);
   let actionMenu = $state<{ x: number; y: number }>();
   let ownDiagnostics = $derived(nodeDiagnostics(diagnostics, node.id));
@@ -109,8 +111,13 @@
     actionMenu = { x: bounds.right - 132, y: bounds.bottom + 4 };
   }
 
-  function requestRemove(): void {
-    if (window.confirm(`删除“${title()}”？`)) remove();
+  async function requestRemove(): Promise<void> {
+    if (await ux.confirm({
+      title: "删除输入规则",
+      message: `确定删除“${title()}”吗？`,
+      confirmLabel: "删除规则",
+      danger: true,
+    })) remove();
   }
 
   function createNode(kind: AddRuleKind, available: string[]): VisualNode {
@@ -215,6 +222,7 @@
             depth={depth + 1}
             position={`${orderLabel}.${childIndex + 1}`}
             {diagnostics}
+            {ux}
             change={(updated) => updateChild(childIndex, updated)}
             duplicate={() => duplicateChild(childIndex)}
             move={(direction) => moveChild(childIndex, direction)}
@@ -236,7 +244,7 @@
       { label: "复制", action: duplicate },
       { label: "上移", action: () => move(-1), disabled: index === 0 },
       { label: "下移", action: () => move(1), disabled: index === total - 1 },
-      { label: "删除", action: requestRemove, danger: true, separatorBefore: true },
+      { label: "删除", action: () => void requestRemove(), danger: true, separatorBefore: true },
     ]}
   />
 {/if}

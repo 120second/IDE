@@ -107,7 +107,9 @@
           onclick={() => shell.showBottomPanel(panel.id)}
         >
           {panel.label}
-          {#if panel.id === "problems"}<span class="panel-badge">{lsp.diagnostics.length}</span>{/if}
+          {#if panel.id === "problems" && lsp.diagnostics.length > 0}
+            <span class:error={lsp.errorCount > 0} class="panel-badge">{lsp.diagnostics.length}</span>
+          {/if}
         </button>
       {/each}
     </div>

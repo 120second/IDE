@@ -7,14 +7,16 @@
   import Icon from "../../shell/Icon.svelte";
   import PreviewPanel from "./PreviewPanel.svelte";
   import RuleBuilder from "./RuleBuilder.svelte";
+  import type { UxStore } from "../../../stores/ux.svelte";
 
   interface Props {
     workspace: EditorWorkspace;
     execution: ExecutionStore;
     generator: GeneratorStore;
+    ux: UxStore;
   }
 
-  let { workspace, execution, generator }: Props = $props();
+  let { workspace, execution, generator, ux }: Props = $props();
   let notice = $state("");
   let settingsOpen = $state(false);
   let previewAnchor = $state<HTMLDivElement>();
@@ -83,7 +85,7 @@
 <div class="visual-generator">
   {#if generator.loading}<div class="generator-loading">正在加载已保存的生成规则…</div>{/if}
 
-  <RuleBuilder nodes={generator.nodes} diagnostics={generator.diagnostics} change={(nodes) => generator.setNodes(nodes)} />
+  <RuleBuilder nodes={generator.nodes} diagnostics={generator.diagnostics} change={(nodes) => generator.setNodes(nodes)} {ux} />
 
   <section class="visual-generator-settings generator-step">
     <header class="generator-step-header">

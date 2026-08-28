@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ArchiveStore } from "../../stores/archive.svelte";
   import type { SettingsStore } from "../../stores/settings.svelte";
@@ -33,6 +33,7 @@
   import type { WorkbenchCommand } from "../../types/commands";
   import FileTemplateDialog from "../templates/FileTemplateDialog.svelte";
   import ThemeStudio from "../settings/ThemeStudio.svelte";
+  import EditorBreadcrumbs from "../editor/EditorBreadcrumbs.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -59,38 +60,55 @@
   let TemplateReferenceWindow = $state.raw<
     (typeof import("../editor/TemplateReferenceWindow.svelte"))["default"]
   >();
+  let activeFileReady = $derived(Boolean(
+    workspace.activeTab?.path
+    && !workspace.activeTab.deleted
+    && !workspace.activeTab.loading,
+  ));
+  let buildReady = $derived(activeFileReady && backendState === "ready" && !execution.compiling && !execution.running);
   let workbenchCommands = $derived<WorkbenchCommand[]>([
     command("file.new", "新建 C++ 文件", "文件", "newFile", () => void createSourceFile()),
     command("file.openFolder", "打开文件夹", "文件", undefined, () => void fileWorkspace.openFolderPicker()),
-    command("file.quickOpen", "快速打开文件", "文件", "quickOpen", () => openQuickFile()),
-    command("file.save", "保存当前文件", "文件", "save", () => void saveCurrent()),
-    { id: "file.saveAll", label: "保存全部文件", category: "文件", shortcut: "Ctrl+K S", run: () => void saveAll() },
-    command("editor.close", "关闭当前编辑器", "编辑器", "closeEditor", () => void closeActiveEditor()),
-    command("build.compile", "编译当前文件", "运行", undefined, () => void execution.compileCurrent()),
-    command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent()),
-    command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }),
-    command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }),
-    { id: "debug.continue", label: "继续调试", category: "调试", shortcut: "F5", run: () => void debugStore.continueExecution() },
-    { id: "debug.toggleBreakpoint", label: "切换当前行断点", category: "调试", shortcut: "F9", run: () => {
+    command("file.quickOpen", "快速打开文件", "文件", "quickOpen", () => openQuickFile(), Boolean(fileWorkspace.info), "请先打开工作区"),
+    command("file.save", "保存当前文件", "文件", "save", () => void saveCurrent(), activeFileReady, "当前没有可保存文件"),
+    { id: "file.saveAll", label: "保存全部文件", category: "文件", shortcut: "Ctrl+K S", enabled: workspace.tabs.some((tab) => tab.dirty && tab.path && !tab.deleted), disabledReason: "没有未保存文件", run: () => void saveAll() },
+    command("file.reveal", "在资源管理器中显露当前文件", "文件", undefined, revealCurrentFile, activeFileReady, "当前没有工作区文件"),
+    command("editor.close", "关闭当前编辑器", "编辑器", "closeEditor", () => void closeActiveEditor(), Boolean(workspace.activeId), "没有打开的编辑器"),
+    command("build.compile", "编译当前文件", "运行", undefined, () => void execution.compileCurrent(), buildReady, buildDisabledReason()),
+    command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent(), buildReady, buildDisabledReason()),
+    command("build.stop", "停止当前程序", "运行", undefined, () => void execution.stop(), execution.running, "当前没有运行中的程序"),
+    command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }, buildReady && execution.testcases.length > 0, execution.testcases.length ? buildDisabledReason() : "尚未添加测试点"),
+    command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }, debugStartReady(), debugDisabledReason()),
+    { id: "debug.continue", label: "继续调试", category: "调试", shortcut: "F5", enabled: debugStore.active && debugStore.stopped && !debugStore.busy, disabledReason: "调试器尚未暂停", run: () => void debugStore.continueExecution() },
+    { id: "debug.toggleBreakpoint", label: "切换当前行断点", category: "调试", shortcut: "F9", enabled: activeFileReady && !debugStore.breakpointBusy, disabledReason: "当前没有可设置断点的文件", run: () => {
       const path = workspace.activeTab?.path;
       if (path) void debugStore.toggleBreakpoint(path, workspace.cursorLine);
     } },
-    { id: "debug.stepOver", label: "单步跳过", category: "调试", shortcut: "F10", run: () => void debugStore.stepOver() },
-    { id: "debug.stepInto", label: "单步进入", category: "调试", shortcut: "F11", run: () => void debugStore.stepInto() },
-    { id: "debug.stepOut", label: "单步跳出", category: "调试", shortcut: "Shift+F11", run: () => void debugStore.stepOut() },
-    { id: "debug.restart", label: "重新启动调试", category: "调试", shortcut: "Ctrl+Shift+F5", run: () => void debugStore.restart() },
-    { id: "debug.stop", label: "停止调试", category: "调试", shortcut: "Shift+F5", run: () => void debugStore.stop() },
+    { id: "debug.stepOver", label: "单步跳过", category: "调试", shortcut: "F10", enabled: debugStore.active && debugStore.stopped && !debugStore.busy, disabledReason: "调试器尚未暂停", run: () => void debugStore.stepOver() },
+    { id: "debug.stepInto", label: "单步进入", category: "调试", shortcut: "F11", enabled: debugStore.active && debugStore.stopped && !debugStore.busy, disabledReason: "调试器尚未暂停", run: () => void debugStore.stepInto() },
+    { id: "debug.stepOut", label: "单步跳出", category: "调试", shortcut: "Shift+F11", enabled: debugStore.active && debugStore.stopped && !debugStore.busy, disabledReason: "调试器尚未暂停", run: () => void debugStore.stepOut() },
+    { id: "debug.restart", label: "重新启动调试", category: "调试", shortcut: "Ctrl+Shift+F5", enabled: debugStore.active && !debugStore.busy, disabledReason: "调试会话尚未启动", run: () => void debugStore.restart() },
+    { id: "debug.stop", label: "停止调试", category: "调试", shortcut: "Shift+F5", enabled: debugStore.active && !debugStore.busy, disabledReason: "调试会话尚未启动", run: () => void debugStore.stop() },
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
     command("view.settings", "打开设置", "视图", undefined, () => showActivity("settings")),
+    command("view.problems", "显示问题面板", "视图", undefined, () => shell.showBottomPanel("problems")),
+    command("view.output", "显示输出面板", "视图", undefined, () => shell.showBottomPanel("output")),
     command("view.toggleSidebar", "切换侧栏", "视图", "toggleSidebar", () => shell.toggleSidebar()),
     command("view.togglePanel", "切换底部面板", "视图", "togglePanel", () => shell.toggleBottomPanel()),
     { id: "view.zen", label: "切换禅模式", category: "视图", shortcut: "Ctrl+K Z", run: () => shell.toggleZenMode() },
+    { id: "lsp.reconnect", label: "重新连接 clangd", category: "语言服务", enabled: Boolean(fileWorkspace.info) && lspStore.state !== "starting", disabledReason: fileWorkspace.info ? "clangd 正在连接" : "请先打开工作区", run: () => lspStore.reconnect() },
   ]);
 
   $effect(() => {
     if (shell.activeActivity === "templates") void templateStore.initialize();
+  });
+
+  $effect(() => {
+    const path = workspace.activeTab?.path;
+    const root = fileWorkspace.info?.path;
+    if (path && root) untrack(() => void fileWorkspace.revealPath(path));
   });
 
   $effect(() => {
@@ -274,8 +292,18 @@
     category: string,
     shortcutId: keyof typeof settings.value.keybindings | undefined,
     run: () => void,
+    enabled = true,
+    disabledReason?: string,
   ): WorkbenchCommand {
-    return { id, label, category, shortcut: shortcutId ? settings.value.keybindings[shortcutId] : undefined, run };
+    return {
+      id,
+      label,
+      category,
+      shortcut: shortcutId ? settings.value.keybindings[shortcutId] : undefined,
+      enabled,
+      disabledReason: enabled ? undefined : disabledReason,
+      run,
+    };
   }
 
   function showActivity(activity: typeof shell.activeActivity): void {
@@ -286,6 +314,39 @@
   function openQuickFile(): void {
     if (fileWorkspace.info) quickFileOpen = true;
     else ux.info("请先打开一个工作区，再使用快速打开文件。");
+  }
+
+  function revealCurrentFile(): void {
+    const path = workspace.activeTab?.path;
+    if (!path) return;
+    showActivity("explorer");
+    void fileWorkspace.revealPath(path);
+  }
+
+  function buildDisabledReason(): string | undefined {
+    if (!activeFileReady) return "当前没有可运行的文件";
+    if (backendState !== "ready") return "本地后端尚未就绪";
+    if (execution.compiling) return "正在编译";
+    if (execution.running) return "程序正在运行";
+    return undefined;
+  }
+
+  function debugStartReady(): boolean {
+    return activeFileReady
+      && backendState === "ready"
+      && !execution.compiling
+      && !execution.running
+      && !debugStore.active
+      && !debugStore.busy;
+  }
+
+  function debugDisabledReason(): string | undefined {
+    if (!activeFileReady) return "当前没有可调试文件";
+    if (backendState !== "ready") return "本地后端尚未就绪";
+    if (execution.compiling || execution.running) return "请先结束当前编译或运行";
+    if (debugStore.active) return "调试会话已启动";
+    if (debugStore.busy) return "调试器正在处理命令";
+    return undefined;
   }
 
   async function saveCurrent(): Promise<void> {
@@ -348,6 +409,7 @@
         {#if shell.themeStudioOpen && !shell.zenMode}
           <ThemeStudio
             {settings}
+            {ux}
             close={() => shell.closeThemeStudio()}
             setDirty={(dirty) => shell.setThemeStudioDirty(dirty)}
           />
@@ -359,6 +421,7 @@
           <TabBar
             {workspace}
             {ux}
+            lsp={lspStore}
             keybindings={settings.value.keybindings}
             togglePanel={() => shell.toggleBottomPanel()}
             toggleZen={() => shell.toggleZenMode()}
@@ -369,6 +432,13 @@
             running={execution.running}
             newFile={() => void createSourceFile()}
           />
+          {#if workspace.activeTab && !shell.zenMode}
+            <EditorBreadcrumbs
+              {workspace}
+              {fileWorkspace}
+              showExplorer={() => showActivity("explorer")}
+            />
+          {/if}
           <div class="editor-surface">
             {#if workspace.activeTab}
               <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
@@ -402,7 +472,7 @@
       </button>
     {/if}
   </div>
-  <StatusBar {shell} {workspace} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} />
+  <StatusBar {shell} {workspace} {fileWorkspace} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} />
 </div>
 
 <UxOverlay {ux} />

@@ -83,11 +83,11 @@
     class="sidebar-content"
   >
     {#if shell.activeActivity === "settings"}
-      <SettingsPanel {settings} {shell} />
+      <SettingsPanel {settings} {shell} {ux} />
     {:else if shell.activeActivity === "explorer"}
       <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "testcases"}
-      <TestcasePanel {workspace} {execution} {generator} keybindings={settings.value.keybindings} />
+      <TestcasePanel {workspace} {execution} {generator} {ux} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "templates"}
       <TemplateSidebar {templateStore} />
     {:else if shell.activeActivity === "debug"}

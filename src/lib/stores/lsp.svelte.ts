@@ -237,6 +237,7 @@ export class LspStore implements LspClient {
   }
 
   diagnosticsFor(path: string): readonly LspDiagnostic[] {
+    void this.diagnostics;
     return this.diagnosticsByPath.get(pathKey(path)) ?? [];
   }
 

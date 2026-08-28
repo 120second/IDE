@@ -248,6 +248,111 @@ pub fn save(path: &Path, settings: AppSettings) -> AppResult<AppSettings> {
     Ok(settings)
 }
 
+const THEME_COLOR_KEYS: &[&str] = &[
+    "background",
+    "backgroundElevated",
+    "activityBackground",
+    "sidebarBackground",
+    "panelBackground",
+    "editorBackground",
+    "tabBackground",
+    "tabActiveBackground",
+    "inputBackground",
+    "surface",
+    "surfaceRaised",
+    "surfaceSunken",
+    "hoverBackground",
+    "activeBackground",
+    "textPrimary",
+    "textSecondary",
+    "textMuted",
+    "accent",
+    "accentStrong",
+    "accentSoft",
+    "accentContrast",
+    "border",
+    "borderSubtle",
+    "borderStrong",
+    "success",
+    "warning",
+    "danger",
+    "focusRing",
+];
+
+const SYNTAX_COLOR_KEYS: &[&str] = &[
+    "text",
+    "muted",
+    "activeLine",
+    "selection",
+    "cursor",
+    "keyword",
+    "type",
+    "string",
+    "number",
+    "comment",
+    "function",
+    "variable",
+];
+
+fn sanitize_custom_themes(themes: Vec<CustomThemeDefinition>) -> Vec<CustomThemeDefinition> {
+    let mut ids = BTreeSet::new();
+    themes
+        .into_iter()
+        .take(24)
+        .filter_map(|mut theme| {
+            theme.id = sanitize_theme_id(&theme.id);
+            if !ids.insert(theme.id.clone()) {
+                return None;
+            }
+            theme.name = bounded_nonempty(&theme.name, "自定义主题", 48);
+            theme.variants.dark.colors =
+                sanitize_color_map(theme.variants.dark.colors, THEME_COLOR_KEYS);
+            theme.variants.dark.syntax =
+                sanitize_color_map(theme.variants.dark.syntax, SYNTAX_COLOR_KEYS);
+            theme.variants.light.colors =
+                sanitize_color_map(theme.variants.light.colors, THEME_COLOR_KEYS);
+            theme.variants.light.syntax =
+                sanitize_color_map(theme.variants.light.syntax, SYNTAX_COLOR_KEYS);
+            Some(theme)
+        })
+        .collect()
+}
+
+fn sanitize_theme_id(value: &str) -> String {
+    let id = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .take(64)
+        .collect::<String>();
+    if id.is_empty() {
+        "custom-theme".to_owned()
+    } else {
+        id
+    }
+}
+
+fn sanitize_color_map(
+    colors: BTreeMap<String, String>,
+    allowed: &[&str],
+) -> BTreeMap<String, String> {
+    colors
+        .into_iter()
+        .filter(|(key, value)| allowed.contains(&key.as_str()) && is_theme_color(value))
+        .take(allowed.len())
+        .map(|(key, value)| (key, value.to_ascii_lowercase()))
+        .collect()
+}
+
+fn is_theme_color(value: &str) -> bool {
+    matches!(value.len(), 4 | 5 | 7 | 9)
+        && value.starts_with('#')
+        && value[1..]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,109 +509,4 @@ mod tests {
         assert_eq!(settings.custom_themes[0].variants.dark.colors.len(), 1);
         assert_eq!(settings.active_custom_theme, "contest");
     }
-}
-
-const THEME_COLOR_KEYS: &[&str] = &[
-    "background",
-    "backgroundElevated",
-    "activityBackground",
-    "sidebarBackground",
-    "panelBackground",
-    "editorBackground",
-    "tabBackground",
-    "tabActiveBackground",
-    "inputBackground",
-    "surface",
-    "surfaceRaised",
-    "surfaceSunken",
-    "hoverBackground",
-    "activeBackground",
-    "textPrimary",
-    "textSecondary",
-    "textMuted",
-    "accent",
-    "accentStrong",
-    "accentSoft",
-    "accentContrast",
-    "border",
-    "borderSubtle",
-    "borderStrong",
-    "success",
-    "warning",
-    "danger",
-    "focusRing",
-];
-
-const SYNTAX_COLOR_KEYS: &[&str] = &[
-    "text",
-    "muted",
-    "activeLine",
-    "selection",
-    "cursor",
-    "keyword",
-    "type",
-    "string",
-    "number",
-    "comment",
-    "function",
-    "variable",
-];
-
-fn sanitize_custom_themes(themes: Vec<CustomThemeDefinition>) -> Vec<CustomThemeDefinition> {
-    let mut ids = BTreeSet::new();
-    themes
-        .into_iter()
-        .take(24)
-        .filter_map(|mut theme| {
-            theme.id = sanitize_theme_id(&theme.id);
-            if !ids.insert(theme.id.clone()) {
-                return None;
-            }
-            theme.name = bounded_nonempty(&theme.name, "自定义主题", 48);
-            theme.variants.dark.colors =
-                sanitize_color_map(theme.variants.dark.colors, THEME_COLOR_KEYS);
-            theme.variants.dark.syntax =
-                sanitize_color_map(theme.variants.dark.syntax, SYNTAX_COLOR_KEYS);
-            theme.variants.light.colors =
-                sanitize_color_map(theme.variants.light.colors, THEME_COLOR_KEYS);
-            theme.variants.light.syntax =
-                sanitize_color_map(theme.variants.light.syntax, SYNTAX_COLOR_KEYS);
-            Some(theme)
-        })
-        .collect()
-}
-
-fn sanitize_theme_id(value: &str) -> String {
-    let id = value
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-        .take(64)
-        .collect::<String>();
-    if id.is_empty() {
-        "custom-theme".to_owned()
-    } else {
-        id
-    }
-}
-
-fn sanitize_color_map(
-    colors: BTreeMap<String, String>,
-    allowed: &[&str],
-) -> BTreeMap<String, String> {
-    colors
-        .into_iter()
-        .filter(|(key, value)| allowed.contains(&key.as_str()) && is_theme_color(value))
-        .take(allowed.len())
-        .map(|(key, value)| (key, value.to_ascii_lowercase()))
-        .collect()
-}
-
-fn is_theme_color(value: &str) -> bool {
-    matches!(value.len(), 4 | 5 | 7 | 9)
-        && value.starts_with('#')
-        && value[1..]
-            .chars()
-            .all(|character| character.is_ascii_hexdigit())
 }

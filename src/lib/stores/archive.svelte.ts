@@ -13,6 +13,7 @@ import {
   updateSmartCollection,
 } from "../api/archive";
 import type { EditorWorkspace } from "../editor/workspace.svelte";
+import type { UxStore } from "./ux.svelte";
 import type {
   ArchiveBulkInput,
   ArchiveFile,
@@ -50,7 +51,10 @@ export class ArchiveStore {
   private request = 0;
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(private readonly editor: EditorWorkspace) {}
+  constructor(
+    private readonly editor: EditorWorkspace,
+    private readonly ux: UxStore,
+  ) {}
 
   dispose(): void {
     if (this.searchTimer) clearTimeout(this.searchTimer);
@@ -235,7 +239,12 @@ export class ArchiveStore {
   }
 
   async deleteCollection(collection: SmartCollection): Promise<void> {
-    if (!window.confirm(`确定删除智能集合“${collection.name}”吗？`)) return;
+    if (!await this.ux.confirm({
+      title: "删除智能集合",
+      message: `确定删除“${collection.name}”吗？归档文件本身不会被删除。`,
+      confirmLabel: "删除集合",
+      danger: true,
+    })) return;
     try {
       await deleteSmartCollection(collection.id);
       if (this.activeView === `collection-${collection.id}`) {

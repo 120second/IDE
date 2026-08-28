@@ -2556,6 +2556,15 @@ button.status-item:hover {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.quick-result-list > button:disabled,
+.quick-result-list > button:disabled:hover {
+  color: var(--text-muted);
+  background: transparent;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .toast-region {
   top: 12px;
   right: 12px;

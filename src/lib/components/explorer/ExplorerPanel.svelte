@@ -37,7 +37,7 @@
     return fileWorkspace.entryDirectory(entry);
   }
 
-  function requestCreate(kind: "file" | "directory", entry?: FileEntry): void {
+  async function requestCreate(kind: "file" | "directory", entry?: FileEntry): Promise<void> {
     menu = undefined;
     const parent = selectedDirectory(entry);
     if (!parent) return;
@@ -45,14 +45,30 @@
       newFile(parent);
       return;
     }
-    const name = window.prompt("新文件夹名称", "新建文件夹")?.trim();
-    if (name) void fileWorkspace.create(parent, name, kind);
+    const name = (await ux.requestText({
+      title: "新建文件夹",
+      message: `将在 ${parent} 中创建文件夹。`,
+      label: "文件夹名称",
+      value: "新建文件夹",
+      confirmLabel: "创建",
+    }))?.trim();
+    if (!name) return;
+    const created = await fileWorkspace.create(parent, name, kind);
+    if (created) ux.success(`已创建文件夹“${name}”。`);
   }
 
-  function requestRename(entry: FileEntry): void {
+  async function requestRename(entry: FileEntry): Promise<void> {
     menu = undefined;
-    const name = window.prompt("重命名", entry.name)?.trim();
-    if (name && name !== entry.name) void fileWorkspace.rename(entry, name);
+    const name = (await ux.requestText({
+      title: "重命名",
+      message: `为“${entry.name}”输入新名称。`,
+      label: entry.kind === "directory" ? "文件夹名称" : "文件名称",
+      value: entry.name,
+      confirmLabel: "重命名",
+    }))?.trim();
+    if (!name || name === entry.name) return;
+    await fileWorkspace.rename(entry, name);
+    if (!fileWorkspace.error) ux.success(`已重命名为“${name}”。`);
   }
 
   async function requestDelete(entry: FileEntry): Promise<void> {
@@ -134,12 +150,18 @@
         <span>{fileWorkspace.info.name}</span>
         <div class="workspace-actions">
           <button title="新建文件" aria-label="新建文件" onclick={() => requestCreate("file")}><Icon name="plus" size={13} /></button>
-          <button title="新建文件夹" aria-label="新建文件夹" onclick={() => requestCreate("directory")}><Icon name="folder-plus" size={14} /></button>
+          <button title="新建文件夹" aria-label="新建文件夹" onclick={() => void requestCreate("directory")}><Icon name="folder-plus" size={14} /></button>
           <button title="刷新" aria-label="刷新工作区" onclick={() => void fileWorkspace.refresh()}><Icon name="refresh" size={13} /></button>
           <button title="打开文件夹" aria-label="打开其他文件夹" onclick={() => void fileWorkspace.openFolderPicker()}><Icon name="folder" size={14} /></button>
         </div>
       </header>
-      <FileTree {fileWorkspace} {editor} {openMenu} />
+      <FileTree
+        {fileWorkspace}
+        {editor}
+        {openMenu}
+        renameEntry={requestRename}
+        deleteEntry={requestDelete}
+      />
     {/if}
   {:else}
     <div class="empty-state workspace-empty">
@@ -181,9 +203,9 @@
       { label: "打开", action: () => openEntry(menu!.entry) },
       ...(menu.entry.kind === "directory" ? [
         { label: "新建文件", action: () => requestCreate("file", menu!.entry) },
-        { label: "新建文件夹", action: () => requestCreate("directory", menu!.entry) },
+        { label: "新建文件夹", action: () => void requestCreate("directory", menu!.entry) },
       ] : []),
-      { label: "重命名", separatorBefore: true, action: () => requestRename(menu!.entry) },
+      { label: "重命名", separatorBefore: true, action: () => void requestRename(menu!.entry) },
       { label: "删除", danger: true, action: () => void requestDelete(menu!.entry) },
     ]}
   />

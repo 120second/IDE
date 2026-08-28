@@ -19,20 +19,28 @@
   onMount(() => input.focus());
 
   function choose(command?: WorkbenchCommand): void {
-    if (!command) return;
+    if (!command || command.enabled === false) return;
     close();
     queueMicrotask(command.run);
   }
 
   function moveSelection(next: number): void {
     if (filtered.length === 0) return;
-    selectedIndex = (next + filtered.length) % filtered.length;
+    const direction = next >= selectedIndex ? 1 : -1;
+    let candidate = (next + filtered.length) % filtered.length;
+    for (let visited = 0; visited < filtered.length; visited += 1) {
+      if (filtered[candidate].enabled !== false) {
+        selectedIndex = candidate;
+        break;
+      }
+      candidate = (candidate + direction + filtered.length) % filtered.length;
+    }
     queueMicrotask(() => list.querySelector<HTMLElement>(`button:nth-child(${selectedIndex + 1})`)?.scrollIntoView({ block: "nearest" }));
   }
 
   function onInput(value: string): void {
     query = value;
-    selectedIndex = 0;
+    selectedIndex = Math.max(0, filtered.findIndex((command) => command.enabled !== false));
   }
 
   function onKeyDown(event: KeyboardEvent): void {
@@ -73,11 +81,13 @@
           class:active={index === selectedIndex}
           role="option"
           aria-selected={index === selectedIndex}
+          aria-disabled={command.enabled === false}
+          disabled={command.enabled === false}
           onmouseenter={() => (selectedIndex = index)}
           onclick={() => choose(command)}
         >
           <span class="quick-result-icon"><Icon name="command" size={14} /></span>
-          <span><strong>{command.label}</strong><small>{command.category}</small></span>
+          <span><strong>{command.label}</strong><small>{command.category}{command.disabledReason ? ` · ${command.disabledReason}` : ""}</small></span>
           {#if command.shortcut}<kbd>{command.shortcut.replaceAll("+", " ")}</kbd>{/if}
         </button>
       {/each}

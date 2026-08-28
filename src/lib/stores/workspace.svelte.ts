@@ -46,6 +46,8 @@ export class WorkspaceStore {
   private visibleRowsRevision = -1;
   private disposed = false;
   private workspaceChangeGuard: WorkspaceChangeGuard | undefined;
+  private openQueue: Promise<void> = Promise.resolve();
+  private revealSequence = 0;
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -102,7 +104,13 @@ export class WorkspaceStore {
     }
   }
 
-  async openPath(path: string): Promise<void> {
+  openPath(path: string): Promise<void> {
+    const operation = this.openQueue.then(() => this.performOpenPath(path));
+    this.openQueue = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async performOpenPath(path: string): Promise<void> {
     if (this.info && samePath(this.info.path, path)) return;
     if (this.editor.tabs.length > 0 && this.workspaceChangeGuard) {
       if (!await this.workspaceChangeGuard(path)) return;
@@ -136,6 +144,32 @@ export class WorkspaceStore {
 
   select(path: string): void {
     this.selectedPath = path;
+  }
+
+  async revealPath(path: string): Promise<void> {
+    const root = this.info?.path;
+    if (!root || !sameOrChildKey(pathKey(path), pathKey(root))) return;
+    const request = ++this.revealSequence;
+    const directories: string[] = [];
+    let current = samePath(path, root) ? root : parentPath(path);
+    while (current && sameOrChildKey(pathKey(current), pathKey(root))) {
+      directories.unshift(current);
+      if (samePath(current, root)) break;
+      current = parentPath(current);
+    }
+    if (!directories.some((directory) => samePath(directory, root))) return;
+
+    for (const directory of directories) {
+      const state = this.ensureDirectory(directory);
+      if (!state.expanded) {
+        state.expanded = true;
+        this.bump();
+      }
+      if (!state.loaded) await this.loadDirectory(directory);
+      if (request !== this.revealSequence || !samePath(this.info?.path ?? "", root)) return;
+    }
+    this.selectedPath = path;
+    this.bump();
   }
 
   async toggleDirectory(entry: FileEntry): Promise<void> {
