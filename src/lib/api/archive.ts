@@ -27,6 +27,10 @@ export function setArchiveFavorite(id: number, favorite: boolean): Promise<void>
   return invoke<void>("set_archive_favorite", { id, favorite });
 }
 
+export function completeArchiveReview(id: number): Promise<ArchiveFile> {
+  return invoke<ArchiveFile>("complete_archive_review", { id });
+}
+
 export function bulkUpdateArchive(input: ArchiveBulkInput): Promise<void> {
   return invoke<void>("bulk_update_archive", { input });
 }
@@ -67,8 +71,8 @@ export function emptyArchiveFacets(): ArchiveFacets {
     recentCount: 0,
     completedCount: 0,
     reviewCount: 0,
+    dueReviewCount: 0,
     platforms: [],
-    difficulties: [],
     tags: [],
   };
 }

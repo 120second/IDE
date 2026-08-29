@@ -44,6 +44,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "performance_indexes",
         sql: include_str!("migrations/0007_performance_indexes.sql"),
     },
+    Migration {
+        version: 8,
+        name: "archive_reviews",
+        sql: include_str!("migrations/0008_archive_reviews.sql"),
+    },
 ];
 
 pub fn apply_pending(connection: &mut Connection) -> AppResult<i64> {
@@ -99,11 +104,11 @@ mod tests {
 
         assert_eq!(
             apply_pending(&mut connection).expect("first migration run"),
-            7
+            8
         );
         assert_eq!(
             apply_pending(&mut connection).expect("second migration run"),
-            7
+            8
         );
 
         let applied_count: i64 = connection
@@ -111,7 +116,7 @@ mod tests {
                 row.get(0)
             })
             .expect("migration count should be readable");
-        assert_eq!(applied_count, 7);
+        assert_eq!(applied_count, 8);
     }
 
     #[test]

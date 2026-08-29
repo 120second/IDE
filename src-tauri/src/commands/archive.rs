@@ -64,6 +64,19 @@ pub fn set_archive_favorite(
 }
 
 #[tauri::command(async)]
+pub fn complete_archive_review(
+    id: i64,
+    state: State<'_, AppState>,
+) -> Result<ArchiveFile, CommandError> {
+    archive_core::complete_review(
+        &state.paths.database_file,
+        &state.active_workspace_root().map_err(CommandError::from)?,
+        id,
+    )
+    .map_err(CommandError::from)
+}
+
+#[tauri::command(async)]
 pub fn bulk_update_archive(
     input: ArchiveBulkInput,
     state: State<'_, AppState>,

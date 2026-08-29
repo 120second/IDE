@@ -28,8 +28,6 @@
   function metadata(file: ArchiveFile): string {
     return [
       platformLabel(file.platform),
-      file.problemId,
-      file.rating === undefined ? "" : String(file.rating),
       statusLabel(file.status),
     ].filter(Boolean).join(" · ");
   }
@@ -37,7 +35,7 @@
 
 <section class="archive-panel">
   <div class="archive-search-row">
-    <div class="search-box archive-search"><Icon name="search" size={13} /><input aria-label="搜索归档" placeholder="标题、题号、标签…" value={archiveStore.search} oninput={(event) => archiveStore.setSearch(event.currentTarget.value)} /></div>
+    <div class="search-box archive-search"><Icon name="search" size={13} /><input aria-label="搜索归档" placeholder="标题、平台、标签…" value={archiveStore.search} oninput={(event) => archiveStore.setSearch(event.currentTarget.value)} /></div>
     <button title={`归档当前文件 · ${keybindings.quickArchive}`} aria-label="归档当前文件" onclick={() => archiveStore.openQuickArchive()}><Icon name="plus" size={13} /></button>
   </div>
 
@@ -60,20 +58,13 @@
           <button title="删除智能集合" aria-label={`删除 ${collection.name}`} onclick={() => void archiveStore.deleteCollection(collection)}>×</button>
         </div>
       {/each}
-      {#if archiveStore.collections.length === 0}<p>可按难度、状态和算法标签保存查询。</p>{/if}
+      {#if archiveStore.collections.length === 0}<p>可按平台、状态和算法标签保存查询。</p>{/if}
     </section>
 
     <section class="archive-group">
       <h4>平台</h4>
       {#each platforms as platform}
         <button class:active={archiveStore.activeView === `platform-${platform.value}`} onclick={() => void archiveStore.selectView(`platform-${platform.value}`, platform.label, { platform: platform.value })}><span>{platform.label}</span><em>{platformCount(platform.value)}</em></button>
-      {/each}
-    </section>
-
-    <section class="archive-group">
-      <h4>难度</h4>
-      {#each archiveStore.facets.difficulties as difficulty}
-        <button class:active={archiveStore.activeView === `difficulty-${difficulty.label}`} onclick={() => void archiveStore.selectView(`difficulty-${difficulty.label}`, `难度 ${difficulty.label}`, { minRating: difficulty.minRating, maxRating: difficulty.maxRating })}><span>{difficulty.label}</span><em>{difficulty.count}</em></button>
       {/each}
     </section>
 

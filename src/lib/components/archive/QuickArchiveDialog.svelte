@@ -12,14 +12,11 @@
 
   let { archiveStore, path, close }: Props = $props();
   let loading = $state(true);
-  let ratingText = $state("");
   let tagsText = $state("");
   let draft = $state<ArchiveInput>({
     path: "",
     title: "",
     platform: "other",
-    problemId: "",
-    rating: undefined,
     status: "unfinished",
     note: "",
     favorite: false,
@@ -37,14 +34,11 @@
             path: file.path,
             title: file.title,
             platform: file.platform,
-            problemId: file.problemId,
-            rating: file.rating,
             status: file.status,
             note: file.note,
             favorite: file.favorite,
             tags: [...file.tags],
           };
-          ratingText = file.rating === undefined ? "" : String(file.rating);
           tagsText = file.tags.join(", ");
         }
       })
@@ -66,11 +60,6 @@
       .split(/[,，]/)
       .map((tag) => tag.trim())
       .filter(Boolean);
-  }
-
-  function parseRating(value: string): void {
-    ratingText = value;
-    draft.rating = value.trim() ? Number(value) : undefined;
   }
 
   async function submit(): Promise<void> {
@@ -101,8 +90,6 @@
               <option value="other">其他</option>
             </select>
           </label>
-          <label><span>题号</span><input bind:value={draft.problemId} placeholder="840D" /></label>
-          <label><span>难度</span><input type="number" min="0" max="10000" value={ratingText} oninput={(event) => parseRating(event.currentTarget.value)} placeholder="2500" /></label>
           <label>
             <span>状态</span>
             <select bind:value={draft.status}>

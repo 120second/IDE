@@ -226,6 +226,162 @@ body {
   background: var(--background);
 }
 
+.window-frame {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding-top: 32px;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--background);
+}
+
+.window-content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.window-titlebar {
+  position: fixed;
+  z-index: 1000;
+  inset: 0 0 auto;
+  display: flex;
+  width: 100%;
+  height: 32px;
+  align-items: stretch;
+  justify-content: space-between;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--tab-background) 88%, var(--background-elevated));
+  user-select: none;
+}
+
+.window-titlebar.focused {
+  color: var(--text-secondary);
+}
+
+.window-titlebar-brand {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  padding: 0 147px 0 9px;
+}
+
+.window-titlebar-mark {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--border));
+  border-radius: 4px;
+  color: var(--accent-contrast);
+  background: var(--accent);
+  font-family: var(--display-font);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.window-titlebar-title {
+  overflow: hidden;
+  color: inherit;
+  font-family: var(--display-font);
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.window-titlebar:not(.focused) .window-titlebar-brand {
+  opacity: 0.68;
+}
+
+.window-titlebar-controls {
+  position: fixed;
+  z-index: 1001;
+  top: 0;
+  right: 0;
+  display: flex;
+  height: 32px;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.window-titlebar:not(.focused) .window-titlebar-controls {
+  opacity: 0.76;
+}
+
+.window-titlebar-controls button {
+  display: grid;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.window-titlebar-controls button:hover {
+  color: var(--text-primary);
+  background: var(--hover-background);
+}
+
+.window-titlebar-controls button:active {
+  background: var(--active-background);
+}
+
+.window-titlebar-controls button:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.window-titlebar-controls .window-titlebar-close:hover,
+.window-titlebar-controls .window-titlebar-close:active {
+  color: #fff;
+  background: #c42b1c;
+}
+
+.window-titlebar-controls svg {
+  width: 12px;
+  height: 12px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  stroke-width: 1.2;
+}
+
+@media print {
+  body.template-print-active .window-titlebar {
+    display: none !important;
+  }
+
+  body.template-print-active .window-frame,
+  body.template-print-active .window-content {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+}
+
 /* Boot uses the same workbench language, including first launch and failures. */
 .boot-screen {
   position: relative;
@@ -2422,7 +2578,8 @@ button.status-item:hover {
 
 /* Template and archive workspaces share the same master-detail grammar. */
 .template-center,
-.archive-panel {
+.archive-panel,
+.review-panel {
   color: var(--text-primary);
   background: color-mix(in srgb, var(--editor-background) var(--editor-opacity-percent), transparent);
 }
@@ -2469,8 +2626,15 @@ button.status-item:hover {
 }
 
 .archive-search-row,
+.review-search-row,
 .archive-results-heading,
 .archive-batch-bar {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface) 68%, transparent);
+}
+
+.review-summary,
+.review-filter-tabs {
   border-color: var(--border);
   background: color-mix(in srgb, var(--surface) 68%, transparent);
 }

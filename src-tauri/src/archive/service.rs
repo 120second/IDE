@@ -13,12 +13,13 @@ use crate::{
 
 use super::{
     ArchiveBulkInput, ArchiveFacets, ArchiveFile, ArchiveInput, ArchiveQuery, ArchiveStatus,
-    DifficultyCount, NamedCount, SmartCollection, SmartCollectionInput,
+    NamedCount, SmartCollection, SmartCollectionInput,
 };
 
 const FILE_LIMIT: usize = 500;
 const TAG_LIMIT: usize = 50;
 const TAG_SEPARATOR: char = '\u{1f}';
+const REVIEW_INTERVAL_DAYS: [i64; 6] = [1, 2, 4, 7, 15, 30];
 
 pub fn register_entries(database_path: &Path, root: &Path, entries: &[FileEntry]) -> AppResult<()> {
     let mut connection = connect(database_path)?;
@@ -75,8 +76,6 @@ pub fn archive_file(
     let path = checked_cpp_path(root, &input.path)?;
     let title = required_text(&input.title, "title", 256)?;
     let platform = normalize_platform(&input.platform);
-    let problem_id = limited_text(&input.problem_id, 128);
-    let rating = validate_rating(input.rating)?;
     let note = limited_text(&input.note, 8_192);
     let tags = sanitize_tags(&input.tags)?;
 
@@ -90,21 +89,20 @@ pub fn archive_file(
     )?;
     transaction.execute(
         "UPDATE workspace_files SET
-            title = ?2, platform = ?3, problem_id = ?4, rating = ?5,
-            status = ?6, note = ?7, favorite = ?8, archived = 1, available = 1,
+            title = ?2, platform = ?3, status = ?4, note = ?5,
+            favorite = ?6, archived = 1, available = 1,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ?1",
         params![
             file_id,
             title,
             platform,
-            problem_id,
-            rating,
             input.status.as_str(),
             note,
             input.favorite,
         ],
     )?;
+    ensure_review_schedule(&transaction, file_id)?;
     transaction.execute("DELETE FROM file_tags WHERE file_id = ?1", [file_id])?;
     attach_tags(&transaction, file_id, &tags)?;
     transaction.commit()?;
@@ -121,6 +119,7 @@ pub fn get_file_by_path(
     let path = normalized_path(path);
     let mut statement = connection.prepare(&format!(
         "SELECT {}, {} FROM workspace_files wf
+         LEFT JOIN archive_reviews ar ON ar.file_id = wf.id
          LEFT JOIN file_tags ft ON ft.file_id = wf.id
          LEFT JOIN tags t ON t.id = ft.tag_id
          WHERE wf.workspace_root = ?1 COLLATE NOCASE AND wf.path = ?2 COLLATE NOCASE
@@ -154,6 +153,59 @@ pub fn set_favorite(database_path: &Path, root: &Path, id: i64, favorite: bool) 
     ensure_changed(changed, "archive file", id)
 }
 
+pub fn complete_review(database_path: &Path, root: &Path, id: i64) -> AppResult<ArchiveFile> {
+    let mut connection = connect(database_path)?;
+    let transaction = connection.transaction()?;
+    let step = transaction
+        .query_row(
+            "SELECT ar.review_step
+             FROM archive_reviews ar
+             JOIN workspace_files wf ON wf.id = ar.file_id
+             WHERE ar.file_id = ?1 AND wf.workspace_root = ?2 COLLATE NOCASE
+               AND wf.available = 1 AND wf.archived = 1",
+            params![id, path_text(root)],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+        .ok_or_else(|| archive_error(format!("review file {id} does not exist")))?;
+    if step >= REVIEW_INTERVAL_DAYS.len() as i64 {
+        transaction.commit()?;
+        return get_file_by_id(&connection, id);
+    }
+
+    let next_step = step + 1;
+    if next_step >= REVIEW_INTERVAL_DAYS.len() as i64 {
+        transaction.execute(
+            "UPDATE archive_reviews SET
+                review_step = ?2, next_review_at = NULL,
+                last_reviewed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE file_id = ?1",
+            params![id, next_step],
+        )?;
+        transaction.execute(
+            "UPDATE workspace_files SET status = 'mastered',
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE id = ?1",
+            [id],
+        )?;
+    } else {
+        let interval = format!("+{} days", REVIEW_INTERVAL_DAYS[next_step as usize]);
+        transaction.execute(
+            "UPDATE archive_reviews SET
+                review_step = ?2,
+                next_review_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?3),
+                last_reviewed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+             WHERE file_id = ?1",
+            params![id, next_step, interval],
+        )?;
+    }
+    transaction.commit()?;
+    get_file_by_id(&connection, id)
+}
+
 pub fn bulk_update(database_path: &Path, root: &Path, input: &ArchiveBulkInput) -> AppResult<()> {
     let ids = input
         .file_ids
@@ -167,7 +219,6 @@ pub fn bulk_update(database_path: &Path, root: &Path, input: &ArchiveBulkInput) 
         return Err(archive_error("at least one file must be selected"));
     }
     let platform = input.platform.as_deref().map(normalize_platform);
-    let rating = validate_rating(input.rating)?;
     let tags = sanitize_tags(&input.add_tags)?;
     let root = path_text(root);
 
@@ -189,17 +240,12 @@ pub fn bulk_update(database_path: &Path, root: &Path, input: &ArchiveBulkInput) 
             "UPDATE workspace_files
              SET archived = 1,
                  platform = COALESCE(?2, platform),
-                 rating = COALESCE(?3, rating),
-                 status = COALESCE(?4, status),
+                 status = COALESCE(?3, status),
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              WHERE id = ?1",
-            params![
-                id,
-                platform,
-                rating,
-                input.status.map(ArchiveStatus::as_str),
-            ],
+            params![id, platform, input.status.map(ArchiveStatus::as_str)],
         )?;
+        ensure_review_schedule(&transaction, id)?;
         attach_tags(&transaction, id, &tags)?;
     }
     transaction.commit()?;
@@ -253,32 +299,16 @@ pub fn list_facets(database_path: &Path, root: &Path) -> AppResult<ArchiveFacets
         &root,
     )?;
 
-    let difficulty_specs = [
-        ("≤1199", None, Some(1199)),
-        ("1200–1599", Some(1200), Some(1599)),
-        ("1600–1899", Some(1600), Some(1899)),
-        ("1900–2099", Some(1900), Some(2099)),
-        ("2100–2399", Some(2100), Some(2399)),
-        ("2400+", Some(2400), None),
-    ];
-    let mut difficulties = Vec::with_capacity(difficulty_specs.len());
-    for (label, minimum, maximum) in difficulty_specs {
-        let value = connection.query_row(
-            "SELECT COUNT(*) FROM workspace_files
-             WHERE workspace_root = ?1 COLLATE NOCASE AND available = 1 AND archived = 1
-               AND rating IS NOT NULL
-               AND (?2 IS NULL OR rating >= ?2)
-               AND (?3 IS NULL OR rating <= ?3)",
-            params![root, minimum, maximum],
-            |row| row.get(0),
-        )?;
-        difficulties.push(DifficultyCount {
-            label: label.to_owned(),
-            min_rating: minimum,
-            max_rating: maximum,
-            count: value,
-        });
-    }
+    let due_review_count = connection.query_row(
+        "SELECT COUNT(*)
+         FROM workspace_files wf
+         JOIN archive_reviews ar ON ar.file_id = wf.id
+         WHERE wf.workspace_root = ?1 COLLATE NOCASE
+           AND wf.available = 1 AND wf.archived = 1
+           AND ar.completed_at IS NULL AND ar.next_review_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        [&root],
+        |row| row.get(0),
+    )?;
 
     Ok(ArchiveFacets {
         inbox_count: count("archived = 0")?,
@@ -286,8 +316,8 @@ pub fn list_facets(database_path: &Path, root: &Path) -> AppResult<ArchiveFacets
         recent_count: count("archived = 1 AND last_opened IS NOT NULL")?,
         completed_count: count("archived = 1 AND status = 'completed'")?,
         review_count: count("archived = 1 AND status = 'review'")?,
+        due_review_count,
         platforms,
-        difficulties,
         tags,
     })
 }
@@ -300,15 +330,12 @@ pub fn create_collection(
     let input = SanitizedCollection::new(input)?;
     let connection = connect(database_path)?;
     connection.execute(
-        "INSERT INTO collections (
-            workspace_root, name, platform, min_rating, max_rating, status, tags
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO collections (workspace_root, name, platform, status, tags)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             path_text(root),
             input.name,
             input.platform,
-            input.min_rating,
-            input.max_rating,
             input.status.map(ArchiveStatus::as_str),
             serde_json::to_string(&input.tags).map_err(|error| archive_error(error.to_string()))?,
         ],
@@ -327,8 +354,8 @@ pub fn update_collection(
     let connection = connect(database_path)?;
     let changed = connection.execute(
         "UPDATE collections SET
-            name = ?3, platform = ?4, min_rating = ?5, max_rating = ?6,
-            status = ?7, tags = ?8,
+            name = ?3, platform = ?4, min_rating = NULL, max_rating = NULL,
+            status = ?5, tags = ?6,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ?1 AND workspace_root = ?2 COLLATE NOCASE",
         params![
@@ -336,8 +363,6 @@ pub fn update_collection(
             path_text(root),
             input.name,
             input.platform,
-            input.min_rating,
-            input.max_rating,
             input.status.map(ArchiveStatus::as_str),
             serde_json::to_string(&input.tags).map_err(|error| archive_error(error.to_string()))?,
         ],
@@ -358,7 +383,7 @@ pub fn delete_collection(database_path: &Path, root: &Path, id: i64) -> AppResul
 pub fn list_collections(database_path: &Path, root: &Path) -> AppResult<Vec<SmartCollection>> {
     let connection = connect(database_path)?;
     let mut statement = connection.prepare(
-        "SELECT id, name, platform, min_rating, max_rating, status, tags, created_at, updated_at
+        "SELECT id, name, platform, status, tags, created_at, updated_at
          FROM collections WHERE workspace_root = ?1 COLLATE NOCASE
          ORDER BY name COLLATE NOCASE, id",
     )?;
@@ -482,7 +507,10 @@ fn list_files_with_connection(
 ) -> AppResult<Vec<ArchiveFile>> {
     let resolved = resolve_query(connection, root, query)?;
     let (filter, values) = build_filter(root, &resolved);
-    let ordering = if resolved.recent_only {
+    let ordering = if resolved.review_only {
+        "CASE WHEN ar.next_review_at IS NULL THEN 1 ELSE 0 END,
+         ar.next_review_at, wf.updated_at DESC, wf.id DESC"
+    } else if resolved.recent_only {
         "wf.last_opened DESC, wf.updated_at DESC, wf.id DESC"
     } else if resolved.inbox_only {
         "wf.created_at DESC, wf.id DESC"
@@ -491,6 +519,7 @@ fn list_files_with_connection(
     };
     let sql = format!(
         "SELECT {}, {} FROM workspace_files wf
+         LEFT JOIN archive_reviews ar ON ar.file_id = wf.id
          LEFT JOIN file_tags ft ON ft.file_id = wf.id
          LEFT JOIN tags t ON t.id = ft.tag_id
          {filter}
@@ -514,7 +543,10 @@ fn count_files_with_connection(
     let (filter, values) = build_filter(root, &resolved);
     connection
         .query_row(
-            &format!("SELECT COUNT(*) FROM workspace_files wf {filter}"),
+            &format!(
+                "SELECT COUNT(*) FROM workspace_files wf
+                 LEFT JOIN archive_reviews ar ON ar.file_id = wf.id {filter}"
+            ),
             params_from_iter(values),
             |row| row.get(0),
         )
@@ -527,9 +559,8 @@ struct ResolvedQuery {
     inbox_only: bool,
     favorite_only: bool,
     recent_only: bool,
+    review_only: bool,
     platform: Option<String>,
-    min_rating: Option<i64>,
-    max_rating: Option<i64>,
     status: Option<ArchiveStatus>,
     tags: Vec<String>,
 }
@@ -544,9 +575,8 @@ fn resolve_query(
         inbox_only: query.inbox_only,
         favorite_only: query.favorite_only,
         recent_only: query.recent_only,
+        review_only: query.review_only,
         platform: query.platform.as_deref().map(normalize_platform),
-        min_rating: validate_rating(query.min_rating)?,
-        max_rating: validate_rating(query.max_rating)?,
         status: query.status,
         tags: query
             .tag
@@ -559,21 +589,10 @@ fn resolve_query(
         if resolved.platform.is_none() {
             resolved.platform = record.platform;
         }
-        if resolved.min_rating.is_none() {
-            resolved.min_rating = record.min_rating;
-        }
-        if resolved.max_rating.is_none() {
-            resolved.max_rating = record.max_rating;
-        }
         if resolved.status.is_none() {
             resolved.status = record.status;
         }
         resolved.tags.extend(record.tags);
-    }
-    if let (Some(minimum), Some(maximum)) = (resolved.min_rating, resolved.max_rating) {
-        if minimum > maximum {
-            return Err(archive_error("minimum rating cannot exceed maximum rating"));
-        }
     }
     Ok(resolved)
 }
@@ -590,20 +609,15 @@ fn build_filter(root: &Path, query: &ResolvedQuery) -> (String, Vec<Value>) {
     if query.recent_only {
         sql.push_str(" AND wf.last_opened IS NOT NULL");
     }
+    if query.review_only {
+        sql.push_str(" AND ar.file_id IS NOT NULL");
+    }
     if let Some(platform) = &query.platform {
         values.push(Value::Text(platform.clone()));
         sql.push_str(&format!(
             " AND wf.platform = ?{} COLLATE NOCASE",
             values.len()
         ));
-    }
-    if let Some(minimum) = query.min_rating {
-        values.push(Value::Integer(minimum));
-        sql.push_str(&format!(" AND wf.rating >= ?{}", values.len()));
-    }
-    if let Some(maximum) = query.max_rating {
-        values.push(Value::Integer(maximum));
-        sql.push_str(&format!(" AND wf.rating <= ?{}", values.len()));
     }
     if let Some(status) = query.status {
         values.push(Value::Text(status.as_str().to_owned()));
@@ -614,7 +628,7 @@ fn build_filter(root: &Path, query: &ResolvedQuery) -> (String, Vec<Value>) {
         let index = values.len();
         sql.push_str(&format!(
             " AND (wf.title LIKE ?{index} OR wf.path LIKE ?{index}
-                    OR wf.problem_id LIKE ?{index} OR wf.platform LIKE ?{index}
+                    OR wf.platform LIKE ?{index}
                     OR wf.note LIKE ?{index}
                     OR EXISTS (
                         SELECT 1 FROM file_tags sft JOIN tags st ON st.id = sft.tag_id
@@ -693,9 +707,19 @@ fn attach_tags(transaction: &Transaction<'_>, file_id: i64, tags: &[String]) -> 
     Ok(())
 }
 
+fn ensure_review_schedule(transaction: &Transaction<'_>, file_id: i64) -> AppResult<()> {
+    transaction.execute(
+        "INSERT OR IGNORE INTO archive_reviews (file_id, next_review_at)
+         VALUES (?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+1 day'))",
+        [file_id],
+    )?;
+    Ok(())
+}
+
 fn get_file_by_id(connection: &Connection, id: i64) -> AppResult<ArchiveFile> {
     let sql = format!(
         "SELECT {}, {} FROM workspace_files wf
+         LEFT JOIN archive_reviews ar ON ar.file_id = wf.id
          LEFT JOIN file_tags ft ON ft.file_id = wf.id
          LEFT JOIN tags t ON t.id = ft.tag_id
          WHERE wf.id = ?1 GROUP BY wf.id",
@@ -708,9 +732,10 @@ fn get_file_by_id(connection: &Connection, id: i64) -> AppResult<ArchiveFile> {
 }
 
 fn file_columns() -> &'static str {
-    "wf.id, wf.path, wf.title, wf.platform, wf.problem_id, wf.rating,
+    "wf.id, wf.path, wf.title, wf.platform,
      wf.status, wf.note, wf.favorite, wf.archived,
-     wf.created_at, wf.updated_at, wf.last_opened"
+     wf.created_at, wf.updated_at, wf.last_opened,
+     ar.review_step, ar.next_review_at, ar.last_reviewed_at, ar.completed_at"
 }
 
 fn tags_column() -> &'static str {
@@ -718,21 +743,24 @@ fn tags_column() -> &'static str {
 }
 
 fn map_archive_file(row: &Row<'_>) -> rusqlite::Result<ArchiveFile> {
-    let tags = row.get::<_, String>(13)?;
+    let tags = row.get::<_, String>(15)?;
+    let completed_at = row.get::<_, Option<String>>(14)?;
     Ok(ArchiveFile {
         id: row.get(0)?,
         path: row.get(1)?,
         title: row.get(2)?,
         platform: row.get(3)?,
-        problem_id: row.get(4)?,
-        rating: row.get(5)?,
-        status: ArchiveStatus::from_text(&row.get::<_, String>(6)?),
-        note: row.get(7)?,
-        favorite: row.get(8)?,
-        archived: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
-        last_opened: row.get(12)?,
+        status: ArchiveStatus::from_text(&row.get::<_, String>(4)?),
+        note: row.get(5)?,
+        favorite: row.get(6)?,
+        archived: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        last_opened: row.get(10)?,
+        review_step: row.get(11)?,
+        next_review_at: row.get(12)?,
+        last_reviewed_at: row.get(13)?,
+        review_completed: completed_at.is_some(),
         tags: tags
             .split(TAG_SEPARATOR)
             .filter(|tag| !tag.is_empty())
@@ -757,8 +785,6 @@ struct CollectionRecord {
     id: i64,
     name: String,
     platform: Option<String>,
-    min_rating: Option<i64>,
-    max_rating: Option<i64>,
     status: Option<ArchiveStatus>,
     tags: Vec<String>,
     created_at: String,
@@ -766,18 +792,16 @@ struct CollectionRecord {
 }
 
 fn map_collection_record(row: &Row<'_>) -> rusqlite::Result<CollectionRecord> {
-    let status = row.get::<_, Option<String>>(5)?;
-    let tags = row.get::<_, String>(6)?;
+    let status = row.get::<_, Option<String>>(3)?;
+    let tags = row.get::<_, String>(4)?;
     Ok(CollectionRecord {
         id: row.get(0)?,
         name: row.get(1)?,
         platform: row.get(2)?,
-        min_rating: row.get(3)?,
-        max_rating: row.get(4)?,
         status: status.as_deref().map(ArchiveStatus::from_text),
         tags: serde_json::from_str(&tags).unwrap_or_default(),
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 
@@ -788,7 +812,7 @@ fn load_collection_record(
 ) -> AppResult<CollectionRecord> {
     connection
         .query_row(
-            "SELECT id, name, platform, min_rating, max_rating, status, tags, created_at, updated_at
+            "SELECT id, name, platform, status, tags, created_at, updated_at
              FROM collections WHERE id = ?1 AND workspace_root = ?2 COLLATE NOCASE",
             params![id, path_text(root)],
             map_collection_record,
@@ -811,8 +835,6 @@ fn collection_from_record(
         id: record.id,
         name: record.name,
         platform: record.platform,
-        min_rating: record.min_rating,
-        max_rating: record.max_rating,
         status: record.status,
         tags: record.tags,
         count,
@@ -829,21 +851,12 @@ fn get_collection(connection: &Connection, root: &Path, id: i64) -> AppResult<Sm
 struct SanitizedCollection {
     name: String,
     platform: Option<String>,
-    min_rating: Option<i64>,
-    max_rating: Option<i64>,
     status: Option<ArchiveStatus>,
     tags: Vec<String>,
 }
 
 impl SanitizedCollection {
     fn new(input: &SmartCollectionInput) -> AppResult<Self> {
-        let min_rating = validate_rating(input.min_rating)?;
-        let max_rating = validate_rating(input.max_rating)?;
-        if let (Some(minimum), Some(maximum)) = (min_rating, max_rating) {
-            if minimum > maximum {
-                return Err(archive_error("minimum rating cannot exceed maximum rating"));
-            }
-        }
         Ok(Self {
             name: required_text(&input.name, "collection name", 128)?,
             platform: input
@@ -851,8 +864,6 @@ impl SanitizedCollection {
                 .as_deref()
                 .filter(|value| !value.trim().is_empty())
                 .map(normalize_platform),
-            min_rating,
-            max_rating,
             status: input.status,
             tags: sanitize_tags(&input.tags)?,
         })
@@ -892,13 +903,6 @@ fn checked_cpp_path(root: &Path, path: &str) -> AppResult<String> {
         return Err(archive_error("only .cpp source files can be archived"));
     }
     Ok(result)
-}
-
-fn validate_rating(rating: Option<i64>) -> AppResult<Option<i64>> {
-    if rating.is_some_and(|value| !(0..=10_000).contains(&value)) {
-        return Err(archive_error("rating must be between 0 and 10000"));
-    }
-    Ok(rating)
 }
 
 fn required_text(value: &str, field: &str, maximum: usize) -> AppResult<String> {
@@ -1003,8 +1007,6 @@ mod tests {
                 path: path_text(&first),
                 title: "D. Destiny".to_owned(),
                 platform: "Codeforces".to_owned(),
-                problem_id: "840D".to_owned(),
-                rating: Some(2500),
                 status: ArchiveStatus::Completed,
                 note: "主席树经典题".to_owned(),
                 favorite: true,
@@ -1013,6 +1015,8 @@ mod tests {
         )
         .expect("archive file");
         assert_eq!(archived.tags.len(), 2);
+        assert_eq!(archived.review_step, Some(0));
+        assert!(archived.next_review_at.is_some());
 
         let tag_result = list_files(
             &database_path,
@@ -1024,22 +1028,41 @@ mod tests {
         )
         .expect("tag query");
         assert_eq!(tag_result.len(), 1);
-        assert_eq!(tag_result[0].problem_id, "840D");
+        assert_eq!(tag_result[0].title, "D. Destiny");
 
         let collection = create_collection(
             &database_path,
             &root,
             &SmartCollectionInput {
-                name: "高难数据结构".to_owned(),
+                name: "数据结构复习".to_owned(),
                 platform: None,
-                min_rating: Some(2400),
-                max_rating: Some(3000),
                 status: Some(ArchiveStatus::Completed),
                 tags: vec!["主席树".to_owned(), "FHQ".to_owned()],
             },
         )
         .expect("smart collection");
         assert_eq!(collection.count, 1);
+        let scheduled = list_files(
+            &database_path,
+            &root,
+            &ArchiveQuery {
+                review_only: true,
+                ..ArchiveQuery::default()
+            },
+        )
+        .expect("review schedule query");
+        assert_eq!(scheduled.len(), 1);
+        assert!(!scheduled[0].review_completed);
+
+        let mut reviewed = archived;
+        for expected_step in 1..=REVIEW_INTERVAL_DAYS.len() as i64 {
+            reviewed =
+                complete_review(&database_path, &root, reviewed.id).expect("complete review stage");
+            assert_eq!(reviewed.review_step, Some(expected_step));
+        }
+        assert!(reviewed.review_completed);
+        assert!(reviewed.next_review_at.is_none());
+        assert_eq!(reviewed.status, ArchiveStatus::Mastered);
         assert_eq!(
             fs::read_to_string(&first).expect("source remains readable"),
             "int main() { return 0; }\n"
@@ -1072,7 +1095,6 @@ mod tests {
                 file_ids: inbox.iter().map(|file| file.id).collect(),
                 add_tags: vec!["DP".to_owned()],
                 platform: Some("AtCoder".to_owned()),
-                rating: Some(1800),
                 status: Some(ArchiveStatus::Review),
             },
         )
@@ -1081,6 +1103,7 @@ mod tests {
             list_files(&database_path, &root, &ArchiveQuery::default()).expect("archived list");
         assert_eq!(archived.len(), 2);
         assert!(archived.iter().all(|file| file.tags == ["DP"]));
+        assert!(archived.iter().all(|file| file.review_step == Some(0)));
 
         let renamed = root.join("renamed.cpp");
         fs::rename(&first, &renamed).expect("rename source");

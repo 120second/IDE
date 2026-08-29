@@ -142,6 +142,7 @@ pub fn run() {
             commands::archive::get_archive_file,
             commands::archive::archive_file,
             commands::archive::set_archive_favorite,
+            commands::archive::complete_archive_review,
             commands::archive::bulk_update_archive,
             commands::archive::list_archive_tags,
             commands::archive::list_archive_facets,

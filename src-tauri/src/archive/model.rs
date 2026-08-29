@@ -36,8 +36,6 @@ pub struct ArchiveFile {
     pub path: String,
     pub title: String,
     pub platform: String,
-    pub problem_id: String,
-    pub rating: Option<i64>,
     pub status: ArchiveStatus,
     pub note: String,
     pub favorite: bool,
@@ -46,6 +44,10 @@ pub struct ArchiveFile {
     pub created_at: String,
     pub updated_at: String,
     pub last_opened: Option<String>,
+    pub review_step: Option<i64>,
+    pub next_review_at: Option<String>,
+    pub last_reviewed_at: Option<String>,
+    pub review_completed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -55,9 +57,6 @@ pub struct ArchiveInput {
     pub title: String,
     #[serde(default)]
     pub platform: String,
-    #[serde(default)]
-    pub problem_id: String,
-    pub rating: Option<i64>,
     pub status: ArchiveStatus,
     #[serde(default)]
     pub note: String,
@@ -78,9 +77,9 @@ pub struct ArchiveQuery {
     pub favorite_only: bool,
     #[serde(default)]
     pub recent_only: bool,
+    #[serde(default)]
+    pub review_only: bool,
     pub platform: Option<String>,
-    pub min_rating: Option<i64>,
-    pub max_rating: Option<i64>,
     pub status: Option<ArchiveStatus>,
     pub tag: Option<String>,
     pub collection_id: Option<i64>,
@@ -93,7 +92,6 @@ pub struct ArchiveBulkInput {
     #[serde(default)]
     pub add_tags: Vec<String>,
     pub platform: Option<String>,
-    pub rating: Option<i64>,
     pub status: Option<ArchiveStatus>,
 }
 
@@ -106,23 +104,14 @@ pub struct NamedCount {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DifficultyCount {
-    pub label: String,
-    pub min_rating: Option<i64>,
-    pub max_rating: Option<i64>,
-    pub count: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ArchiveFacets {
     pub inbox_count: i64,
     pub favorite_count: i64,
     pub recent_count: i64,
     pub completed_count: i64,
     pub review_count: i64,
+    pub due_review_count: i64,
     pub platforms: Vec<NamedCount>,
-    pub difficulties: Vec<DifficultyCount>,
     pub tags: Vec<NamedCount>,
 }
 
@@ -131,8 +120,6 @@ pub struct ArchiveFacets {
 pub struct SmartCollectionInput {
     pub name: String,
     pub platform: Option<String>,
-    pub min_rating: Option<i64>,
-    pub max_rating: Option<i64>,
     pub status: Option<ArchiveStatus>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -144,8 +131,6 @@ pub struct SmartCollection {
     pub id: i64,
     pub name: String,
     pub platform: Option<String>,
-    pub min_rating: Option<i64>,
-    pub max_rating: Option<i64>,
     pub status: Option<ArchiveStatus>,
     pub tags: Vec<String>,
     pub count: i64,

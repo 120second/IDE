@@ -1,5 +1,6 @@
 import {
   bulkUpdateArchive,
+  completeArchiveReview,
   createSmartCollection,
   deleteSmartCollection,
   emptyArchiveFacets,
@@ -29,6 +30,7 @@ const EMPTY_QUERY: ArchiveQuery = {
   inboxOnly: false,
   favoriteOnly: false,
   recentOnly: false,
+  reviewOnly: false,
 };
 
 export class ArchiveStore {
@@ -37,10 +39,13 @@ export class ArchiveStore {
   collections = $state.raw<SmartCollection[]>([]);
   knownTags = $state.raw<string[]>([]);
   selectedIds = $state.raw<number[]>([]);
+  reviewFiles = $state.raw<ArchiveFile[]>([]);
   activeView = $state("inbox");
   activeLabel = $state("收件箱");
   search = $state("");
+  reviewSearch = $state("");
   loading = $state(false);
+  reviewLoading = $state(false);
   saving = $state(false);
   workspaceReady = $state(false);
   error = $state("");
@@ -49,7 +54,9 @@ export class ArchiveStore {
 
   private query: ArchiveQuery = { ...EMPTY_QUERY, inboxOnly: true };
   private request = 0;
+  private reviewRequest = 0;
   private searchTimer: ReturnType<typeof setTimeout> | undefined;
+  private reviewSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -58,6 +65,7 @@ export class ArchiveStore {
 
   dispose(): void {
     if (this.searchTimer) clearTimeout(this.searchTimer);
+    if (this.reviewSearchTimer) clearTimeout(this.reviewSearchTimer);
   }
 
   async setWorkspaceReady(ready: boolean): Promise<void> {
@@ -70,6 +78,7 @@ export class ArchiveStore {
       this.files = [];
       this.facets = emptyArchiveFacets();
       this.collections = [];
+      this.reviewFiles = [];
     }
   }
 
@@ -108,6 +117,30 @@ export class ArchiveStore {
     }
   }
 
+  async refreshReviews(): Promise<void> {
+    if (!this.workspaceReady) return;
+    const request = ++this.reviewRequest;
+    this.reviewLoading = true;
+    this.error = "";
+    try {
+      const [files, facets] = await Promise.all([
+        listArchiveFiles({
+          ...EMPTY_QUERY,
+          reviewOnly: true,
+          search: this.reviewSearch,
+        }),
+        listArchiveFacets(),
+      ]);
+      if (request !== this.reviewRequest) return;
+      this.reviewFiles = files;
+      this.facets = facets;
+    } catch (error) {
+      if (request === this.reviewRequest) this.error = errorMessage(error);
+    } finally {
+      if (request === this.reviewRequest) this.reviewLoading = false;
+    }
+  }
+
   async selectView(
     id: string,
     label: string,
@@ -124,6 +157,12 @@ export class ArchiveStore {
     this.search = search;
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = setTimeout(() => void this.refreshFiles(), 180);
+  }
+
+  setReviewSearch(search: string): void {
+    this.reviewSearch = search;
+    if (this.reviewSearchTimer) clearTimeout(this.reviewSearchTimer);
+    this.reviewSearchTimer = setTimeout(() => void this.refreshReviews(), 180);
   }
 
   toggleSelected(id: number, selected: boolean): void {
@@ -193,6 +232,23 @@ export class ArchiveStore {
       await this.refreshAll();
     } catch (error) {
       this.error = errorMessage(error);
+    }
+  }
+
+  async completeReview(file: ArchiveFile): Promise<void> {
+    if (this.saving || file.reviewCompleted) return;
+    this.saving = true;
+    this.error = "";
+    try {
+      const updated = await completeArchiveReview(file.id);
+      this.notice = updated.reviewCompleted
+        ? `已完成“${updated.title}”的全部复习`
+        : `已完成“${updated.title}”的本次复习`;
+      await this.refreshReviews();
+    } catch (error) {
+      this.error = errorMessage(error);
+    } finally {
+      this.saving = false;
     }
   }
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { healthCheck } from "./lib/api/health";
+  import TitleBar from "./lib/components/shell/TitleBar.svelte";
   import Workbench from "./lib/components/shell/Workbench.svelte";
   import type { EditorWorkspace } from "./lib/editor/workspace.svelte";
   import {
@@ -203,16 +204,21 @@
   <title>LightCP</title>
 </svelte:head>
 
-{#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
-  <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {backendState} {health} />
-{:else}
-  <main class="boot-screen" aria-live="polite">
-    <div class="boot-mark">L</div>
-    {#if editorLoadError}
-      <p>编辑器加载失败</p>
-      <span>{editorLoadError}</span>
+<div class="window-frame">
+  <TitleBar />
+  <div class="window-content">
+    {#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
+      <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {backendState} {health} />
     {:else}
-      <p>正在启动 LightCP…</p>
+      <main class="boot-screen" aria-live="polite">
+        <div class="boot-mark">L</div>
+        {#if editorLoadError}
+          <p>编辑器加载失败</p>
+          <span>{editorLoadError}</span>
+        {:else}
+          <p>正在启动 LightCP…</p>
+        {/if}
+      </main>
     {/if}
-  </main>
-{/if}
+  </div>
+</div>

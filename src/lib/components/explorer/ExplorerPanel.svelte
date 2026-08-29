@@ -6,6 +6,7 @@
   import Icon from "../shell/Icon.svelte";
   import FileTree from "./FileTree.svelte";
   import ArchivePanel from "../archive/ArchivePanel.svelte";
+  import ReviewPanel from "../archive/ReviewPanel.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
   import ContextMenu from "../ux/ContextMenu.svelte";
   import type { KeybindingMap } from "../../keybindings";
@@ -27,7 +28,7 @@
 
   let { fileWorkspace, editor, archiveStore, ux, keybindings, newFile }: Props = $props();
   let menu = $state<ContextMenuState>();
-  let view = $state<"files" | "archive">("files");
+  let view = $state<"files" | "archive" | "review">("files");
   let rootDropActive = $state(false);
   let selectedEntry = $derived(
     fileWorkspace.visibleRows.find((row) => row.entry.path === fileWorkspace.selectedPath)?.entry,
@@ -134,8 +135,11 @@
     <div class="explorer-view-tabs" role="tablist" aria-label="资源管理器视图">
       <button class:active={view === "files"} role="tab" aria-selected={view === "files"} onclick={() => (view = "files")}>文件</button>
       <button class:active={view === "archive"} role="tab" aria-selected={view === "archive"} onclick={() => { view = "archive"; void archiveStore.refreshAll(); }}>代码归档</button>
+      <button class:active={view === "review"} role="tab" aria-selected={view === "review"} onclick={() => { view = "review"; void archiveStore.refreshReviews(); }}>复习题目{archiveStore.facets.dueReviewCount > 0 ? ` ${archiveStore.facets.dueReviewCount}` : ""}</button>
     </div>
-    {#if view === "archive"}
+    {#if view === "review"}
+      <ReviewPanel {archiveStore} />
+    {:else if view === "archive"}
       <ArchivePanel {archiveStore} {keybindings} />
     {:else}
       <header
