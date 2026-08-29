@@ -3,6 +3,7 @@
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { TemplateMetadata } from "../../types/templates";
   import Icon from "../shell/Icon.svelte";
+  import TemplatePrintDialog from "./TemplatePrintDialog.svelte";
 
   interface Props {
     templateStore: TemplateStore;
@@ -10,6 +11,8 @@
 
   let { templateStore }: Props = $props();
   let historyOpen = $state(false);
+  let printOpen = $state(false);
+  let printButton: HTMLButtonElement;
   const TEMPLATE_ROW_HEIGHT = 62;
   const TEMPLATE_OVERSCAN = 8;
   let listViewport: HTMLDivElement;
@@ -121,6 +124,11 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
   }
+
+  function closePrintDialog(): void {
+    printOpen = false;
+    requestAnimationFrame(() => printButton?.focus());
+  }
 </script>
 
 <svelte:window onclick={collapseFromBlank} />
@@ -131,7 +139,10 @@
       <strong>模板中心</strong>
       <span>{templateStore.kind === "snippet" ? "可重复使用的代码片段" : "新文件的起始模板"}</span>
     </div>
-    <button class="primary-button" onclick={() => templateStore.beginCreate()}><Icon name="plus" size={13} /> 新建</button>
+    <div class="template-center-actions">
+      <button class="secondary-button" bind:this={printButton} onclick={() => (printOpen = true)}><Icon name="printer" size={13} /> 打印/导出</button>
+      <button class="primary-button" onclick={() => templateStore.beginCreate()}><Icon name="plus" size={13} /> 新建</button>
+    </div>
   </header>
 
   <div class="template-center-body" class:detail-open={detailOpen}>
@@ -295,4 +306,12 @@
       </div>
     </div>
   </div>
+{/if}
+
+{#if printOpen}
+  <TemplatePrintDialog
+    categories={templateStore.categories}
+    selectedCategoryId={templateStore.collection === "all" ? templateStore.selectedCategoryId : undefined}
+    onclose={closePrintDialog}
+  />
 {/if}

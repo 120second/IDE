@@ -97,6 +97,7 @@ pub fn run() {
             commands::templates::list_templates,
             commands::templates::search_template_completions,
             commands::templates::get_template,
+            commands::templates::get_templates,
             commands::templates::create_template,
             commands::templates::update_template,
             commands::templates::delete_template,

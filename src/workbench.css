@@ -3138,3 +3138,1310 @@ button.status-item:hover {
   box-shadow: none !important;
   transition: none !important;
 }
+
+/* Template handbook: compact A4 preview and print-only document. */
+.template-center-actions {
+  display: flex !important;
+  min-width: auto !important;
+  flex: 0 0 auto !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+}
+
+.template-center-actions button,
+.template-print-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.template-print-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  padding: 16px;
+  place-items: center;
+  background: color-mix(in srgb, #020806 78%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.template-print-dialog {
+  display: flex;
+  width: min(1480px, calc(100vw - 32px));
+  height: min(920px, calc(100vh - 32px));
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-strong));
+  border-radius: 10px;
+  outline: 0;
+  background: color-mix(in srgb, var(--panel-background) 97%, #03100c);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.52);
+}
+
+.template-print-dialog:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border-strong));
+}
+
+.template-print-dialog-header {
+  display: flex;
+  min-height: 67px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 12px 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 36%),
+    color-mix(in srgb, var(--tab-background) 92%, transparent);
+}
+
+.template-print-dialog-header > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.template-print-eyebrow {
+  color: var(--accent-strong);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+
+.template-print-dialog-header strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.template-print-dialog-header small {
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+.template-print-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.template-print-submit {
+  min-width: 126px;
+}
+
+.template-print-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin-left: 2px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.template-print-close:hover {
+  border-color: var(--border);
+  color: var(--text-primary);
+  background: var(--hover-background);
+}
+
+.template-print-dialog-body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.template-print-settings {
+  display: flex;
+  width: 254px;
+  min-width: 254px;
+  min-height: 0;
+  flex-direction: column;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--sidebar-background) 72%, transparent);
+  scrollbar-width: thin;
+}
+
+.template-print-settings > section {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.template-print-settings section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.template-print-settings section > header > span {
+  color: var(--text-primary);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.template-print-settings section > header > small {
+  color: var(--accent-strong);
+  font-size: 8.5px;
+}
+
+.template-print-settings label:not(.template-print-check) {
+  display: grid;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.template-print-settings select {
+  width: 100%;
+  height: 30px;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  background: var(--input-background);
+  font-size: 9.5px;
+}
+
+.template-print-layout-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.template-print-layout-options button {
+  display: grid;
+  min-height: 42px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--input-background) 72%, transparent);
+  text-align: left;
+}
+
+.template-print-layout-options button:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: var(--hover-background);
+}
+
+.template-print-layout-options button.active {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 12%, var(--input-background));
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+.template-print-layout-options button strong {
+  overflow: hidden;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-print-layout-options button small {
+  color: var(--text-muted);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.template-print-layout-summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 8.5px;
+  line-height: 1.5;
+}
+
+.template-print-layout-summary strong {
+  color: var(--accent-strong);
+  font-size: 10px;
+}
+
+.template-print-check {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+}
+
+.template-print-check input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.template-print-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: auto 12px 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--border));
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--warning) 72%, var(--text-secondary));
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+  font-size: 8.5px;
+  line-height: 1.5;
+}
+
+.template-print-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.template-print-preview {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 0, color-mix(in srgb, var(--accent) 6%, transparent), transparent 34%),
+    color-mix(in srgb, var(--window-background) 88%, #020806);
+  scrollbar-width: thin;
+}
+
+.template-print-state {
+  display: flex;
+  height: 100%;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.template-print-state strong {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.template-print-state small {
+  max-width: 320px;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.template-print-state.error svg {
+  color: var(--danger);
+}
+
+.template-print-state button {
+  margin-top: 4px;
+  color: var(--accent-strong);
+  background: transparent;
+  font-size: 9.5px;
+}
+
+.template-print-spinner {
+  width: 21px;
+  height: 21px;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: template-print-spin 700ms linear infinite;
+}
+
+@keyframes template-print-spin {
+  to { transform: rotate(360deg); }
+}
+
+.template-print-document {
+  --print-ink: #17211d;
+  --print-muted: #62726b;
+  --print-rule: #cbd6d1;
+  --print-accent: #087f64;
+  --print-code-background: #0d1117;
+  --print-code-foreground: #e6edf3;
+  box-sizing: border-box;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 10mm;
+  color: var(--print-ink);
+  background: #fff;
+  box-shadow: 0 18px 54px rgb(0 0 0 / 0.38), 0 0 0 1px rgb(255 255 255 / 0.08);
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.print-template-card {
+  min-width: 0;
+  margin: 0 0 3.2mm;
+  break-inside: avoid-page;
+}
+
+.print-template-heading {
+  margin: 0 0 1.2mm;
+  padding: 0 0.5mm;
+  break-after: avoid-page;
+}
+
+.print-template-heading h3 {
+  margin: 0;
+  color: var(--print-ink);
+  font-size: 9pt;
+  line-height: 1.3;
+}
+
+.print-template-heading p {
+  overflow: hidden;
+  margin: 0.5mm 0 0;
+  color: var(--print-muted);
+  font-size: 6.4pt;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.print-template-heading div {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 0.7mm;
+  color: #3f5149;
+  font-size: 6.8pt;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.print-code-block {
+  overflow: hidden;
+  padding: 2.6mm 3mm;
+  border: 0.25mm solid #26323c;
+  border-radius: 2mm;
+  color: var(--print-code-foreground);
+  background: var(--print-code-background);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  font-family: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  font-size: 7.8pt;
+  font-variant-ligatures: none;
+  line-height: 1.36;
+  tab-size: 4;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.print-template-card.is-compact .print-code-block {
+  padding: 2.2mm 2.4mm;
+  font-size: 7.5pt;
+}
+
+.print-template-card.is-compact .print-template-heading h3 {
+  font-size: 8.3pt;
+}
+
+.print-template-card.is-compact .print-template-heading p {
+  font-size: 6.1pt;
+}
+
+.print-code-line {
+  display: flex;
+  min-width: 0;
+  break-inside: avoid;
+}
+
+.print-code-line code {
+  min-width: 0;
+  flex: 1;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.print-line-number {
+  width: 3.2ch;
+  flex: 0 0 3.2ch;
+  margin-right: 1.1ch;
+  color: #56616d;
+  text-align: right;
+  user-select: none;
+}
+
+.print-code-block .tok-keyword,
+.print-code-block .tok-bool,
+.print-code-block .tok-atom { color: #ff7b72; }
+.print-code-block .tok-typeName,
+.print-code-block .tok-className,
+.print-code-block .tok-namespace { color: #79c0ff; }
+.print-code-block .tok-string,
+.print-code-block .tok-string2 { color: #a5d6ff; }
+.print-code-block .tok-number,
+.print-code-block .tok-literal { color: #79c0ff; }
+.print-code-block .tok-variableName,
+.print-code-block .tok-propertyName { color: #ffa657; }
+.print-code-block .tok-comment { color: #8b949e; font-style: italic; }
+.print-code-block .tok-meta,
+.print-code-block .tok-macroName { color: #d2a8ff; }
+.print-code-block .tok-operator { color: #ff7b72; }
+.print-code-block .tok-invalid { color: #fff; background: #8e2635; }
+
+@media (max-width: 920px) {
+  .template-print-overlay {
+    padding: 8px;
+  }
+
+  .template-print-dialog {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+  }
+
+  .template-print-settings {
+    width: 220px;
+    min-width: 220px;
+  }
+
+  .template-print-preview {
+    padding: 14px;
+  }
+
+  .template-print-dialog-header small,
+  .template-print-header-actions > .secondary-button {
+    display: none;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    background: #fff !important;
+  }
+
+  body.template-print-active * {
+    visibility: hidden !important;
+  }
+
+  body.template-print-active .template-print-document,
+  body.template-print-active .template-print-document * {
+    visibility: visible !important;
+  }
+
+  body.template-print-active .template-print-overlay {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+  }
+
+  body.template-print-active .app-shell,
+  body.template-print-active .shell-body,
+  body.template-print-active .workbench,
+  body.template-print-active .editor-column,
+  body.template-print-active .template-center {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  body.template-print-active .template-print-dialog,
+  body.template-print-active .template-print-dialog-body,
+  body.template-print-active .template-print-preview {
+    display: block !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  body.template-print-active .template-print-dialog-header,
+  body.template-print-active .template-print-settings {
+    display: none !important;
+  }
+
+  body.template-print-active .template-print-document {
+    position: static !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .print-template-card {
+    break-inside: avoid-page;
+  }
+}
+
+/* Template handbook v2: explicit A4 book pages shared by preview and PDF. */
+.template-print-preview {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.template-book-toolbar {
+  display: grid;
+  min-height: 42px;
+  flex: 0 0 42px;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-background) 92%, transparent);
+}
+
+.template-book-toolbar button {
+  display: inline-flex;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  background: var(--input-background);
+  font-size: 9px;
+}
+
+.template-book-toolbar button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  color: var(--text-primary);
+  background: var(--hover-background);
+}
+
+.template-book-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.template-book-page-controls {
+  display: flex;
+  grid-column: 2;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.template-book-page-controls > span {
+  min-width: 148px;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+.template-book-page-controls > span strong {
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.template-book-zoom-controls {
+  display: flex;
+  min-width: 0;
+  grid-column: 3;
+  align-items: center;
+  justify-self: end;
+  gap: 5px;
+}
+
+.template-book-zoom-controls label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.template-book-zoom-controls input[type="range"] {
+  width: 78px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.template-book-zoom-controls output {
+  width: 33px;
+  color: var(--text-muted);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.template-book-zoom-controls .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.template-book-page-arrow {
+  width: 28px;
+  padding: 0 !important;
+}
+
+.template-book-page-arrow.previous svg {
+  transform: rotate(180deg);
+}
+
+.template-book-viewport {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 24px 28px 34px;
+  background:
+    radial-gradient(ellipse at 50% 16%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 42%),
+    linear-gradient(135deg, color-mix(in srgb, var(--window-background) 94%, #010604), #07110e);
+  scrollbar-width: thin;
+  cursor: grab;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+
+.template-book-viewport.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.template-book-canvas {
+  --template-preview-scale: 0.82;
+  position: relative;
+  width: calc(var(--print-spread-width, 420mm) * var(--template-preview-scale));
+  height: calc(var(--print-page-height, 297mm) * var(--template-preview-scale));
+  margin: 0 auto;
+}
+
+.template-print-document {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  width: max-content;
+  min-height: 0;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  perspective: 2400px;
+  transform: scale(var(--template-preview-scale));
+  transform-origin: top left;
+}
+
+.template-print-document.single-page-right {
+  padding-left: var(--print-page-width, 210mm);
+}
+
+.template-print-document.single-page-left {
+  padding-right: var(--print-page-width, 210mm);
+}
+
+.template-book-page {
+  --print-ink: #17211d;
+  --print-muted: #62726b;
+  --print-rule: #cbd6d1;
+  --print-accent: #087f64;
+  --print-code-background: #0d1117;
+  --print-code-foreground: #e6edf3;
+  position: relative;
+  box-sizing: border-box;
+  display: none;
+  width: var(--print-page-width, 210mm);
+  height: var(--print-page-height, 297mm);
+  flex: 0 0 var(--print-page-width, 210mm);
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--print-margin-top, 9.5mm) var(--print-margin-right, 11mm) var(--print-margin-bottom, 9.5mm) var(--print-margin-left, 11mm);
+  color: var(--print-ink);
+  background:
+    linear-gradient(90deg, rgb(12 36 29 / 0.035), transparent 7mm),
+    #fff;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.template-book-page.is-visible {
+  display: flex;
+  animation: template-book-page-open 190ms ease-out both;
+}
+
+.template-book-page.is-left-page {
+  border-radius: 5px 0 0 5px;
+  box-shadow: -14px 18px 46px rgb(0 0 0 / 0.34), inset -1.8mm 0 2.5mm rgb(12 36 29 / 0.07);
+  transform-origin: right center;
+}
+
+.template-book-page.is-right-page {
+  border-radius: 0 5px 5px 0;
+  box-shadow: 14px 18px 46px rgb(0 0 0 / 0.34), inset 1.8mm 0 2.5mm rgb(12 36 29 / 0.07);
+  transform-origin: left center;
+}
+
+.template-book-page.is-left-page::after,
+.template-book-page.is-right-page::after {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 1.6mm;
+  pointer-events: none;
+  content: "";
+}
+
+.template-book-page.is-left-page::after {
+  right: 0;
+  background: linear-gradient(90deg, transparent, rgb(0 25 18 / 0.12));
+}
+
+.template-book-page.is-right-page::after {
+  left: 0;
+  background: linear-gradient(90deg, rgb(0 25 18 / 0.12), transparent);
+}
+
+@keyframes template-book-page-open {
+  from {
+    opacity: 0.42;
+    transform: rotateY(2.5deg) translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: rotateY(0) translateY(0);
+  }
+}
+
+.template-book-running-header {
+  display: flex;
+  height: 5mm;
+  flex: 0 0 5mm;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6mm;
+  padding: 0 0.6mm 1mm;
+  border-bottom: 0.2mm solid var(--print-rule);
+  color: var(--print-muted);
+  font-size: 5.8pt;
+  letter-spacing: 0.04em;
+}
+
+.template-book-running-header span:last-child {
+  overflow: hidden;
+  max-width: 60%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-book-page-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: 2mm;
+}
+
+.template-book-page-footer {
+  display: grid;
+  height: 5mm;
+  flex: 0 0 5mm;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: end;
+  gap: 3mm;
+  padding: 1.1mm 0.6mm 0;
+  border-top: 0.2mm solid var(--print-rule);
+  color: var(--print-muted);
+  font-size: 5.8pt;
+}
+
+.template-book-page-footer > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-book-page-footer strong {
+  display: grid;
+  width: 5mm;
+  height: 5mm;
+  margin-bottom: -1.5mm;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--print-accent);
+  font-size: 7pt;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-book-page-footer > span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-book-title {
+  margin-bottom: 6mm;
+  padding: 5mm 0 4mm;
+  border-bottom: 0.8mm solid var(--print-accent);
+}
+
+.template-book-title > span {
+  color: var(--print-accent);
+  font-size: 6.2pt;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.template-book-title h1 {
+  margin: 1.2mm 0 1.5mm;
+  color: var(--print-ink);
+  font-size: 22pt;
+  line-height: 1.15;
+}
+
+.template-book-title p {
+  margin: 0;
+  color: var(--print-muted);
+  font-size: 6.8pt;
+}
+
+.template-book-toc-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 6mm;
+  margin-bottom: 4mm;
+}
+
+.template-book-toc-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 2.5mm;
+}
+
+.template-book-toc-heading > div > span {
+  color: var(--print-accent);
+  font-size: 7pt;
+  font-weight: 800;
+}
+
+.template-book-toc-heading h2 {
+  margin: 0;
+  color: var(--print-ink);
+  font-size: 14pt;
+}
+
+.template-book-toc-heading small {
+  color: var(--print-muted);
+  font-size: 6pt;
+}
+
+.template-book-toc-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8mm;
+}
+
+.template-book-toc-column {
+  display: grid;
+  align-content: start;
+  gap: 0;
+}
+
+.template-book-toc-major {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 3mm;
+  margin: 2.4mm 0 0.9mm;
+  padding: 1.2mm 1.5mm;
+  border-left: 0.8mm solid var(--print-accent);
+  color: var(--print-ink);
+  background: #e7f3ee;
+  font-size: 8pt;
+  line-height: 1.2;
+}
+
+.template-book-toc-major small,
+.template-book-toc-minor small {
+  color: var(--print-accent);
+  font-size: 6pt;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-book-toc-column > .template-book-toc-major:first-child {
+  margin-top: 0;
+}
+
+.template-book-toc-minor {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 3mm;
+  margin: 1.4mm 0 0.4mm 2.2mm;
+  padding: 0 0.8mm;
+  color: #41554d;
+  font-size: 6.4pt;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.template-print-band-columns {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--print-column-gap, 5.5mm);
+}
+
+.template-print-flow-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.template-print-band-full {
+  min-width: 0;
+}
+
+.template-print-chapter-heading {
+  margin: var(--print-chapter-gap, 4.2mm) 0 1.7mm;
+  padding: 1mm 1.4mm;
+  border-top: 0.55mm solid var(--print-accent);
+  border-bottom: 0.2mm solid var(--print-rule);
+  color: var(--print-ink);
+  background: linear-gradient(90deg, #e5f2ed, transparent 78%);
+}
+
+.template-print-flow-column > .template-print-chapter-heading:first-child,
+.template-print-band-full:first-child > .template-print-chapter-heading:first-child {
+  margin-top: 0;
+}
+
+.template-print-chapter-heading h2 {
+  margin: 0;
+  font-size: 9pt;
+  font-weight: 800;
+  line-height: 1.16;
+}
+
+.template-book-page .template-print-section-heading {
+  display: flex;
+  align-items: center;
+  margin: var(--print-section-gap, 3.2mm) 0 1.5mm;
+  padding: 0.75mm 1.2mm;
+  border: 0;
+  border-left: 0.65mm solid color-mix(in srgb, var(--print-accent) 72%, #fff);
+  color: #30453d;
+  background: #f0f6f3;
+  break-after: avoid-page;
+}
+
+.template-print-chapter-heading + .template-print-section-heading,
+.template-print-flow-column > .template-print-section-heading:first-child,
+.template-print-band-full:first-child > .template-print-section-heading:first-child {
+  margin-top: 0;
+}
+
+.template-book-page .template-print-section-heading h3 {
+  margin: 0;
+  font-size: 7.7pt;
+  font-weight: 750;
+  line-height: 1.18;
+}
+
+.template-book-toc-column a {
+  display: grid;
+  min-width: 0;
+  min-height: 5.8mm;
+  grid-template-columns: minmax(0, auto) minmax(8mm, 1fr) auto;
+  align-items: end;
+  gap: 1.5mm;
+  width: calc(100% - 4.4mm);
+  margin-left: 4.4mm;
+  padding: 0.55mm 1.2mm;
+  border-radius: 1mm;
+  color: var(--print-ink);
+  text-decoration: none;
+}
+
+.template-book-toc-column a:hover,
+.template-book-toc-column a:focus-visible {
+  outline: 0;
+  background: #edf6f2;
+}
+
+.template-book-toc-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.5mm;
+}
+
+.template-book-toc-copy strong {
+  overflow: hidden;
+  font-size: 6.8pt;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-book-toc-copy small {
+  overflow: hidden;
+  color: var(--print-muted);
+  font-size: 5.6pt;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-book-toc-leader {
+  min-width: 8mm;
+  margin-bottom: 1mm;
+  border-bottom: 0.25mm dotted #9baaa4;
+}
+
+.template-book-toc-page-number {
+  color: var(--print-accent);
+  font-size: 7pt;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-book-page .print-template-card {
+  margin-bottom: 3.2mm;
+  break-inside: auto;
+}
+
+.template-book-page .print-template-heading {
+  margin-bottom: 1.7mm;
+  padding: 0 0.2mm;
+}
+
+.template-book-page .print-template-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2.5mm;
+}
+
+.template-book-page .print-template-heading h3 {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 8.6pt;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-book-page .print-template-heading h3 span {
+  color: var(--print-muted);
+  font-size: 6.5pt;
+  font-weight: 500;
+}
+
+.template-book-page .print-template-heading p {
+  max-width: 48%;
+  flex: 0 1 auto;
+  margin: 0;
+  font-size: 5.8pt;
+  text-align: right;
+}
+
+.template-book-page .print-template-heading div {
+  margin-top: 0.4mm;
+  font-size: 6.1pt;
+  line-height: 1.3;
+}
+
+.template-book-page .print-code-block {
+  padding: 2mm 2.6mm;
+  border-radius: 1.2mm;
+  font-size: var(--print-code-font-size, 7.6pt);
+  line-height: var(--print-code-line-height, 1.22);
+}
+
+.template-book-page .print-template-card.is-compact .print-code-block {
+  padding: 2mm 2.5mm;
+  font-size: var(--print-code-font-size, 7.6pt);
+}
+
+.template-book-page .print-template-card.is-compact .print-template-heading h3 {
+  font-size: 8.2pt;
+}
+
+@media (max-width: 1180px) {
+  .template-book-zoom-controls input[type="range"] {
+    width: 58px;
+  }
+
+  .template-book-page-controls > span {
+    min-width: 116px;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html,
+  body.template-print-active,
+  body.template-print-active #app {
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  body.template-print-active .app-shell,
+  body.template-print-active .shell-body,
+  body.template-print-active .workbench,
+  body.template-print-active .editor-column {
+    position: static !important;
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  body.template-print-active .workspace-background,
+  body.template-print-active .activity-bar,
+  body.template-print-active .sidebar,
+  body.template-print-active .status-bar,
+  body.template-print-active .editor-column > :not(.template-print-overlay) {
+    display: none !important;
+  }
+
+  body.template-print-active .template-print-overlay {
+    position: static !important;
+    inset: auto !important;
+  }
+
+  body.template-print-active .template-book-toolbar {
+    display: none !important;
+  }
+
+  body.template-print-active .template-book-viewport {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+
+  body.template-print-active .template-book-canvas {
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+  }
+
+  body.template-print-active .template-print-document,
+  body.template-print-active .template-print-document.single-page-right,
+  body.template-print-active .template-print-document.single-page-left {
+    display: block !important;
+    width: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+    perspective: none !important;
+  }
+
+  body.template-print-active .template-book-page {
+    display: flex !important;
+    width: var(--print-page-width, 210mm) !important;
+    height: var(--print-page-height, 297mm) !important;
+    min-height: var(--print-page-height, 297mm) !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    transform: none !important;
+    animation: none !important;
+    break-after: page !important;
+    page-break-after: always !important;
+  }
+
+  body.template-print-active .template-book-page:last-child {
+    break-after: auto !important;
+    page-break-after: auto !important;
+  }
+
+  .template-book-toc-column a:hover,
+  .template-book-toc-column a:focus-visible {
+    background: transparent;
+  }
+
+  body.template-print-active .print-code-block {
+    border-color: #c8cfcc !important;
+    color: #17211d !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    print-color-adjust: economy;
+    -webkit-print-color-adjust: economy;
+  }
+
+  body.template-print-active .print-code-block .tok-keyword,
+  body.template-print-active .print-code-block .tok-bool,
+  body.template-print-active .print-code-block .tok-atom {
+    color: #111 !important;
+    font-weight: 700;
+  }
+
+  body.template-print-active .print-code-block .tok-typeName,
+  body.template-print-active .print-code-block .tok-className,
+  body.template-print-active .print-code-block .tok-namespace,
+  body.template-print-active .print-code-block .tok-variableName,
+  body.template-print-active .print-code-block .tok-propertyName,
+  body.template-print-active .print-code-block .tok-number,
+  body.template-print-active .print-code-block .tok-literal {
+    color: #27332e !important;
+  }
+
+  body.template-print-active .print-code-block .tok-string,
+  body.template-print-active .print-code-block .tok-string2,
+  body.template-print-active .print-code-block .tok-meta,
+  body.template-print-active .print-code-block .tok-macroName,
+  body.template-print-active .print-code-block .tok-operator {
+    color: #3f4b46 !important;
+  }
+
+  body.template-print-active .print-code-block .tok-comment {
+    color: #69736f !important;
+    font-style: italic;
+  }
+}

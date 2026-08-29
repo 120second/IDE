@@ -56,6 +56,12 @@ export function getTemplate(id: number): Promise<TemplateDetail> {
   return invoke<TemplateDetail>("get_template", { id }).then(normalizeDetail);
 }
 
+export function getTemplates(ids: number[]): Promise<TemplateDetail[]> {
+  return isTauri()
+    ? invoke<TemplateDetail[]>("get_templates", { ids }).then((items) => items.map(normalizeDetail))
+    : Promise.resolve([]);
+}
+
 export function createTemplate(input: TemplateInput): Promise<TemplateDetail> {
   return invoke<TemplateDetail>("create_template", { input }).then(normalizeDetail);
 }

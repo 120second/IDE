@@ -80,6 +80,14 @@ pub fn get_template(id: i64, state: State<'_, AppState>) -> Result<TemplateDetai
 }
 
 #[tauri::command(async)]
+pub fn get_templates(
+    ids: Vec<i64>,
+    state: State<'_, AppState>,
+) -> Result<Vec<TemplateDetail>, CommandError> {
+    template_core::get_templates(&state.paths.database_file, &ids).map_err(CommandError::from)
+}
+
+#[tauri::command(async)]
 pub fn create_template(
     input: TemplateInput,
     state: State<'_, AppState>,

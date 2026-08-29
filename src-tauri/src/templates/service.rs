@@ -193,6 +193,13 @@ pub fn get_template(database_path: &Path, id: i64) -> AppResult<TemplateDetail> 
     get_template_from_connection(&connection, id)
 }
 
+pub fn get_templates(database_path: &Path, ids: &[i64]) -> AppResult<Vec<TemplateDetail>> {
+    let connection = connect(database_path)?;
+    ids.iter()
+        .map(|id| get_template_from_connection(&connection, *id))
+        .collect()
+}
+
 pub fn create_template(database_path: &Path, input: &TemplateInput) -> AppResult<TemplateDetail> {
     let input = SanitizedInput::new(input)?;
     let mut connection = connect(database_path)?;
@@ -818,6 +825,12 @@ mod tests {
         filter.category_id = Some(category.id);
         let sorted = list_templates(&database_path, &filter).expect("manual list");
         assert_eq!(sorted[0].id, second.metadata.id);
+
+        let details = get_templates(&database_path, &[second.metadata.id, first.metadata.id])
+            .expect("batch details");
+        assert_eq!(details.len(), 2);
+        assert_eq!(details[0].metadata.name, "MCMF");
+        assert_eq!(details[1].metadata.name, "Dinic");
         cleanup_database(database_path);
     }
 

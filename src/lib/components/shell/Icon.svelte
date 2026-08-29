@@ -25,6 +25,7 @@
     | "command"
     | "chevron-right"
     | "folder-plus"
+    | "printer"
     | "refresh"
     | "play"
     | "pause"
@@ -104,6 +105,9 @@
     <path d="m9 5 7 7-7 7" />
   {:else if name === "folder-plus"}
     <path d="M3.5 6h6l2 2h9v10.5h-17zM15.5 11v5M13 13.5h5" />
+  {:else if name === "printer"}
+    <path d="M7 8V4h10v4M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+    <path d="M7 14h10v6H7zM17.5 11h.01" />
   {:else if name === "refresh"}
     <path d="M19 7v5h-5M5 17v-5h5M18 12a6.5 6.5 0 0 0-11-4.5L5 10M6 12a6.5 6.5 0 0 0 11 4.5l2-2.5" />
   {:else if name === "play"}
