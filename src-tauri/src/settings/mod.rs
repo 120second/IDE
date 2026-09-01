@@ -35,6 +35,15 @@ pub enum UiDensity {
     Comfortable,
 }
 
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum BackgroundFit {
+    #[default]
+    Cover,
+    Contain,
+    Fill,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CustomThemeVariant {
@@ -77,6 +86,14 @@ pub struct AppSettings {
     pub active_custom_theme: String,
     pub custom_themes: Vec<CustomThemeDefinition>,
     pub ui_density: UiDensity,
+    pub background_image: String,
+    pub background_image_name: String,
+    pub background_image_opacity: f64,
+    pub background_dim: f64,
+    pub background_fit: BackgroundFit,
+    pub sidebar_opacity: f64,
+    pub editor_opacity: f64,
+    pub surface_blur: f64,
     pub font_family: String,
     pub font_size: f64,
     pub line_height: f64,
@@ -100,6 +117,14 @@ impl Default for AppSettings {
             active_custom_theme: String::new(),
             custom_themes: Vec::new(),
             ui_density: UiDensity::Compact,
+            background_image: String::new(),
+            background_image_name: String::new(),
+            background_image_opacity: 0.42,
+            background_dim: 0.28,
+            background_fit: BackgroundFit::Cover,
+            sidebar_opacity: 0.92,
+            editor_opacity: 0.96,
+            surface_blur: 10.0,
             font_family: "Cascadia Code, JetBrains Mono, Consolas, monospace".to_owned(),
             font_size: 14.0,
             line_height: 1.55,
@@ -119,6 +144,18 @@ impl Default for AppSettings {
 
 impl AppSettings {
     pub fn sanitize(mut self) -> Self {
+        self.background_image = self.background_image.trim().chars().take(4096).collect();
+        self.background_image_name = self
+            .background_image_name
+            .trim()
+            .chars()
+            .take(256)
+            .collect();
+        self.background_image_opacity = finite_clamp(self.background_image_opacity, 0.0, 1.0, 0.42);
+        self.background_dim = finite_clamp(self.background_dim, 0.0, 0.8, 0.28);
+        self.sidebar_opacity = finite_clamp(self.sidebar_opacity, 0.2, 1.0, 0.92);
+        self.editor_opacity = finite_clamp(self.editor_opacity, 0.2, 1.0, 0.96);
+        self.surface_blur = finite_clamp(self.surface_blur, 0.0, 20.0, 10.0);
         self.font_size = finite_clamp(self.font_size, 11.0, 24.0, 14.0);
         self.line_height = finite_clamp(self.line_height, 1.2, 2.0, 1.55);
         self.run_timeout_ms = self.run_timeout_ms.clamp(100, 60_000);
@@ -360,6 +397,12 @@ mod tests {
     #[test]
     fn settings_are_sanitized_to_supported_ranges() {
         let settings = AppSettings {
+            background_image: "  C:\\Pictures\\wallpaper.png  ".to_owned(),
+            background_image_opacity: -2.0,
+            background_dim: 5.0,
+            sidebar_opacity: 0.1,
+            editor_opacity: f64::NAN,
+            surface_blur: 100.0,
             font_size: 3.0,
             line_height: 9.0,
             font_family: "   ".to_owned(),
@@ -368,6 +411,12 @@ mod tests {
         }
         .sanitize();
 
+        assert_eq!(settings.background_image, r"C:\Pictures\wallpaper.png");
+        assert_eq!(settings.background_image_opacity, 0.0);
+        assert_eq!(settings.background_dim, 0.8);
+        assert_eq!(settings.sidebar_opacity, 0.2);
+        assert_eq!(settings.editor_opacity, 0.96);
+        assert_eq!(settings.surface_blur, 20.0);
         assert_eq!(settings.font_size, 11.0);
         assert_eq!(settings.line_height, 2.0);
         assert!(!settings.font_family.is_empty());

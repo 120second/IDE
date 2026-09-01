@@ -7,7 +7,7 @@
   import type { GeneratorStore } from "../../stores/generator.svelte";
   import type { DebugStore } from "../../stores/debug.svelte";
   import type { StressStore } from "../../stores/stress.svelte";
-  import type { ShellStore } from "../../stores/shell.svelte";
+  import type { SettingsPage, ShellStore } from "../../stores/shell.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
   import type { LspStore } from "../../stores/lsp.svelte";
@@ -33,7 +33,9 @@
   import type { WorkbenchCommand } from "../../types/commands";
   import FileTemplateDialog from "../templates/FileTemplateDialog.svelte";
   import ThemeStudio from "../settings/ThemeStudio.svelte";
+  import SettingsWindow from "../settings/SettingsWindow.svelte";
   import EditorBreadcrumbs from "../editor/EditorBreadcrumbs.svelte";
+  import SettingsMenu from "./SettingsMenu.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -57,6 +59,7 @@
   let quickFileOpen = $state(false);
   let commandPaletteOpen = $state(false);
   let fileDialogParent = $state<string>();
+  let settingsMenuAnchor = $state<HTMLButtonElement>();
   let TemplateReferenceWindow = $state.raw<
     (typeof import("../editor/TemplateReferenceWindow.svelte"))["default"]
   >();
@@ -92,7 +95,7 @@
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
-    command("view.settings", "打开设置", "视图", undefined, () => showActivity("settings")),
+    command("view.settings", "打开设置", "视图", undefined, () => openSettingsPage("theme")),
     command("view.problems", "显示问题面板", "视图", undefined, () => shell.showBottomPanel("problems")),
     command("view.output", "显示输出面板", "视图", undefined, () => shell.showBottomPanel("output")),
     command("view.toggleSidebar", "切换侧栏", "视图", "toggleSidebar", () => shell.toggleSidebar()),
@@ -127,6 +130,11 @@
       if (matchesShortcut(event, "commandPalette", keybindings)) {
         event.preventDefault();
         commandPaletteOpen = true;
+        return;
+      }
+      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === ",") {
+        event.preventDefault();
+        openSettingsPage("theme");
         return;
       }
       if (matchesShortcut(event, "quickArchive", keybindings)) {
@@ -311,6 +319,25 @@
     shell.sidebarVisible = true;
   }
 
+  function openSettingsPage(page: SettingsPage): void {
+    shell.openSettings(page);
+  }
+
+  function toggleSettingsMenu(anchor: HTMLButtonElement): void {
+    settingsMenuAnchor = settingsMenuAnchor ? undefined : anchor;
+  }
+
+  function closeSettingsMenu(restoreFocus = false): void {
+    const anchor = settingsMenuAnchor;
+    settingsMenuAnchor = undefined;
+    if (restoreFocus) queueMicrotask(() => anchor?.focus());
+  }
+
+  function openSnippets(): void {
+    showActivity("templates");
+    void templateStore.initialize().then(() => templateStore.setKind("snippet"));
+  }
+
   function openQuickFile(): void {
     if (fileWorkspace.info) quickFileOpen = true;
     else ux.info("请先打开一个工作区，再使用快速打开文件。");
@@ -388,7 +415,13 @@
 <div class:zen-mode={shell.zenMode} class="app-shell">
   <div class="workspace-background" aria-hidden="true"></div>
   <div class="shell-body">
-    {#if !shell.zenMode}<ActivityBar {shell} />{/if}
+    {#if !shell.zenMode}
+      <ActivityBar
+        {shell}
+        settingsMenuOpen={Boolean(settingsMenuAnchor)}
+        {toggleSettingsMenu}
+      />
+    {/if}
     <div class="workbench">
       {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge"}
         <Sidebar
@@ -464,6 +497,9 @@
             <BottomPanel {shell} {workspace} {execution} debug={debugStore} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} {health} />
           {/if}
         {/if}
+        {#if shell.settingsWindowOpen && !shell.zenMode && !shell.themeStudioOpen}
+          <SettingsWindow {settings} {shell} {ux} />
+        {/if}
       </section>
     </div>
     {#if shell.zenMode}
@@ -474,6 +510,18 @@
   </div>
   <StatusBar {shell} {workspace} {fileWorkspace} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} />
 </div>
+
+{#if settingsMenuAnchor}
+  <SettingsMenu
+    anchor={settingsMenuAnchor}
+    commandShortcut={settings.value.keybindings.commandPalette}
+    close={closeSettingsMenu}
+    openCommandPalette={() => (commandPaletteOpen = true)}
+    openSettings={openSettingsPage}
+    {openSnippets}
+    openTasks={() => showActivity("testcases")}
+  />
+{/if}
 
 <UxOverlay {ux} />
 

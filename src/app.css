@@ -32,7 +32,9 @@
   --radius: 7px;
 
   --workspace-background-image: none;
+  --workspace-background-size: cover;
   --background-opacity: 0;
+  --background-dim-percent: 100%;
   --window-opacity: 1;
   --window-opacity-percent: 100%;
   --sidebar-opacity: 1;
@@ -1381,7 +1383,7 @@ input:focus-visible {
   opacity: var(--background-opacity);
   background-image: var(--workspace-background-image);
   background-position: center;
-  background-size: cover;
+  background-size: var(--workspace-background-size);
   background-repeat: no-repeat;
 }
 
@@ -4210,10 +4212,6 @@ input[type="range"]:disabled {
 .performance-mode .editor-surface,
 .performance-mode .bottom-panel {
   backdrop-filter: none !important;
-}
-
-.performance-mode .workspace-background::after {
-  display: none;
 }
 
 @media (max-width: 850px) {

@@ -2,6 +2,7 @@ export type ThemePreference = "system" | "dark" | "light";
 export type ResolvedTheme = "dark" | "light";
 export type ColorThemeId = "signal" | "graphite" | "forest";
 export type UiDensity = "compact" | "standard" | "comfortable";
+export type BackgroundFit = "cover" | "contain" | "fill";
 
 export interface ThemeColorOverrides {
   background?: string;
@@ -74,6 +75,14 @@ export interface AppSettings {
   activeCustomTheme: string;
   customThemes: CustomThemeDefinition[];
   uiDensity: UiDensity;
+  backgroundImage: string;
+  backgroundImageName: string;
+  backgroundImageOpacity: number;
+  backgroundDim: number;
+  backgroundFit: BackgroundFit;
+  sidebarOpacity: number;
+  editorOpacity: number;
+  surfaceBlur: number;
   fontFamily: string;
   fontSize: number;
   lineHeight: number;

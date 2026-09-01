@@ -84,6 +84,33 @@ describe("workspace session persistence", () => {
     expect(shell.activeBottomPanel).toBe("output");
     store.dispose();
   });
+
+  it("migrates the former settings workspace back to explorer", async () => {
+    values.set("lightcp.session.v1", JSON.stringify({
+      version: 1,
+      activeActivity: "settings",
+      sidebarVisible: true,
+      bottomPanelVisible: true,
+      activeBottomPanel: "problems",
+      sidebarWidth: 264,
+      bottomPanelHeight: 190,
+    }));
+    const shell = new ShellStore();
+    const workspace = workspaceStub("");
+    workspace.recent = [];
+    const store = new SessionStore(
+      workspace as never,
+      editorStub() as never,
+      shell,
+      { error: vi.fn() } as never,
+    );
+
+    await store.initialize();
+
+    expect(shell.activeActivity).toBe("explorer");
+    expect(shell.settingsWindowOpen).toBe(false);
+    store.dispose();
+  });
 });
 
 describe("window session geometry", () => {

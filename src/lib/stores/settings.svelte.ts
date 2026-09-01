@@ -1,7 +1,9 @@
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { loadSettings, saveSettings } from "../api/settings";
 import {
   resolveThemePreference,
   type AppSettings,
+  type BackgroundFit,
   type ColorThemeId,
   type CustomThemeDefinition,
   type EditorSyntaxToken,
@@ -28,6 +30,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   activeCustomTheme: "",
   customThemes: [],
   uiDensity: "compact",
+  backgroundImage: "",
+  backgroundImageName: "",
+  backgroundImageOpacity: 0.42,
+  backgroundDim: 0.28,
+  backgroundFit: "cover",
+  sidebarOpacity: 0.92,
+  editorOpacity: 0.96,
+  surfaceBlur: 10,
   fontFamily: "Cascadia Code, JetBrains Mono, Consolas, monospace",
   fontSize: 14,
   lineHeight: 1.55,
@@ -120,6 +130,14 @@ export class SettingsStore {
       colorTheme: DEFAULT_SETTINGS.colorTheme,
       activeCustomTheme: "",
       uiDensity: DEFAULT_SETTINGS.uiDensity,
+      backgroundImage: DEFAULT_SETTINGS.backgroundImage,
+      backgroundImageName: DEFAULT_SETTINGS.backgroundImageName,
+      backgroundImageOpacity: DEFAULT_SETTINGS.backgroundImageOpacity,
+      backgroundDim: DEFAULT_SETTINGS.backgroundDim,
+      backgroundFit: DEFAULT_SETTINGS.backgroundFit,
+      sidebarOpacity: DEFAULT_SETTINGS.sidebarOpacity,
+      editorOpacity: DEFAULT_SETTINGS.editorOpacity,
+      surfaceBlur: DEFAULT_SETTINGS.surfaceBlur,
       fontFamily: DEFAULT_SETTINGS.fontFamily,
       fontSize: DEFAULT_SETTINGS.fontSize,
       lineHeight: DEFAULT_SETTINGS.lineHeight,
@@ -322,19 +340,27 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   root.dataset.customTheme = custom?.id ?? "";
   root.dataset.density = settings.uiDensity;
   root.classList.toggle("performance-mode", settings.performanceMode);
-  root.style.setProperty("--background-opacity", "0");
+  const hasBackground = Boolean(settings.backgroundImage);
+  const controlOpacity = Math.max(0.96, settings.sidebarOpacity, settings.editorOpacity);
+  root.style.setProperty("--background-opacity", hasBackground ? `${settings.backgroundImageOpacity}` : "0");
+  root.style.setProperty("--background-dim-percent", hasBackground ? `${settings.backgroundDim * 100}%` : "100%");
   root.style.setProperty("--window-opacity", "1");
   root.style.setProperty("--window-opacity-percent", "100%");
-  root.style.setProperty("--sidebar-opacity", "1");
-  root.style.setProperty("--sidebar-opacity-percent", "100%");
-  root.style.setProperty("--editor-opacity", "1");
-  root.style.setProperty("--editor-opacity-percent", "100%");
-  root.style.setProperty("--control-opacity-percent", "100%");
-  root.style.setProperty("--surface-blur", "0px");
+  root.style.setProperty("--sidebar-opacity", `${settings.sidebarOpacity}`);
+  root.style.setProperty("--sidebar-opacity-percent", `${settings.sidebarOpacity * 100}%`);
+  root.style.setProperty("--editor-opacity", `${settings.editorOpacity}`);
+  root.style.setProperty("--editor-opacity-percent", `${settings.editorOpacity * 100}%`);
+  root.style.setProperty("--control-opacity-percent", `${controlOpacity * 100}%`);
+  root.style.setProperty("--surface-blur", `${hasBackground && !settings.performanceMode ? settings.surfaceBlur : 0}px`);
   root.style.setProperty("--editor-font-family", settings.fontFamily);
   root.style.setProperty("--editor-font-size", `${settings.fontSize}px`);
   root.style.setProperty("--editor-line-height", `${settings.lineHeight}`);
-  root.style.setProperty("--workspace-background-image", "none");
+  root.style.setProperty("--workspace-background-size", settings.backgroundFit);
+  const backgroundUrl = resolveBackgroundUrl(settings.backgroundImage);
+  root.style.setProperty(
+    "--workspace-background-image",
+    backgroundUrl ? `url("${escapeCssUrl(backgroundUrl)}")` : "none",
+  );
   for (const cssVariable of Object.values(THEME_CSS_VARIABLES)) root.style.removeProperty(cssVariable);
   if (custom) {
     for (const [token, value] of Object.entries(custom.variants[variant].colors)) {
@@ -354,6 +380,14 @@ function normalizeSettings(settings: AppSettings): AppSettings {
       : "",
     customThemes,
     uiDensity: normalizeDensity(settings.uiDensity),
+    backgroundImage: String(settings.backgroundImage ?? "").trim().slice(0, 4096),
+    backgroundImageName: String(settings.backgroundImageName ?? "").trim().slice(0, 256),
+    backgroundImageOpacity: clamp(settings.backgroundImageOpacity, 0, 1, DEFAULT_SETTINGS.backgroundImageOpacity),
+    backgroundDim: clamp(settings.backgroundDim, 0, 0.8, DEFAULT_SETTINGS.backgroundDim),
+    backgroundFit: normalizeBackgroundFit(settings.backgroundFit),
+    sidebarOpacity: clamp(settings.sidebarOpacity, 0.2, 1, DEFAULT_SETTINGS.sidebarOpacity),
+    editorOpacity: clamp(settings.editorOpacity, 0.2, 1, DEFAULT_SETTINGS.editorOpacity),
+    surfaceBlur: clamp(settings.surfaceBlur, 0, 20, DEFAULT_SETTINGS.surfaceBlur),
     fontFamily:
       String(settings.fontFamily ?? "").trim().slice(0, 256) || DEFAULT_SETTINGS.fontFamily,
     fontSize: clamp(settings.fontSize, 11, 24, 14),
@@ -381,6 +415,21 @@ function normalizeColorTheme(value: ColorThemeId): ColorThemeId {
 
 function normalizeDensity(value: UiDensity): UiDensity {
   return value === "standard" || value === "comfortable" ? value : "compact";
+}
+
+function normalizeBackgroundFit(value: BackgroundFit): BackgroundFit {
+  return value === "contain" || value === "fill" ? value : "cover";
+}
+
+function resolveBackgroundUrl(value: string): string {
+  const path = value.trim();
+  if (!path) return "";
+  if (/^(data:|blob:)/i.test(path)) return path;
+  return isTauri() ? convertFileSrc(path) : path;
+}
+
+function escapeCssUrl(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function cloneDefaults(): AppSettings {

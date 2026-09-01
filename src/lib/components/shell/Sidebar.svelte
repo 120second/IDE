@@ -12,7 +12,6 @@
   import type { UxStore } from "../../stores/ux.svelte";
   import ExplorerPanel from "../explorer/ExplorerPanel.svelte";
   import TestcasePanel from "../testcases/TestcasePanel.svelte";
-  import SettingsPanel from "../settings/SettingsPanel.svelte";
   import TemplateSidebar from "../templates/TemplateSidebar.svelte";
   import Icon from "./Icon.svelte";
   import DebugPanel from "../debug/DebugPanel.svelte";
@@ -37,7 +36,6 @@
     templates: "模板",
     debug: "运行与调试",
     judge: "对拍",
-    settings: "设置",
   };
 
   let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug, ux, newFile }: Props = $props();
@@ -82,9 +80,7 @@
     class:templates-content={shell.activeActivity === "templates"}
     class="sidebar-content"
   >
-    {#if shell.activeActivity === "settings"}
-      <SettingsPanel {settings} {shell} {ux} />
-    {:else if shell.activeActivity === "explorer"}
+    {#if shell.activeActivity === "explorer"}
       <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "testcases"}
       <TestcasePanel {workspace} {execution} {generator} {ux} keybindings={settings.value.keybindings} />

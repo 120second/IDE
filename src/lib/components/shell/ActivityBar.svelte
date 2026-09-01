@@ -4,6 +4,8 @@
 
   interface Props {
     shell: ShellStore;
+    settingsMenuOpen: boolean;
+    toggleSettingsMenu: (anchor: HTMLButtonElement) => void;
   }
 
   const primaryItems: { id: ActivityId; label: string; icon: IconName }[] = [
@@ -14,7 +16,8 @@
     { id: "judge", label: "对拍", icon: "judge" },
   ];
 
-  let { shell }: Props = $props();
+  let { shell, settingsMenuOpen, toggleSettingsMenu }: Props = $props();
+  let settingsButton = $state<HTMLButtonElement>();
 </script>
 
 <nav class="activity-bar" aria-label="主要功能">
@@ -34,11 +37,13 @@
   </div>
   <div class="activity-footer">
     <button
-      class:active={shell.activeActivity === "settings" && shell.sidebarVisible}
+      class:active={settingsMenuOpen || shell.settingsWindowOpen}
       aria-label="设置"
-      aria-pressed={shell.activeActivity === "settings" && shell.sidebarVisible}
-      title="设置"
-      onclick={() => shell.selectActivity("settings")}
+      aria-haspopup="menu"
+      aria-expanded={settingsMenuOpen}
+      title="管理"
+      bind:this={settingsButton}
+      onclick={() => settingsButton && toggleSettingsMenu(settingsButton)}
     >
       <Icon name="settings" size={21} />
     </button>

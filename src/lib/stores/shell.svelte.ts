@@ -3,10 +3,18 @@ export type ActivityId =
   | "testcases"
   | "templates"
   | "debug"
-  | "judge"
-  | "settings";
+  | "judge";
 
 export type BottomPanelId = "problems" | "output" | "tests" | "debugConsole";
+
+export type SettingsPage =
+  | "theme"
+  | "interface"
+  | "background"
+  | "editor"
+  | "shortcuts"
+  | "toolchain"
+  | "performance";
 
 export class ShellStore {
   activeActivity = $state<ActivityId>("explorer");
@@ -16,11 +24,13 @@ export class ShellStore {
   zenMode = $state(false);
   themeStudioOpen = $state(false);
   themeStudioDirty = $state(false);
+  settingsWindowOpen = $state(false);
+  settingsPage = $state<SettingsPage>("theme");
   sidebarWidth = $state(264);
   bottomPanelHeight = $state(190);
 
   selectActivity(activity: ActivityId): void {
-    if (activity !== "settings" && this.themeStudioOpen) {
+    if (this.themeStudioOpen) {
       if (!this.confirmThemeStudioExit()) return;
       this.themeStudioOpen = false;
       this.themeStudioDirty = false;
@@ -39,10 +49,23 @@ export class ShellStore {
   }
 
   openThemeStudio(): void {
-    this.activeActivity = "settings";
-    this.sidebarVisible = true;
+    this.settingsPage = "theme";
+    this.settingsWindowOpen = true;
     this.themeStudioOpen = true;
     this.themeStudioDirty = false;
+  }
+
+  openSettings(page: SettingsPage = "theme"): boolean {
+    if (this.themeStudioOpen && !this.confirmThemeStudioExit()) return false;
+    this.themeStudioOpen = false;
+    this.themeStudioDirty = false;
+    this.settingsPage = page;
+    this.settingsWindowOpen = true;
+    return true;
+  }
+
+  closeSettingsWindow(): void {
+    this.settingsWindowOpen = false;
   }
 
   closeThemeStudio(): void {

@@ -1,3 +1,4 @@
+pub mod appearance;
 pub mod archive;
 pub mod compiler;
 pub mod debugger;

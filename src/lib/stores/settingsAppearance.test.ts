@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveThemePreference } from "../types/settings";
 import type { AppSettings, CustomThemeDefinition } from "../types/settings";
 import {
@@ -13,12 +13,42 @@ import {
   EDITOR_FONT_PRESETS,
   EDITOR_LINE_HEIGHTS,
   UI_DENSITIES,
+  applyDocumentAppearance,
 } from "./settings.svelte";
 
 describe("appearance settings", () => {
-  it("offers paired color themes instead of transparency presets", () => {
+  it("offers paired color themes alongside local background controls", () => {
     expect(COLOR_THEMES.map((theme) => theme.id)).toEqual(["signal", "graphite", "forest"]);
     expect(new Set(COLOR_THEMES.map((theme) => theme.label)).size).toBe(COLOR_THEMES.length);
+    expect(DEFAULT_SETTINGS.backgroundImage).toBe("");
+    expect(DEFAULT_SETTINGS.backgroundFit).toBe("cover");
+    expect(DEFAULT_SETTINGS.sidebarOpacity).toBeGreaterThanOrEqual(0.2);
+    expect(DEFAULT_SETTINGS.editorOpacity).toBeGreaterThanOrEqual(0.2);
+  });
+
+  it("applies surface opacity even when no background image is selected", () => {
+    const setProperty = vi.fn();
+    vi.stubGlobal("document", {
+      documentElement: {
+        dataset: {},
+        classList: { toggle: vi.fn() },
+        style: { setProperty, removeProperty: vi.fn() },
+      },
+    });
+
+    try {
+      applyDocumentAppearance({
+        ...DEFAULT_SETTINGS,
+        theme: "dark",
+        backgroundImage: "",
+        sidebarOpacity: 0.42,
+        editorOpacity: 0.5,
+      });
+      expect(setProperty).toHaveBeenCalledWith("--sidebar-opacity-percent", "42%");
+      expect(setProperty).toHaveBeenCalledWith("--editor-opacity-percent", "50%");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("resolves system, dark, and light modes deterministically", () => {

@@ -1,14 +1,16 @@
 <script lang="ts">
   import type { SettingsStore } from "../../stores/settings.svelte";
-  import type { ShellStore } from "../../stores/shell.svelte";
+  import type { SettingsPage, ShellStore } from "../../stores/shell.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
   import {
     COLOR_THEMES,
+    DEFAULT_SETTINGS,
     EDITOR_FONT_PRESETS,
     EDITOR_LINE_HEIGHTS,
     UI_DENSITIES,
   } from "../../stores/settings.svelte";
-  import type { ThemePreference } from "../../types/settings";
+  import type { BackgroundFit, ThemePreference } from "../../types/settings";
+  import { selectBackgroundImage } from "../../api/appearance";
   import { diagnoseToolchain } from "../../api/health";
   import type { ToolStatus, ToolchainStatus } from "../../types/health";
   import {
@@ -32,7 +34,9 @@
   let conflicts = $derived(shortcutConflicts(settings.value.keybindings));
   let toolchain = $state<ToolchainStatus>();
   let checkingToolchain = $state(false);
+  let choosingBackground = $state(false);
   let toolchainError = $state("");
+  let settingsPanel = $state<HTMLDivElement>();
   let diagnosticRequest = 0;
   let toolRows = $derived<{ label: string; tool: ToolStatus | undefined }[]>([
     { label: "编译", tool: toolchain?.compiler },
@@ -45,6 +49,28 @@
     { id: "dark", label: "深色", description: "固定使用深色版本" },
     { id: "light", label: "浅色", description: "固定使用浅色版本" },
   ];
+  const backgroundFits: { id: BackgroundFit; label: string }[] = [
+    { id: "cover", label: "覆盖" },
+    { id: "contain", label: "适应" },
+    { id: "fill", label: "拉伸" },
+  ];
+  const pageDetails: Record<SettingsPage, { title: string; description: string }> = {
+    theme: { title: "主题", description: "显示模式、内置颜色主题与自定义主题。" },
+    interface: { title: "界面", description: "调整工作台密度、透明度与背景模糊。" },
+    background: { title: "背景", description: "管理背景图片、填充方式、可见度与明暗。" },
+    editor: { title: "编辑器字体", description: "调整代码字体、字号和行距。" },
+    shortcuts: { title: "键盘快捷方式", description: "查看并修改工作台命令快捷键。" },
+    toolchain: { title: "C++ 工具链", description: "配置编译、调试、语言服务与运行参数。" },
+    performance: { title: "性能", description: "控制低配置设备上的绘制开销。" },
+  };
+  let appearancePage = $derived(
+    shell.settingsPage === "theme"
+    || shell.settingsPage === "interface"
+    || shell.settingsPage === "background"
+    || shell.settingsPage === "editor",
+  );
+
+  const percent = (value: number) => `${Math.round(value * 100)}%`;
 
   function fontPresetActive(value: string): boolean {
     return settings.value.fontFamily === value;
@@ -61,6 +87,61 @@
   function openThemeStudio(): void {
     if (!settings.value.activeCustomTheme) settings.createCustomTheme();
     shell.openThemeStudio();
+  }
+
+  function resetCurrentAppearance(): void {
+    if (shell.settingsPage === "theme") {
+      settings.update({
+        theme: DEFAULT_SETTINGS.theme,
+        colorTheme: DEFAULT_SETTINGS.colorTheme,
+        activeCustomTheme: "",
+      });
+    } else if (shell.settingsPage === "interface") {
+      settings.update({
+        uiDensity: DEFAULT_SETTINGS.uiDensity,
+        sidebarOpacity: DEFAULT_SETTINGS.sidebarOpacity,
+        editorOpacity: DEFAULT_SETTINGS.editorOpacity,
+        surfaceBlur: DEFAULT_SETTINGS.surfaceBlur,
+      });
+    } else if (shell.settingsPage === "background") {
+      settings.update({
+        backgroundImage: DEFAULT_SETTINGS.backgroundImage,
+        backgroundImageName: DEFAULT_SETTINGS.backgroundImageName,
+        backgroundImageOpacity: DEFAULT_SETTINGS.backgroundImageOpacity,
+        backgroundDim: DEFAULT_SETTINGS.backgroundDim,
+        backgroundFit: DEFAULT_SETTINGS.backgroundFit,
+      });
+    } else if (shell.settingsPage === "editor") {
+      settings.update({
+        fontFamily: DEFAULT_SETTINGS.fontFamily,
+        fontSize: DEFAULT_SETTINGS.fontSize,
+        lineHeight: DEFAULT_SETTINGS.lineHeight,
+      });
+    }
+  }
+
+  async function chooseBackgroundImage(): Promise<void> {
+    if (choosingBackground) return;
+    choosingBackground = true;
+    try {
+      const selected = await selectBackgroundImage();
+      if (!selected) return;
+      settings.update({
+        backgroundImage: selected.path,
+        backgroundImageName: selected.name,
+      });
+      ux.success("背景图片已应用。");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ux.error(`无法使用这张背景图片：${message}`);
+    } finally {
+      choosingBackground = false;
+    }
+  }
+
+  function clearBackgroundImage(): void {
+    settings.update({ backgroundImage: "", backgroundImageName: "" });
+    ux.info("已清除工作台背景图片。");
   }
 
   function captureShortcut(event: KeyboardEvent, id: ShortcutId): void {
@@ -103,18 +184,6 @@
     return tool.available ? "可用" : "未找到";
   }
 
-  async function resetSettings(): Promise<void> {
-    const accepted = await ux.confirm({
-      title: "恢复默认设置",
-      message: "这会重置外观、快捷键、工具链路径和运行参数，并删除所有自定义主题。",
-      confirmLabel: "恢复默认设置",
-      danger: true,
-    });
-    if (!accepted) return;
-    settings.reset();
-    ux.success("已恢复默认设置。");
-  }
-
   $effect(() => {
     settings.value.compilerPath;
     settings.value.gdbPath;
@@ -122,24 +191,32 @@
     const timer = window.setTimeout(() => void refreshToolchain(), 350);
     return () => window.clearTimeout(timer);
   });
+
+  $effect(() => {
+    shell.settingsPage;
+    requestAnimationFrame(() => settingsPanel?.scrollTo({ top: 0 }));
+  });
 </script>
 
-<div class="settings-panel">
-  <section class="settings-section">
-    <div class="section-heading">
-      <div>
-        <h3>外观</h3>
-        <p>修改会立即应用到整个工作台。</p>
-      </div>
-      <span class:failed={settings.saveState === "error"} class="save-state">
-        {#if settings.saveState === "saving"}正在保存…
-        {:else if settings.saveState === "saved"}已保存
-        {:else if settings.saveState === "error"}保存失败
-        {:else if settings.saveState === "loading"}正在加载…
-        {/if}
-      </span>
+<div class="settings-panel" bind:this={settingsPanel}>
+  <header class="settings-page-header">
+    <div>
+      <h2>{pageDetails[shell.settingsPage].title}</h2>
+      <p>{pageDetails[shell.settingsPage].description}</p>
     </div>
+    <span class:failed={settings.saveState === "error"} class="save-state">
+      {#if settings.saveState === "saving"}正在保存…
+      {:else if settings.saveState === "saved"}已保存
+      {:else if settings.saveState === "error"}保存失败
+      {:else if settings.saveState === "loading"}正在加载…
+      {/if}
+    </span>
+  </header>
 
+  {#if appearancePage}
+  <section class="settings-section settings-detail-section" data-settings-page={shell.settingsPage}>
+
+    {#if shell.settingsPage === "theme"}
     <div class="appearance-block">
       <div class="appearance-block-heading">
         <strong>显示模式</strong>
@@ -194,7 +271,9 @@
         {settings.value.activeCustomTheme ? "编辑当前自定义主题" : "创建副本并自定义"}
       </button>
     </div>
+    {/if}
 
+    {#if shell.settingsPage === "interface"}
     <div class="appearance-block">
       <div class="appearance-block-heading">
         <strong>界面密度</strong>
@@ -210,8 +289,116 @@
           >{density.label}</button>
         {/each}
       </div>
-    </div>
 
+      <details class="appearance-advanced interface-advanced">
+        <summary>高级设置</summary>
+        <small>透明度始终生效：没有图片时透出工作台底色，选择图片后透出背景图片。</small>
+        <label class="appearance-range">
+          <span class="range-heading"><span>侧栏不透明度</span><output>{percent(settings.value.sidebarOpacity)}</output></span>
+          <input
+            type="range"
+            min="0.2"
+            max="1"
+            step="0.01"
+            value={settings.value.sidebarOpacity}
+            oninput={(event) => settings.update({ sidebarOpacity: Number(event.currentTarget.value) })}
+          />
+        </label>
+        <label class="appearance-range">
+          <span class="range-heading"><span>编辑区不透明度</span><output>{percent(settings.value.editorOpacity)}</output></span>
+          <input
+            type="range"
+            min="0.2"
+            max="1"
+            step="0.01"
+            value={settings.value.editorOpacity}
+            oninput={(event) => settings.update({ editorOpacity: Number(event.currentTarget.value) })}
+          />
+        </label>
+        <label class="appearance-range">
+          <span class="range-heading"><span>背景模糊</span><output>{Math.round(settings.value.surfaceBlur)} px</output></span>
+          <input
+            type="range"
+            min="0"
+            max="20"
+            step="1"
+            disabled={settings.value.performanceMode || !settings.value.backgroundImage}
+            value={settings.value.surfaceBlur}
+            oninput={(event) => settings.update({ surfaceBlur: Number(event.currentTarget.value) })}
+          />
+          {#if !settings.value.backgroundImage}<small>选择背景图片后可调整模糊。</small>{/if}
+          {#if settings.value.performanceMode}<small>性能模式下已自动关闭模糊。</small>{/if}
+        </label>
+      </details>
+    </div>
+    {/if}
+
+    {#if shell.settingsPage === "background"}
+    <div class="appearance-block background-material-block">
+      <div class="appearance-block-heading">
+        <strong>背景与材质</strong>
+        <span>背景只保存在本机，不会写入或导出到颜色主题。</span>
+      </div>
+
+      <div class:empty={!settings.value.backgroundImage} class="background-image-card">
+        <div class="background-image-preview" aria-hidden="true"></div>
+        <div class="background-image-info">
+          <strong>{settings.value.backgroundImageName || "未选择背景图片"}</strong>
+          <small>{settings.value.backgroundImage ? "PNG、JPEG、WebP 或 AVIF" : "选择本地图片作为工作台底层背景"}</small>
+        </div>
+        <div class="background-image-actions">
+          <button
+            class="secondary-button compact-button"
+            disabled={choosingBackground}
+            onclick={() => void chooseBackgroundImage()}
+          >{choosingBackground ? "处理中…" : settings.value.backgroundImage ? "更换" : "选择图片"}</button>
+          {#if settings.value.backgroundImage}
+            <button class="secondary-button compact-button" onclick={clearBackgroundImage}>清除</button>
+          {/if}
+        </div>
+      </div>
+
+      <div class="background-fit-picker" role="group" aria-label="背景图片填充方式">
+        {#each backgroundFits as fit}
+          <button
+            class:active={settings.value.backgroundFit === fit.id}
+            aria-pressed={settings.value.backgroundFit === fit.id}
+            disabled={!settings.value.backgroundImage}
+            onclick={() => settings.update({ backgroundFit: fit.id })}
+          >{fit.label}</button>
+        {/each}
+      </div>
+
+      <label class="appearance-range">
+        <span class="range-heading"><span>背景可见度</span><output>{percent(settings.value.backgroundImageOpacity)}</output></span>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          disabled={!settings.value.backgroundImage}
+          value={settings.value.backgroundImageOpacity}
+          oninput={(event) => settings.update({ backgroundImageOpacity: Number(event.currentTarget.value) })}
+        />
+      </label>
+
+      <label class="appearance-range">
+        <span class="range-heading"><span>背景压暗</span><output>{percent(settings.value.backgroundDim)}</output></span>
+        <input
+          type="range"
+          min="0"
+          max="0.8"
+          step="0.01"
+          disabled={!settings.value.backgroundImage}
+          value={settings.value.backgroundDim}
+          oninput={(event) => settings.update({ backgroundDim: Number(event.currentTarget.value) })}
+        />
+      </label>
+
+    </div>
+    {/if}
+
+    {#if shell.settingsPage === "editor"}
     <div class="appearance-block editor-typography-block">
       <div class="appearance-block-heading">
         <strong>编辑器字体</strong>
@@ -265,19 +452,17 @@
         </label>
       </details>
     </div>
+    {/if}
 
-    <button class="secondary-button reset-appearance" onclick={() => settings.resetAppearance()}>
-      恢复默认外观
+    <button class="secondary-button reset-appearance" onclick={resetCurrentAppearance}>
+      恢复此板块默认值
     </button>
   </section>
+  {/if}
 
-  <section class="settings-section shortcut-settings">
-    <div class="section-heading">
-      <div>
-        <h3>快捷键</h3>
-        <p>聚焦输入框后直接按下新的组合键；按 Backspace 恢复该项默认值。</p>
-      </div>
-    </div>
+  {#if shell.settingsPage === "shortcuts"}
+  <section class="settings-section shortcut-settings settings-detail-section">
+    <p class="settings-detail-note">聚焦输入框后直接按下新的组合键；按 Backspace 恢复该项默认值。</p>
 
     {#each SHORTCUT_IDS as id}
       <label class:error-row={conflicts.has(id)} class="shortcut-row">
@@ -298,13 +483,12 @@
       </label>
     {/each}
   </section>
+  {/if}
 
-  <section class="settings-section">
-    <div class="section-heading">
-      <div>
-        <h3>C++ 工具链</h3>
-        <p>用于编译、调试和代码智能功能。</p>
-      </div>
+  {#if shell.settingsPage === "toolchain"}
+  <section class="settings-section settings-detail-section">
+    <div class="settings-detail-actions">
+      <span>根据当前路径重新检测编译、调试和代码智能工具。</span>
       <button class="secondary-button compact-button" disabled={checkingToolchain} onclick={() => void refreshToolchain()}>
         {checkingToolchain ? "检查中…" : "重新检查"}
       </button>
@@ -411,8 +595,10 @@
       </select>
     </label>
   </section>
+  {/if}
 
-  <section class="settings-section">
+  {#if shell.settingsPage === "performance"}
+  <section class="settings-section settings-detail-section">
     <label class="toggle-row">
       <span>
         <strong>性能模式</strong>
@@ -425,12 +611,9 @@
       />
     </label>
   </section>
+  {/if}
 
   {#if settings.errorMessage}
     <p class="settings-error">{settings.errorMessage}</p>
   {/if}
-
-  <button class="secondary-button reset-settings" onclick={() => void resetSettings()}>
-    恢复默认设置
-  </button>
 </div>
