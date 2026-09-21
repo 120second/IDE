@@ -6,7 +6,6 @@ import {
   getDebugSnapshot,
   pauseDebugSession,
   removeDebugBreakpoint,
-  restartDebugSession,
   setDebugBreakpoint,
   startDebugSession,
   stepIntoDebugSession,
@@ -41,6 +40,13 @@ export class DebugStore {
   sessionId = $state("");
   reason = $state("");
   busy = $state(false);
+  refreshing = $state(false);
+  stopRequested = $state(false);
+  stopOnEntry = $state(true);
+  inputMode = $state<"none" | "custom" | "testcase">("none");
+  stdinDraft = $state("");
+  selectedTestcaseId = $state<number>();
+  inspectionVersion = $state(0);
   breakpointBusy = $state(false);
   pendingStep = $state<DebugStepKind>();
   error = $state("");
@@ -54,6 +60,8 @@ export class DebugStore {
   private unlisten: UnlistenFn | undefined;
   private sequence = 0;
   private watchSequence = 0;
+  private stateRevision = 0;
+  private launchEvents: DebugEvent[] | undefined;
   private readonly consoleBuffer = new BoundedOutputBuffer(
     CONSOLE_LIMIT,
     "[较早的调试输出已丢弃]\n",
@@ -81,8 +89,30 @@ export class DebugStore {
   }
 
   get active(): boolean {
-    return this.state === "starting" || (Boolean(this.sessionId) && this.state !== "idle");
+    return this.state === "starting" || this.state === "running" || this.state === "stopped";
   }
+
+  get sourcePath(): string { return this.debugSourcePath || this.editor.activeTab?.path || ""; }
+
+  get selectedTestcase(): Testcase | undefined {
+    return this.execution.testcases?.find((testcase) => testcase.id === this.selectedTestcaseId)
+      ?? this.execution.testcases?.find((testcase) => testcase.enabled)
+      ?? this.execution.testcases?.[0];
+  }
+
+  get startDisabledReason(): string {
+    if (this.active || this.busy) return "请先停止当前调试";
+    if (this.execution.compiling || this.execution.running) return "请等待编译或运行结束";
+    const tab = this.editor.activeTab;
+    if (!tab?.path || !tab.path.toLowerCase().endsWith(".cpp")) return "请先打开一个 C++ 文件";
+    if (tab.loading || tab.deleted) return "当前文件尚未就绪";
+    if (this.inputMode === "testcase" && !this.selectedTestcase) return "请先添加测试点，或选择其他输入方式";
+    return "";
+  }
+
+  showConsole(): void { this.shell.showBottomPanel("debugConsole"); }
+  showCompilerOutput(): void { this.shell.showBottomPanel("output"); }
+  openToolchainSettings(): void { this.shell.openSettings("toolchain"); }
 
   get stopped(): boolean {
     return this.state === "stopped";
@@ -113,18 +143,28 @@ export class DebugStore {
     this.relocatedBreakpoints.clear();
     this.consoleBuffer.clear();
     this.editor.clearDebugLocation();
-    if (this.active) void stopDebugSession();
+    if (this.active || this.sessionId) void stopDebugSession();
   }
 
   async startCurrent(): Promise<void> {
-    await this.start("");
+    if (this.inputMode === "testcase") {
+      const testcase = this.selectedTestcase;
+      if (!testcase) { this.error = "请先选择一个测试点。"; return; }
+      await this.start(testcase.input, testcase.name);
+    } else {
+      await this.start(this.inputMode === "custom" ? this.stdinDraft : "", this.inputMode === "custom" ? "自定义输入" : "空输入");
+    }
   }
 
   async startTestcase(testcase: Testcase): Promise<void> {
-    await this.startInput(testcase.input, testcase.name);
+    this.inputMode = "testcase";
+    this.selectedTestcaseId = testcase.id;
+    await this.start(testcase.input, testcase.name);
   }
 
   async startInput(input: string, label: string): Promise<void> {
+    this.inputMode = "custom";
+    this.stdinDraft = input;
     await this.start(input, label);
   }
 
@@ -152,13 +192,23 @@ export class DebugStore {
   }
 
   async restart(): Promise<void> {
-    if (!this.active) return;
-    this.pendingStep = undefined;
-    await this.control(restartDebugSession, true);
+    if (this.busy) return;
+    const sourcePath = this.debugSourcePath;
+    // Recompile so edits, current input and current breakpoints all take effect.
+    if (this.active || this.sessionId) await this.stop();
+    if (sourcePath && !this.sessionId) await this.editor.openSearchMatch(sourcePath, 1, 1);
+    if (!this.sessionId) await this.startCurrent();
   }
 
   async stop(): Promise<void> {
-    if (this.busy || this.state === "idle") return;
+    if (this.busy) {
+      this.stopRequested = true;
+      this.pendingStep = undefined;
+      this.reason = "正在停止，请稍候…";
+      return;
+    }
+    if (this.state === "idle" && !this.sessionId) return;
+    ++this.sequence;
     this.pendingStep = undefined;
     this.busy = true;
     try {
@@ -173,23 +223,29 @@ export class DebugStore {
     } finally {
       this.editor.clearDebugLocation();
       this.busy = false;
+      this.stopRequested = false;
     }
   }
 
   async refresh(revealFrame = false): Promise<void> {
     if (!this.stopped || this.busy) return;
     const request = ++this.sequence;
+    const sessionId = this.sessionId;
+    this.refreshing = true;
     try {
       const snapshot = await getDebugSnapshot(
         this.selectedFrame,
         this.watches.map((watch) => watch.expression),
       );
-      if (request === this.sequence && this.state === "stopped") {
+      if (request === this.sequence && this.state === "stopped" && sessionId === this.sessionId) {
         this.applySnapshot(snapshot);
+        ++this.inspectionVersion;
         if (revealFrame) await this.revealSelectedFrame();
       }
     } catch (error) {
       if (request === this.sequence) this.error = errorMessage(error);
+    } finally {
+      if (request === this.sequence) this.refreshing = false;
     }
   }
 
@@ -367,6 +423,10 @@ export class DebugStore {
 
   private async start(stdin: string, testcaseName = ""): Promise<void> {
     if (this.active || this.busy) return;
+    if (this.startDisabledReason) { this.error = this.startDisabledReason; return; }
+    ++this.sequence;
+    this.stopRequested = false;
+    this.refreshing = false;
     this.pendingStep = undefined;
     this.breakpoints = dedupeBreakpoints(this.breakpoints);
     this.syncGutter();
@@ -376,57 +436,85 @@ export class DebugStore {
     this.editor.clearDebugLocation();
     this.sessionId = "";
     this.state = "starting";
+    this.variables = [];
+    this.frames = [];
+    this.watches = this.watches.map((watch) => ({ ...watch, value: "", error: "" }));
     this.reason = testcaseName ? `正在调试测试点“${testcaseName}”` : "正在准备调试";
     const sourcePath = this.editor.activeTab?.path;
     this.debugSourcePath = sourcePath ?? "";
     try {
+      // Release an exited/error backend before compiling the same executable.
+      await stopDebugSession();
+      if (this.editor.activeTab?.path !== sourcePath) throw new Error("当前文件已切换，请重新开始调试。");
       const compiled = await this.execution.compileCurrent("debug");
+      if (this.stopRequested || this.disposed) { this.state = "idle"; this.reason = "调试已取消"; return; }
       if (!compiled?.success || !compiled.executablePath || !sourcePath) {
         this.state = "idle";
         this.error = this.execution.error || "调试编译失败。";
+        this.reason = "编译失败，请查看编译输出";
         return;
       }
       this.shell.activeActivity = "debug";
       this.shell.sidebarVisible = true;
       this.shell.showBottomPanel("debugConsole");
+      this.launchEvents = [];
       const snapshot = await startDebugSession({
         gdbPath: this.settings.value.gdbPath,
         executablePath: compiled.executablePath,
         sourcePath,
         workingDirectory: parentDirectory(sourcePath),
         stdin,
+        stopOnEntry: this.stopOnEntry,
         breakpoints: this.breakpoints.map(({ id, file, line, enabled, condition }) => ({
           id, file, line, enabled, condition,
         })),
       });
       this.applySnapshot(snapshot);
-      if (snapshot.state === "stopped") queueMicrotask(() => void this.refresh(true));
+      const events = this.launchEvents;
+      this.launchEvents = undefined;
+      for (const event of events) this.handleEvent(event);
     } catch (error) {
       this.state = "error";
       this.error = errorMessage(error);
       this.reason = this.error;
+      this.sessionId = "";
       this.appendConsole(`[调试] ${this.error}\n`);
     } finally {
+      this.launchEvents = undefined;
       this.busy = false;
+      this.afterOperation();
     }
   }
 
-  private async control(action: () => Promise<DebugSessionSnapshot>, restarting = false): Promise<boolean> {
+  private async control(action: () => Promise<DebugSessionSnapshot>): Promise<boolean> {
     if (this.busy || !this.active) return false;
     this.busy = true;
+    ++this.sequence;
+    this.refreshing = false;
+    const revision = this.stateRevision;
     this.error = "";
-    if (restarting) {
-      this.state = "starting";
-      this.reason = "正在重新启动";
-    }
     try {
-      this.applySnapshot(await action());
+      const snapshot = await action();
+      // Async pause/exit events can overtake the invoke response.
+      if (revision === this.stateRevision) this.applySnapshot(snapshot);
+      else this.mergeBreakpoints(snapshot.breakpoints);
       return true;
     } catch (error) {
       this.error = errorMessage(error);
       return false;
     } finally {
       this.busy = false;
+      this.afterOperation();
+    }
+  }
+
+  private afterOperation(): void {
+    if (this.stopRequested) {
+      this.stopRequested = false;
+      void this.stop();
+    } else if (this.stopped) {
+      if (this.pendingStep) queueMicrotask(() => void this.consumePendingStep());
+      else queueMicrotask(() => void this.refresh(true));
     }
   }
 
@@ -479,8 +567,8 @@ export class DebugStore {
   }
 
   private handleEvent(event: DebugEvent): void {
-    if (this.sessionId && event.sessionId !== this.sessionId) return;
-    if (!this.sessionId) this.sessionId = event.sessionId;
+    if (this.launchEvents) { this.launchEvents.push(event); return; }
+    if (!this.sessionId || event.sessionId !== this.sessionId) return;
     if (event.kind === "output") {
       this.appendConsole(event.text);
       return;
@@ -490,6 +578,9 @@ export class DebugStore {
       return;
     }
     this.state = event.state;
+    ++this.stateRevision;
+    ++this.sequence;
+    this.refreshing = false;
     this.reason = event.reason;
     if (event.state === "stopped") {
       this.selectedFrame = 0;
@@ -497,11 +588,15 @@ export class DebugStore {
       else queueMicrotask(() => void this.refresh(true));
     } else if (event.state === "running") {
       this.error = "";
+      this.variables = [];
+      this.frames = [];
+      this.watches = this.watches.map((watch) => ({ ...watch, value: "", error: "" }));
       this.editor.clearDebugLocation();
     } else if (event.state === "exited" || event.state === "error") {
       this.pendingStep = undefined;
       this.variables = [];
       this.frames = [];
+      if (event.state === "error") this.error = event.reason;
       this.editor.clearDebugLocation();
     }
   }

@@ -171,7 +171,7 @@
     <div class="empty-state workspace-empty">
       <Icon name="folder" size={28} />
       <p>尚未打开文件夹</p>
-      <span>打开一个竞赛目录；子目录仅在展开时加载。</span>
+      <span>选择存放代码的文件夹，即可开始。</span>
       <button class="primary-button" disabled={fileWorkspace.loading} onclick={() => void fileWorkspace.openFolderPicker()}>
         {fileWorkspace.loading ? "正在打开…" : "打开文件夹"}
       </button>

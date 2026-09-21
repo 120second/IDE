@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { TemplateMetadata } from "../../types/templates";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
   import TemplatePrintDialog from "./TemplatePrintDialog.svelte";
 
@@ -21,6 +22,7 @@
   let draggedTemplateId = $state<number>();
   let dropTemplateId = $state<number>();
   let dropAfter = $state(false);
+  const backdrop = createBackdropDismiss(() => { historyOpen = false; templateStore.versionPreview = undefined; });
   let detailOpen = $derived(templateStore.detailLoading || templateStore.mode !== "empty");
   let templateStart = $derived(
     Math.max(0, Math.floor(listScrollTop / TEMPLATE_ROW_HEIGHT) - TEMPLATE_OVERSCAN),
@@ -264,7 +266,7 @@
 </section>
 
 {#if historyOpen}
-  <div class="modal-backdrop" role="presentation" onclick={() => { historyOpen = false; templateStore.versionPreview = undefined; }}>
+  <div class="modal-backdrop" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
     <div class="history-dialog" role="dialog" aria-modal="true" aria-label="模板版本历史" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
       <header>
         <div><strong>版本历史</strong><span>最近保存的 20 个版本</span></div>

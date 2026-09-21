@@ -2,6 +2,7 @@ import { mount } from "svelte";
 import App from "./App.svelte";
 import "./app.css";
 import "./workbench.css";
+import "./appearance.css";
 
 const target = document.getElementById("app");
 

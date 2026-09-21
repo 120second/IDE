@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { rankWorkbenchCommands, type WorkbenchCommand } from "../../types/commands";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "./Icon.svelte";
 
   interface Props {
@@ -15,6 +16,7 @@
   let query = $state("");
   let selectedIndex = $state(0);
   let filtered = $derived.by(() => rankWorkbenchCommands(commands, query).slice(0, 80));
+  const backdrop = createBackdropDismiss(() => close());
 
   onMount(() => input.focus());
 
@@ -61,7 +63,7 @@
 
 </script>
 
-<div class="quick-search-backdrop" role="presentation" onclick={close}>
+<div class="quick-search-backdrop" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
   <div class="template-quick-search command-palette" role="dialog" aria-modal="true" aria-label="命令面板" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
     <header>
       <Icon name="search" size={17} />

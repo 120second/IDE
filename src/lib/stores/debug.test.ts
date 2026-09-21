@@ -64,6 +64,7 @@ function fixture() {
   const execution = {
     compileCurrent: vi.fn().mockResolvedValue({ success: true, executablePath: "D:\\Code\\main.exe" }),
     error: "",
+    testcases: [{ id: 1, name: "样例 1", input: "21\n", enabled: true }],
   };
   const settings = { value: { gdbPath: "gdb" } };
   const shell = {
@@ -77,7 +78,9 @@ function fixture() {
 
 describe("debug store coordination", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    debugApi.stopDebugSession.mockResolvedValue(snapshot({ state: "idle" }));
+    debugApi.getDebugSnapshot.mockResolvedValue(snapshot({ state: "stopped" }));
   });
 
   it("passes custom stdin to GDB and opens the debug console", async () => {
@@ -199,4 +202,100 @@ describe("debug store coordination", () => {
       expect.objectContaining({ id: "bp-1", line: 15 }),
     ));
   });
+
+  it("uses the selected input for keyboard launches and defaults to pausing at main", async () => {
+    debugApi.startDebugSession.mockResolvedValue(snapshot());
+    const { store } = fixture();
+    store.inputMode = "testcase";
+    await store.startCurrent();
+    expect(debugApi.startDebugSession).toHaveBeenCalledWith(expect.objectContaining({ stdin: "21\n", stopOnEntry: true }));
+  });
+
+  it("accepts a breakpoint event delivered before launch resolves and refreshes after busy clears", async () => {
+    const { store, editor } = fixture();
+    debugApi.getDebugSnapshot.mockResolvedValue(snapshot({ state: "stopped", frames: [{ level: 0, address: "", function: "main", file: "main.cpp", fullName: "D:\\Code\\main.cpp", line: 7 }] }));
+    debugApi.startDebugSession.mockImplementation(async () => {
+      emit(store, "stopped");
+      await Promise.resolve();
+      return snapshot();
+    });
+    await store.startCurrent();
+    await vi.waitFor(() => expect(editor.revealDebugLocation).toHaveBeenCalledWith("D:\\Code\\main.cpp", 7));
+    expect(store.state).toBe("stopped");
+  });
+
+  it("does not overwrite a fast step's stopped event with a stale running response", async () => {
+    const { store } = fixture();
+    store.sessionId = "session-1";
+    store.state = "stopped";
+    debugApi.stepOverDebugSession.mockImplementation(async () => {
+      emit(store, "running");
+      emit(store, "stopped");
+      await Promise.resolve();
+      return snapshot();
+    });
+    await store.stepOver();
+    await vi.waitFor(() => expect(debugApi.getDebugSnapshot).toHaveBeenCalledTimes(1));
+    expect(store.stopped).toBe(true);
+  });
+
+  it("discards inspection results from the previous pause even if another pause has arrived", async () => {
+    const { store } = fixture();
+    store.sessionId = "session-1";
+    store.state = "stopped";
+    let resolve!: (value: DebugSessionSnapshot) => void;
+    debugApi.getDebugSnapshot.mockReturnValueOnce(new Promise<DebugSessionSnapshot>((done) => { resolve = done; }));
+    const refresh = store.refresh();
+    emit(store, "running");
+    emit(store, "stopped");
+    resolve(snapshot({ state: "stopped", variables: [{ name: "stale", expression: "stale", value: "99", typeName: "int", numChildren: 0, hasChildren: false }] }));
+    await refresh;
+    expect(store.variables).toEqual([]);
+  });
+
+  it("allows a new session after normal exit and ignores old or post-stop events", async () => {
+    const { store } = fixture();
+    store.sessionId = "old";
+    store.state = "exited";
+    expect(store.active).toBe(false);
+    debugApi.startDebugSession.mockResolvedValue(snapshot());
+    await store.startCurrent();
+    emit(store, "exited", "old");
+    expect(store.state).toBe("running");
+    await store.stop();
+    emit(store, "stopped");
+    expect(store.state).toBe("idle");
+    expect(store.sessionId).toBe("");
+  });
+
+  it("can cancel while compilation is pending without starting GDB", async () => {
+    const { store, execution } = fixture();
+    let resolve!: (value: unknown) => void;
+    execution.compileCurrent.mockReturnValue(new Promise((done) => { resolve = done; }) as never);
+    const starting = store.startCurrent();
+    await vi.waitFor(() => expect(execution.compileCurrent).toHaveBeenCalled());
+    await store.stop();
+    expect(store.stopRequested).toBe(true);
+    resolve({ success: true, executablePath: "D:\\Code\\main.exe" });
+    await starting;
+    expect(debugApi.startDebugSession).not.toHaveBeenCalled();
+    expect(store.state).toBe("idle");
+    expect(store.busy).toBe(false);
+  });
+
+  it("releases a failed session so fixing GDB settings and retrying works", async () => {
+    const { store } = fixture();
+    debugApi.startDebugSession.mockRejectedValueOnce(new Error("找不到 GDB"));
+    await store.startCurrent();
+    expect(store.error).toBe("找不到 GDB");
+    expect(store.active).toBe(false);
+    debugApi.startDebugSession.mockResolvedValueOnce(snapshot());
+    await store.startCurrent();
+    expect(store.state).toBe("running");
+    expect(store.error).toBe("");
+  });
 });
+
+function emit(store: DebugStore, state: DebugSessionSnapshot["state"], sessionId = "session-1"): void {
+  (store as unknown as { handleEvent: (event: DebugEvent) => void }).handleEvent({ kind: "state", sessionId, state, reason: state });
+}

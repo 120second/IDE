@@ -36,6 +36,7 @@
   import SettingsWindow from "../settings/SettingsWindow.svelte";
   import EditorBreadcrumbs from "../editor/EditorBreadcrumbs.svelte";
   import SettingsMenu from "./SettingsMenu.svelte";
+  import RandomGenerator from "../testcases/random/RandomGenerator.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -95,6 +96,7 @@
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
+    command("view.generator", "打开随机数据生成器", "竞赛", undefined, () => shell.openGenerator()),
     command("view.settings", "打开设置", "视图", undefined, () => openSettingsPage("theme")),
     command("view.problems", "显示问题面板", "视图", undefined, () => shell.showBottomPanel("problems")),
     command("view.output", "显示输出面板", "视图", undefined, () => shell.showBottomPanel("output")),
@@ -106,6 +108,21 @@
 
   $effect(() => {
     if (shell.activeActivity === "templates") void templateStore.initialize();
+  });
+
+  $effect(() => {
+    if (!generator.editorRequested) return;
+    untrack(() => {
+      generator.consumeEditorRequest();
+      shell.openGenerator();
+    });
+  });
+
+  $effect(() => {
+    const sourcePath = workspace.activeTab?.path;
+    if (shell.activeActivity === "testcases" || shell.activeActivity === "judge") {
+      untrack(() => void generator.syncSource(sourcePath));
+    }
   });
 
   $effect(() => {
@@ -315,6 +332,7 @@
   }
 
   function showActivity(activity: typeof shell.activeActivity): void {
+    shell.generatorOpen = false;
     shell.activeActivity = activity;
     shell.sidebarVisible = true;
   }
@@ -450,6 +468,17 @@
           <TemplateCenter {templateStore} />
         {:else if shell.activeActivity === "judge" && !shell.zenMode}
           <StressCenter stress={stressStore} {generator} {workspace} />
+        {:else if shell.activeActivity === "testcases" && shell.generatorOpen && !shell.zenMode}
+          <RandomGenerator
+            {workspace}
+            {execution}
+            {generator}
+            {ux}
+            close={() => {
+              shell.generatorOpen = false;
+              requestAnimationFrame(() => workspace.focus());
+            }}
+          />
         {:else}
           <TabBar
             {workspace}
@@ -493,7 +522,7 @@
               {/key}
             {/if}
           </div>
-          {#if shell.bottomPanelVisible && !shell.zenMode}
+          {#if shell.bottomPanelVisible && !shell.zenMode && (workspace.activeTab || execution.running)}
             <BottomPanel {shell} {workspace} {execution} debug={debugStore} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} {health} />
           {/if}
         {/if}

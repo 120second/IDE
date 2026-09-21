@@ -3,21 +3,22 @@
     arrayField,
     cloneNode,
     constant,
-    expressionLabel,
     graphNode,
     integerField,
     line,
     newRuleId,
     nodeDiagnostics,
+    repeatNode,
     scopeBefore,
+    suggestIntegerName,
     treeNode,
     TREE_SHAPES,
     variable,
+    wrapNodesInRepeat,
   } from "../../../generator/visualRules";
   import type {
     TreeShape,
     VisualDiagnostic,
-    VisualField,
     VisualNode,
   } from "../../../types/generator";
   import ContextMenu from "../../ux/ContextMenu.svelte";
@@ -27,6 +28,7 @@
   import RecursiveRuleNode from "./RuleNode.svelte";
   import ValueExpressionInput from "./ValueExpressionInput.svelte";
   import type { UxStore } from "../../../stores/ux.svelte";
+  import { presentRule } from "../../../generator/rulePresentation";
 
   interface Props {
     node: VisualNode;
@@ -35,75 +37,28 @@
     scope: string[];
     depth: number;
     position?: string;
+    startExpanded?: boolean;
     diagnostics: VisualDiagnostic[];
     change: (node: VisualNode) => void;
     duplicate: () => void;
     move: (direction: -1 | 1) => void;
+    wrapFollowing?: () => void;
     remove: () => void;
     ux: UxStore;
   }
 
-  let { node, index, total, scope, depth, position, diagnostics, change, duplicate, move, remove, ux }: Props = $props();
+  let { node, index, total, scope, depth, position, startExpanded = false, diagnostics, change, duplicate, move, wrapFollowing, remove, ux }: Props = $props();
   let expanded = $state(false);
   let actionMenu = $state<{ x: number; y: number }>();
+  let newestChildId = $state("");
   let ownDiagnostics = $derived(nodeDiagnostics(diagnostics, node.id));
   let invalid = $derived(ownDiagnostics.length > 0);
   let orderLabel = $derived(position ?? String(index + 1));
+  let presentation = $derived(presentRule(node));
 
-  function fieldName(field: VisualField): string {
-    return field.name.trim() || "未命名";
-  }
-
-  function lineTitle(fields: VisualField[]): string {
-    if (fields.length === 0) return "空输入行";
-    if (fields.every((field) => field.type === "integer")) {
-      return fields.length === 1
-        ? `读取整数 ${fieldName(fields[0])}`
-        : `读取 ${fields.length} 个整数：${fields.map(fieldName).join("、")}`;
-    }
-    if (fields.length === 1) {
-      const field = fields[0];
-      if (field.type === "array") return `读取 ${expressionLabel(field.length)} 个整数到数组 ${fieldName(field)}`;
-      if (field.type === "string") return `读取长度为 ${expressionLabel(field.length)} 的${field.alphabet === "binary" ? "二进制" : "小写字母"}字符串 ${fieldName(field)}`;
-      if (field.type === "permutation") return `读取长度为 ${expressionLabel(field.length)} 的排列 ${fieldName(field)}`;
-    }
-    return `读取一行数据：${fields.map(fieldName).join("、")}`;
-  }
-
-  function fieldSummary(field: VisualField): string {
-    if (field.type === "integer") return `${fieldName(field)} 为 ${expressionLabel(field.minimum)}～${expressionLabel(field.maximum)}`;
-    if (field.type === "array") return `元素范围 ${expressionLabel(field.minimum)}～${expressionLabel(field.maximum)}`;
-    if (field.type === "string") return `字符集：${field.alphabet === "binary" ? "0 和 1" : "小写英文字母"}`;
-    return `元素为 1～${expressionLabel(field.length)}，每个值出现一次`;
-  }
-
-  function title(): string {
-    if (node.type === "line") return lineTitle(node.fields);
-    if (node.type === "repeat") return `重复 ${expressionLabel(node.count)} 次`;
-    if (node.type === "tree") return `生成 ${expressionLabel(node.nodes)} 个节点的${node.weight ? "带权树" : "树"}`;
-    if (node.type === "graph") {
-      const kind = node.kind === "dag" ? "有向无环图" : node.kind === "connectedUndirected" ? "连通无向图" : "简单无向图";
-      return `生成 ${expressionLabel(node.nodes)} 个节点、${expressionLabel(node.edges)} 条边的${kind}`;
-    }
-    return `生成 ${expressionLabel(node.rows)} × ${expressionLabel(node.columns)} 的矩阵 ${node.name || "mat"}`;
-  }
-
-  function summary(): string {
-    let description: string;
-    if (node.type === "line") {
-      description = node.fields.map(fieldSummary).join(" · ") || "这一行还没有内容";
-    } else if (node.type === "repeat") {
-      description = `以下 ${node.children.length} 项输入内容会按顺序重复`;
-    } else if (node.type === "tree") {
-      const shape = node.shape ? TREE_SHAPES.find((item) => item.value === node.shape)?.label : "使用默认树形";
-      description = `节点编号从 ${node.indexBase} 开始 · ${shape}${node.weight ? ` · 权值 ${expressionLabel(node.weight.minimum)}～${expressionLabel(node.weight.maximum)}` : ""}`;
-    } else if (node.type === "graph") {
-      description = `节点编号从 ${node.indexBase} 开始`;
-    } else {
-      description = `元素范围 ${expressionLabel(node.minimum)}～${expressionLabel(node.maximum)}`;
-    }
-    return invalid ? `需要修复：${ownDiagnostics[0]?.message ?? description}` : description;
-  }
+  $effect(() => {
+    if (startExpanded) expanded = true;
+  });
 
   function openActionMenu(event: MouseEvent): void {
     const bounds = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : undefined;
@@ -114,7 +69,7 @@
   async function requestRemove(): Promise<void> {
     if (await ux.confirm({
       title: "删除输入规则",
-      message: `确定删除“${title()}”吗？`,
+      message: `确定删除“${presentation.kind} ${presentation.signature}”吗？`,
       confirmLabel: "删除规则",
       danger: true,
     })) remove();
@@ -123,11 +78,11 @@
   function createNode(kind: AddRuleKind, available: string[]): VisualNode {
     const size = available.includes("n") ? "n" : available.at(-1);
     const edges = available.includes("m") ? "m" : undefined;
-    if (kind === "integer") return line([integerField(`x${index + 1}`)]);
+    if (kind === "integer") return line([integerField(suggestIntegerName(available))]);
     if (kind === "array") return line([arrayField("a", size ? variable(size) : constant(10))]);
     if (kind === "string") return line([{ type: "string", id: newRuleId("field"), name: "s", length: size ? variable(size) : constant(10), alphabet: "lowercase" }]);
     if (kind === "permutation") return line([{ type: "permutation", id: newRuleId("field"), name: "p", length: size ? variable(size) : constant(10) }]);
-    if (kind === "repeat") return { type: "repeat", id: newRuleId("repeat"), count: available.at(-1) ? variable(available.at(-1)!) : constant(1), children: [line([integerField("x")])] };
+    if (kind === "repeat") return repeatNode(available);
     if (kind === "tree") return treeNode(size ? variable(size) : constant(10));
     if (kind === "graph") return graphNode(size ? variable(size) : constant(10), edges ? variable(edges) : constant(10));
     return { type: "matrix", id: newRuleId("matrix"), name: "mat", rows: size ? variable(size) : constant(10), columns: size ? variable(size) : constant(10), minimum: constant(1), maximum: constant(1000) };
@@ -136,7 +91,9 @@
   function addChild(kind: AddRuleKind): void {
     if (node.type !== "repeat") return;
     const available = scopeBefore(node.children, node.children.length, scope);
-    change({ ...node, children: [...node.children, createNode(kind, available)] });
+    const child = createNode(kind, available);
+    newestChildId = child.id;
+    change({ ...node, children: [...node.children, child] });
   }
 
   function updateChild(childIndex: number, child: VisualNode): void {
@@ -164,17 +121,31 @@
     if (node.type !== "repeat") return;
     change({ ...node, children: node.children.filter((_, index) => index !== childIndex) });
   }
+
+  function wrapChildrenFrom(childIndex: number): void {
+    if (node.type !== "repeat" || depth >= 4) return;
+    const children = wrapNodesInRepeat(node.children, childIndex, scope);
+    newestChildId = children[childIndex]?.id ?? "";
+    change({ ...node, children });
+  }
 </script>
 
 <article class:invalid class:expanded class:repeat-node={node.type === "repeat"} class="rule-node" style:--rule-depth={depth}>
   <div class="rule-node-header">
     <span class="rule-order" aria-hidden="true">{orderLabel}</span>
-    <button type="button" class="rule-node-main" aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
-      <span><strong>{title()}</strong><small>{summary()}</small></span>
+    <button type="button" class="rule-node-main" aria-label={`第 ${orderLabel} 项，${presentation.kind}：${presentation.signature}。${presentation.details.join("；")}${invalid ? `；${ownDiagnostics[0]?.message}` : ""}`} aria-expanded={expanded} onclick={() => (expanded = !expanded)}>
+      <span class="rule-kind">{presentation.kind}</span>
+      <span class="rule-description">
+        <strong class="rule-signature">{presentation.signature}</strong>
+        {#if presentation.details.length}
+          <span class="rule-facts">{#each presentation.details as detail}<span>{detail}</span>{/each}</span>
+        {/if}
+        {#if invalid}<span class="rule-summary-error">{ownDiagnostics[0]?.message}</span>{/if}
+      </span>
     </button>
     <div class="rule-node-actions">
-      <button type="button" class="rule-edit-button" aria-label={expanded ? "收起规则编辑" : "编辑生成规则"} aria-expanded={expanded} onclick={() => (expanded = !expanded)}><Icon name="edit" size={12} /><span>{expanded ? "收起" : "编辑"}</span></button>
-      <button type="button" class="rule-more-button" aria-label="更多规则操作" aria-haspopup="menu" aria-expanded={Boolean(actionMenu)} onclick={openActionMenu}>…</button>
+      <button type="button" class="rule-edit-button" aria-label={`${expanded ? "收起" : "编辑"}第 ${orderLabel} 项`} aria-expanded={expanded} onclick={() => (expanded = !expanded)}><Icon name="edit" size={13} /><span>{expanded ? "收起" : "编辑"}</span></button>
+      <button type="button" class="rule-more-button" aria-label={`第 ${orderLabel} 项的更多操作`} aria-haspopup="menu" aria-expanded={Boolean(actionMenu)} onclick={openActionMenu}>…</button>
     </div>
   </div>
 
@@ -183,8 +154,8 @@
       {#if node.type === "line"}
         <LineRule {node} {scope} {diagnostics} {change} />
       {:else if node.type === "repeat"}
-        <ValueExpressionInput label="重复次数" value={node.count} variables={scope} change={(count) => change({ ...node, count })} />
-        <p class="rule-editor-hint">下方内容会完整重复，可继续添加或调整其中的输入项。</p>
+        <ValueExpressionInput label="循环次数" value={node.count} variables={scope} change={(count) => change({ ...node, count })} />
+        <p class="rule-editor-hint">循环次数可以选择前面读入的 t、T、q 等整数，也可以填写常量。</p>
       {:else if node.type === "tree"}
         <ValueExpressionInput label="节点数" value={node.nodes} variables={scope} change={(nodes) => change({ ...node, nodes })} />
         <div class="rule-inline-fields">
@@ -210,9 +181,11 @@
   {/if}
 
   {#if node.type === "repeat"}
-    <div class="repeat-flow">
-      <span class="repeat-flow-label">每次按以下顺序生成</span>
+    <div class="repeat-flow" role="group" aria-label={`第 ${orderLabel} 项的循环内容`}>
       <div class="repeat-children">
+        {#if node.children.length === 0}
+          <div class="repeat-empty">在下面添加每次循环要生成的数据。</div>
+        {/if}
         {#each node.children as child, childIndex (child.id)}
           <RecursiveRuleNode
             node={child}
@@ -221,15 +194,22 @@
             scope={scopeBefore(node.children, childIndex, scope)}
             depth={depth + 1}
             position={`${orderLabel}.${childIndex + 1}`}
+            startExpanded={child.id === newestChildId}
             {diagnostics}
             {ux}
             change={(updated) => updateChild(childIndex, updated)}
             duplicate={() => duplicateChild(childIndex)}
             move={(direction) => moveChild(childIndex, direction)}
+            wrapFollowing={() => wrapChildrenFrom(childIndex)}
             remove={() => removeChild(childIndex)}
           />
         {/each}
-        <div class="repeat-add-row"><AddRuleMenu depth={depth + 1} add={addChild} compact label="添加到重复块" /></div>
+        <div class="repeat-add-row">
+          <span>循环内添加</span>
+          <button type="button" class="secondary-button" onclick={() => addChild("integer")}><Icon name="plus" size={13} />输入行</button>
+          <button type="button" class="secondary-button" disabled={depth >= 3} onclick={() => addChild("repeat")}><Icon name="repeat" size={13} />循环</button>
+          <AddRuleMenu add={addChild} compact label="更多类型" />
+        </div>
       </div>
     </div>
   {/if}
@@ -244,6 +224,7 @@
       { label: "复制", action: duplicate },
       { label: "上移", action: () => move(-1), disabled: index === 0 },
       { label: "下移", action: () => move(1), disabled: index === total - 1 },
+      ...wrapFollowing && depth < 4 ? [{ label: "将本项及之后放入循环", action: wrapFollowing, separatorBefore: true }] : [],
       { label: "删除", action: () => void requestRemove(), danger: true, separatorBefore: true },
     ]}
   />

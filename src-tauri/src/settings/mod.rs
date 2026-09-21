@@ -83,6 +83,7 @@ impl Default for CustomThemeDefinition {
 pub struct AppSettings {
     pub theme: ThemePreference,
     pub color_theme: ColorTheme,
+    pub editor_theme: String,
     pub active_custom_theme: String,
     pub custom_themes: Vec<CustomThemeDefinition>,
     pub ui_density: UiDensity,
@@ -91,8 +92,13 @@ pub struct AppSettings {
     pub background_image_opacity: f64,
     pub background_dim: f64,
     pub background_fit: BackgroundFit,
+    pub background_position_x: f64,
+    pub background_position_y: f64,
+    pub background_scale: f64,
     pub sidebar_opacity: f64,
     pub editor_opacity: f64,
+    pub panel_opacity: f64,
+    pub popup_opacity: f64,
     pub surface_blur: f64,
     pub font_family: String,
     pub font_size: f64,
@@ -114,6 +120,7 @@ impl Default for AppSettings {
         Self {
             theme: ThemePreference::System,
             color_theme: ColorTheme::Signal,
+            editor_theme: "inherit".to_owned(),
             active_custom_theme: String::new(),
             custom_themes: Vec::new(),
             ui_density: UiDensity::Compact,
@@ -122,8 +129,13 @@ impl Default for AppSettings {
             background_image_opacity: 0.42,
             background_dim: 0.28,
             background_fit: BackgroundFit::Cover,
+            background_position_x: 50.0,
+            background_position_y: 50.0,
+            background_scale: 1.0,
             sidebar_opacity: 0.92,
             editor_opacity: 0.96,
+            panel_opacity: 1.0,
+            popup_opacity: 1.0,
             surface_blur: 10.0,
             font_family: "Cascadia Code, JetBrains Mono, Consolas, monospace".to_owned(),
             font_size: 14.0,
@@ -153,6 +165,11 @@ impl AppSettings {
             .collect();
         self.background_image_opacity = finite_clamp(self.background_image_opacity, 0.0, 1.0, 0.42);
         self.background_dim = finite_clamp(self.background_dim, 0.0, 0.8, 0.28);
+        self.background_position_x = finite_clamp(self.background_position_x, 0.0, 100.0, 50.0);
+        self.background_position_y = finite_clamp(self.background_position_y, 0.0, 100.0, 50.0);
+        self.background_scale = finite_clamp(self.background_scale, 1.0, 3.0, 1.0);
+        self.panel_opacity = finite_clamp(self.panel_opacity, 0.2, 1.0, 1.0);
+        self.popup_opacity = finite_clamp(self.popup_opacity, 0.6, 1.0, 1.0);
         self.sidebar_opacity = finite_clamp(self.sidebar_opacity, 0.2, 1.0, 0.92);
         self.editor_opacity = finite_clamp(self.editor_opacity, 0.2, 1.0, 0.96);
         self.surface_blur = finite_clamp(self.surface_blur, 0.0, 20.0, 10.0);
@@ -176,6 +193,11 @@ impl AppSettings {
         self.debug_args = sanitize_arguments(self.debug_args, &["-g", "-O0"]);
         self.keybindings = sanitize_keybindings(self.keybindings);
         self.custom_themes = sanitize_custom_themes(self.custom_themes);
+        if !matches!(self.editor_theme.as_str(), "inherit" | "signal" | "graphite" | "forest")
+            && !self.custom_themes.iter().any(|theme| self.editor_theme == format!("custom:{}", theme.id))
+        {
+            self.editor_theme = "inherit".to_owned();
+        }
         self.active_custom_theme = self
             .custom_themes
             .iter()
@@ -264,7 +286,16 @@ pub fn load(path: &Path) -> AppResult<AppSettings> {
     }
 
     let bytes = fs::read(path)?;
-    let settings = serde_json::from_slice::<AppSettings>(&bytes).map_err(|error| {
+    let settings = serde_json::from_slice::<serde_json::Value>(&bytes).and_then(|mut value| {
+        // Older versions used the editor opacity for the output panel too.
+        if let Some(object) = value.as_object_mut() {
+            if !object.contains_key("panelOpacity") {
+                let opacity = object.get("editorOpacity").cloned().unwrap_or(serde_json::json!(1.0));
+                object.insert("panelOpacity".to_owned(), opacity);
+            }
+        }
+        serde_json::from_value::<AppSettings>(value)
+    }).map_err(|error| {
         AppError::Configuration(format!(
             "failed to parse settings file {}: {error}",
             path.display()
@@ -395,6 +426,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn appearance_controls_roundtrip_and_legacy_defaults() {
+        let legacy: AppSettings = serde_json::from_str(r#"{"colorTheme":"forest"}"#).unwrap();
+        assert_eq!(legacy.editor_theme, "inherit");
+        assert_eq!(legacy.background_scale, 1.0);
+        assert_eq!(legacy.background_position_x, 50.0);
+        let settings = AppSettings {
+            editor_theme: "graphite".to_owned(),
+            background_position_x: 27.0,
+            background_position_y: 83.0,
+            background_scale: 1.8,
+            panel_opacity: 0.45,
+            popup_opacity: 0.75,
+            ..legacy
+        }.sanitize();
+        let value = serde_json::to_value(&settings).unwrap();
+        let restored: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.editor_theme, "graphite");
+        assert_eq!(restored.background_position_x, 27.0);
+        assert_eq!(restored.background_position_y, 83.0);
+        assert_eq!(restored.background_scale, 1.8);
+        assert_eq!(restored.panel_opacity, 0.45);
+        assert_eq!(restored.popup_opacity, 0.75);
+        let invalid = AppSettings { editor_theme: "unknown".to_owned(), background_scale: 8.0, popup_opacity: 0.0, ..restored }.sanitize();
+        assert_eq!(invalid.editor_theme, "inherit");
+        assert_eq!(invalid.background_scale, 3.0);
+        assert_eq!(invalid.popup_opacity, 0.6);
+    }
+
+    #[test]
     fn settings_are_sanitized_to_supported_ranges() {
         let settings = AppSettings {
             background_image: "  C:\\Pictures\\wallpaper.png  ".to_owned(),
@@ -457,6 +517,11 @@ mod tests {
         };
         let expected = AppSettings {
             theme: ThemePreference::Light,
+            editor_theme: "graphite".to_owned(),
+            background_scale: 1.7,
+            background_position_x: 30.0,
+            panel_opacity: 0.55,
+            popup_opacity: 0.8,
             color_theme: ColorTheme::Forest,
             active_custom_theme: custom_theme.id.clone(),
             custom_themes: vec![custom_theme],
@@ -472,6 +537,11 @@ mod tests {
         let loaded = load(&path).expect("settings should load");
 
         assert_eq!(loaded.theme, ThemePreference::Light);
+        assert_eq!(loaded.editor_theme, "graphite");
+        assert_eq!(loaded.background_scale, 1.7);
+        assert_eq!(loaded.background_position_x, 30.0);
+        assert_eq!(loaded.panel_opacity, 0.55);
+        assert_eq!(loaded.popup_opacity, 0.8);
         assert_eq!(loaded.color_theme, ColorTheme::Forest);
         assert_eq!(loaded.active_custom_theme, "contest");
         assert_eq!(loaded.custom_themes.len(), 1);
@@ -494,6 +564,10 @@ mod tests {
             Some("F7")
         );
 
+        fs::write(&path, r#"{"editorOpacity":0.42}"#).expect("legacy settings fixture");
+        let legacy = load(&path).expect("load legacy settings");
+        assert_eq!(legacy.editor_opacity, 0.42);
+        assert_eq!(legacy.panel_opacity, 0.42);
         fs::remove_file(path).expect("temporary settings file should be removable");
     }
 

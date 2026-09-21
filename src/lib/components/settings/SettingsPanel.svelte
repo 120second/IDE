@@ -2,6 +2,8 @@
   import type { SettingsStore } from "../../stores/settings.svelte";
   import type { SettingsPage, ShellStore } from "../../stores/shell.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
+  import AppearanceRange from "./AppearanceRange.svelte";
+  import AppearancePreview from "./AppearancePreview.svelte";
   import {
     COLOR_THEMES,
     DEFAULT_SETTINGS,
@@ -35,8 +37,11 @@
   let toolchain = $state<ToolchainStatus>();
   let checkingToolchain = $state(false);
   let choosingBackground = $state(false);
+  let previewExpanded = $state(false);
   let toolchainError = $state("");
   let settingsPanel = $state<HTMLDivElement>();
+  let settingsPanelHeight = $state(600);
+  let settingsHeaderHeight = $state(80);
   let diagnosticRequest = 0;
   let toolRows = $derived<{ label: string; tool: ToolStatus | undefined }[]>([
     { label: "编译", tool: toolchain?.compiler },
@@ -58,7 +63,7 @@
     theme: { title: "主题", description: "显示模式、内置颜色主题与自定义主题。" },
     interface: { title: "界面", description: "调整工作台密度、透明度与背景模糊。" },
     background: { title: "背景", description: "管理背景图片、填充方式、可见度与明暗。" },
-    editor: { title: "编辑器字体", description: "调整代码字体、字号和行距。" },
+    editor: { title: "编辑器", description: "独立选择代码配色，调整字体、字号和行距。" },
     shortcuts: { title: "键盘快捷方式", description: "查看并修改工作台命令快捷键。" },
     toolchain: { title: "C++ 工具链", description: "配置编译、调试、语言服务与运行参数。" },
     performance: { title: "性能", description: "控制低配置设备上的绘制开销。" },
@@ -101,6 +106,8 @@
         uiDensity: DEFAULT_SETTINGS.uiDensity,
         sidebarOpacity: DEFAULT_SETTINGS.sidebarOpacity,
         editorOpacity: DEFAULT_SETTINGS.editorOpacity,
+        panelOpacity: DEFAULT_SETTINGS.panelOpacity,
+        popupOpacity: DEFAULT_SETTINGS.popupOpacity,
         surfaceBlur: DEFAULT_SETTINGS.surfaceBlur,
       });
     } else if (shell.settingsPage === "background") {
@@ -110,9 +117,13 @@
         backgroundImageOpacity: DEFAULT_SETTINGS.backgroundImageOpacity,
         backgroundDim: DEFAULT_SETTINGS.backgroundDim,
         backgroundFit: DEFAULT_SETTINGS.backgroundFit,
+        backgroundPositionX: DEFAULT_SETTINGS.backgroundPositionX,
+        backgroundPositionY: DEFAULT_SETTINGS.backgroundPositionY,
+        backgroundScale: DEFAULT_SETTINGS.backgroundScale,
       });
     } else if (shell.settingsPage === "editor") {
       settings.update({
+        editorTheme: DEFAULT_SETTINGS.editorTheme,
         fontFamily: DEFAULT_SETTINGS.fontFamily,
         fontSize: DEFAULT_SETTINGS.fontSize,
         lineHeight: DEFAULT_SETTINGS.lineHeight,
@@ -198,8 +209,8 @@
   });
 </script>
 
-<div class="settings-panel" bind:this={settingsPanel}>
-  <header class="settings-page-header">
+<div class="settings-panel" bind:this={settingsPanel} bind:clientHeight={settingsPanelHeight} style:--appearance-panel-height={`${settingsPanelHeight}px`} style:--appearance-header-height={`${settingsHeaderHeight}px`}>
+  <header class="settings-page-header" bind:clientHeight={settingsHeaderHeight}>
     <div>
       <h2>{pageDetails[shell.settingsPage].title}</h2>
       <p>{pageDetails[shell.settingsPage].description}</p>
@@ -214,6 +225,7 @@
   </header>
 
   {#if appearancePage}
+  <div class="appearance-layout">
   <section class="settings-section settings-detail-section" data-settings-page={shell.settingsPage}>
 
     {#if shell.settingsPage === "theme"}
@@ -237,7 +249,7 @@
     <div class="appearance-block">
       <div class="appearance-block-heading">
         <strong>颜色主题</strong>
-        <span>选择后立即应用到编辑器、侧栏、面板和弹窗。</span>
+        <span>选择后立即应用到界面；编辑器可在“编辑器”页面独立选择配色。</span>
       </div>
       <div class="appearance-theme-grid" role="group" aria-label="颜色主题">
         {#each COLOR_THEMES as theme}
@@ -267,7 +279,7 @@
           </button>
         {/each}
       </div>
-      <button class="primary-button open-theme-studio" onclick={openThemeStudio}>
+      <button class="secondary-button open-theme-studio" onclick={openThemeStudio}>
         {settings.value.activeCustomTheme ? "编辑当前自定义主题" : "创建副本并自定义"}
       </button>
     </div>
@@ -290,31 +302,13 @@
         {/each}
       </div>
 
-      <details class="appearance-advanced interface-advanced">
-        <summary>高级设置</summary>
+      <div class="appearance-advanced interface-advanced">
+        <strong>分区域不透明度</strong>
         <small>透明度始终生效：没有图片时透出工作台底色，选择图片后透出背景图片。</small>
-        <label class="appearance-range">
-          <span class="range-heading"><span>侧栏不透明度</span><output>{percent(settings.value.sidebarOpacity)}</output></span>
-          <input
-            type="range"
-            min="0.2"
-            max="1"
-            step="0.01"
-            value={settings.value.sidebarOpacity}
-            oninput={(event) => settings.update({ sidebarOpacity: Number(event.currentTarget.value) })}
-          />
-        </label>
-        <label class="appearance-range">
-          <span class="range-heading"><span>编辑区不透明度</span><output>{percent(settings.value.editorOpacity)}</output></span>
-          <input
-            type="range"
-            min="0.2"
-            max="1"
-            step="0.01"
-            value={settings.value.editorOpacity}
-            oninput={(event) => settings.update({ editorOpacity: Number(event.currentTarget.value) })}
-          />
-        </label>
+        <AppearanceRange label="侧栏不透明度" value={settings.value.sidebarOpacity} min={0.2} max={1} defaultValue={DEFAULT_SETTINGS.sidebarOpacity} change={(value) => settings.update({ sidebarOpacity: value })} />
+        <AppearanceRange label="编辑区不透明度" value={settings.value.editorOpacity} min={0.2} max={1} defaultValue={DEFAULT_SETTINGS.editorOpacity} change={(value) => settings.update({ editorOpacity: value })} />
+        <AppearanceRange label="底部输出区不透明度" value={settings.value.panelOpacity} min={0.2} max={1} defaultValue={DEFAULT_SETTINGS.panelOpacity} change={(value) => settings.update({ panelOpacity: value })} />
+        <AppearanceRange label="菜单与弹窗不透明度" value={settings.value.popupOpacity} min={0.6} max={1} defaultValue={DEFAULT_SETTINGS.popupOpacity} change={(value) => settings.update({ popupOpacity: value })} />
         <label class="appearance-range">
           <span class="range-heading"><span>背景模糊</span><output>{Math.round(settings.value.surfaceBlur)} px</output></span>
           <input
@@ -323,13 +317,14 @@
             max="20"
             step="1"
             disabled={settings.value.performanceMode || !settings.value.backgroundImage}
+            aria-label="背景模糊"
             value={settings.value.surfaceBlur}
             oninput={(event) => settings.update({ surfaceBlur: Number(event.currentTarget.value) })}
           />
           {#if !settings.value.backgroundImage}<small>选择背景图片后可调整模糊。</small>{/if}
           {#if settings.value.performanceMode}<small>性能模式下已自动关闭模糊。</small>{/if}
         </label>
-      </details>
+      </div>
     </div>
     {/if}
 
@@ -368,6 +363,17 @@
           >{fit.label}</button>
         {/each}
       </div>
+      {#if settings.value.backgroundImage && settings.value.sidebarOpacity >= 0.98 && settings.value.editorOpacity >= 0.98 && settings.value.panelOpacity >= 0.98}
+        <p class="settings-detail-note">面板底色遮住了背景图片。<button class="secondary-button" onclick={() => (shell.settingsPage = "interface")}>调整面板透明度</button></p>
+      {/if}
+
+      <div class="background-framing">
+        <div class="appearance-block-heading"><strong>位置与裁剪</strong><span>调整图片焦点与放大比例，超出窗口的部分会自动裁剪。</span></div>
+        <AppearanceRange label="水平位置" value={settings.value.backgroundPositionX} min={0} max={100} step={1} unit="position" defaultValue={50} disabled={!settings.value.backgroundImage} change={(value) => settings.update({ backgroundPositionX: value })} />
+        <AppearanceRange label="垂直位置" value={settings.value.backgroundPositionY} min={0} max={100} step={1} unit="position" defaultValue={50} disabled={!settings.value.backgroundImage} change={(value) => settings.update({ backgroundPositionY: value })} />
+        <AppearanceRange label="图片缩放" value={settings.value.backgroundScale} min={1} max={3} defaultValue={1} disabled={!settings.value.backgroundImage} change={(value) => settings.update({ backgroundScale: value })} />
+        <button class="secondary-button" disabled={!settings.value.backgroundImage} onclick={() => settings.update({ backgroundPositionX: 50, backgroundPositionY: 50, backgroundScale: 1 })}>恢复居中与原始缩放</button>
+      </div>
 
       <label class="appearance-range">
         <span class="range-heading"><span>背景可见度</span><output>{percent(settings.value.backgroundImageOpacity)}</output></span>
@@ -378,6 +384,7 @@
           step="0.01"
           disabled={!settings.value.backgroundImage}
           value={settings.value.backgroundImageOpacity}
+          aria-label="背景可见度"
           oninput={(event) => settings.update({ backgroundImageOpacity: Number(event.currentTarget.value) })}
         />
       </label>
@@ -391,6 +398,7 @@
           step="0.01"
           disabled={!settings.value.backgroundImage}
           value={settings.value.backgroundDim}
+          aria-label="背景压暗"
           oninput={(event) => settings.update({ backgroundDim: Number(event.currentTarget.value) })}
         />
       </label>
@@ -399,6 +407,15 @@
     {/if}
 
     {#if shell.settingsPage === "editor"}
+    <div class="appearance-block">
+      <div class="appearance-block-heading"><strong>代码配色</strong><span>可以跟随界面，也可以独立选择已有主题的代码配色与编辑区底色。</span></div>
+      <label><span>编辑器主题</span><select value={settings.value.editorTheme} onchange={(event) => settings.update({ editorTheme: event.currentTarget.value })}>
+        <option value="inherit">跟随界面主题</option>
+        {#each COLOR_THEMES as theme}<option value={theme.id}>{theme.label}</option>{/each}
+        {#each settings.value.customThemes as theme}<option value={`custom:${theme.id}`}>{theme.name}（自定义）</option>{/each}
+      </select></label>
+      <button class="secondary-button" disabled={settings.value.editorTheme === "inherit"} onclick={() => settings.update({ editorTheme: "inherit" })}>恢复跟随界面</button>
+    </div>
     <div class="appearance-block editor-typography-block">
       <div class="appearance-block-heading">
         <strong>编辑器字体</strong>
@@ -458,6 +475,11 @@
       恢复此板块默认值
     </button>
   </section>
+  <div class="appearance-preview-column" class:preview-expanded={previewExpanded}>
+    <button type="button" class="secondary-button preview-toggle" aria-expanded={previewExpanded} onclick={() => (previewExpanded = !previewExpanded)}>{previewExpanded ? "收起实时预览" : "展开实时预览"}</button>
+    <AppearancePreview settings={settings.value} />
+  </div>
+  </div>
   {/if}
 
   {#if shell.settingsPage === "shortcuts"}

@@ -44,7 +44,7 @@
   let activeTheme = $derived(getActiveCustomTheme(settings.value));
   let variant = $derived(resolveThemePreference(settings.value.theme));
   let colors = $derived(resolveThemeColors(settings.value, variant));
-  let syntax = $derived(resolveEditorThemeColors(settings.value, variant));
+  let syntax = $derived(resolveEditorThemeColors({ ...settings.value, editorTheme: "inherit" }, variant));
   let currentUiGroup = $derived(THEME_COLOR_GROUPS.find((group) => group.id === selectedUiGroup) ?? THEME_COLOR_GROUPS[0]);
   let currentSyntaxGroup = $derived(SYNTAX_COLOR_GROUPS.find((group) => group.id === selectedSyntaxGroup) ?? SYNTAX_COLOR_GROUPS[0]);
 

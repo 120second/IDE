@@ -1,14 +1,15 @@
 <script lang="ts">
+  import Icon from "../../shell/Icon.svelte";
+
   export type AddRuleKind = "integer" | "array" | "string" | "permutation" | "repeat" | "tree" | "graph" | "matrix";
 
   interface Props {
-    depth: number;
     add: (kind: AddRuleKind) => void;
     compact?: boolean;
     label?: string;
   }
 
-  let { depth, add, compact = false, label }: Props = $props();
+  let { add, compact = false, label }: Props = $props();
   let open = $state(false);
   let root = $state<HTMLDivElement>();
   let trigger = $state<HTMLButtonElement>();
@@ -116,7 +117,7 @@
     aria-expanded={open}
     onclick={toggle}
     onkeydown={handleTriggerKeydown}
-  >＋ {label ?? (compact ? "添加输入" : "添加规则")}</button>
+  ><Icon name="plus" size={12} /><span>{label ?? (compact ? "添加输入" : "添加规则")}</span></button>
   {#if open}
     <div
       class="add-rule-popover"
@@ -127,14 +128,14 @@
       style={`left: ${placement.left}px; top: ${placement.top}px; width: ${placement.width}px; max-height: ${placement.maxHeight}px;`}
       onkeydown={handleMenuKeydown}
     >
-      <button type="button" role="menuitem" onclick={() => choose("integer")}><strong>整数</strong><span>一个新的标量输入行</span></button>
+      <span class="add-rule-section" role="presentation">数据容器</span>
       <button type="button" role="menuitem" onclick={() => choose("array")}><strong>数组</strong><span>独占一行的整数数组</span></button>
       <button type="button" role="menuitem" onclick={() => choose("string")}><strong>字符串</strong><span>二进制串或小写串</span></button>
       <button type="button" role="menuitem" onclick={() => choose("permutation")}><strong>排列</strong><span>1 到 n 的随机排列</span></button>
-      <button type="button" role="menuitem" onclick={() => choose("repeat")} disabled={depth >= 4}><strong>重复块</strong><span>{depth >= 4 ? "已达到 4 层限制" : "按变量或常量重复"}</span></button>
+      <button type="button" role="menuitem" onclick={() => choose("matrix")}><strong>矩阵</strong><span>多行定长整数</span></button>
+      <span class="add-rule-section" role="presentation">图结构</span>
       <button type="button" role="menuitem" onclick={() => choose("tree")}><strong>树</strong><span>无权或带权树</span></button>
       <button type="button" role="menuitem" onclick={() => choose("graph")}><strong>图</strong><span>简单图、连通图或有向无环图</span></button>
-      <button type="button" role="menuitem" onclick={() => choose("matrix")}><strong>矩阵</strong><span>多行定长整数</span></button>
     </div>
   {/if}
 </div>

@@ -8,3 +8,11 @@ export function testcaseEditorToggle(
   if (editingId !== targetId) return "replace";
   return formOpen ? "collapse" : "resume";
 }
+
+export function shouldShowTestcaseEmptyState(
+  formOpen: boolean,
+  loading: boolean,
+  testcaseCount: number,
+): boolean {
+  return !formOpen && !loading && testcaseCount === 0;
+}

@@ -133,25 +133,25 @@ export const THEME_CSS_VARIABLES: Record<ThemeColorToken, string> = {
 const UI_THEME_COLORS: Record<ColorThemeId, Record<ResolvedTheme, Required<ThemeColorOverrides>>> = {
   signal: {
     dark: {
-      background: "#0a0e13", backgroundElevated: "#111720", activityBackground: "#090d12",
-      sidebarBackground: "#0f151d", panelBackground: "#0d131b", editorBackground: "#0c1118",
-      tabBackground: "#0d131b", tabActiveBackground: "#121a24", inputBackground: "#090f16",
-      surface: "#121923", surfaceRaised: "#17202b", surfaceSunken: "#080d13",
-      hoverBackground: "#79a0d314", activeBackground: "#4c8de826", textPrimary: "#e5ebf4",
-      textSecondary: "#a4afbf", textMuted: "#7d8c9f", accent: "#4c8de8",
-      accentStrong: "#70a8f2", accentSoft: "#4c8de824", accentContrast: "#06101d",
-      border: "#202a36", borderSubtle: "#18212c", borderStrong: "#344150",
+      background: "#202225", backgroundElevated: "#292c30", activityBackground: "#25272b",
+      sidebarBackground: "#25272b", panelBackground: "#202225", editorBackground: "#202225",
+      tabBackground: "#25272b", tabActiveBackground: "#202225", inputBackground: "#202225",
+      surface: "#292c30", surfaceRaised: "#30343a", surfaceSunken: "#232529",
+      hoverBackground: "#ffffff0d", activeBackground: "#79a5df21", textPrimary: "#e3e6eb",
+      textSecondary: "#b4bcc8", textMuted: "#a0a9b6", accent: "#82afe9",
+      accentStrong: "#a1c5f2", accentSoft: "#82afe91c", accentContrast: "#16263b",
+      border: "#3b3f46", borderSubtle: "#30343a", borderStrong: "#565f6b",
       success: "#49c58a", warning: "#dda84f", danger: "#ec6874", focusRing: "#70a8f261",
     },
     light: {
-      background: "#e9edf2", backgroundElevated: "#f8fafc", activityBackground: "#e4e9ef",
-      sidebarBackground: "#f1f4f7", panelBackground: "#f5f7fa", editorBackground: "#fcfdff",
-      tabBackground: "#e9edf2", tabActiveBackground: "#fcfdff", inputBackground: "#ffffff",
-      surface: "#f7f9fb", surfaceRaised: "#ffffff", surfaceSunken: "#e9edf2",
-      hoverBackground: "#294c7412", activeBackground: "#2d6fca21", textPrimary: "#1e2732",
-      textSecondary: "#526174", textMuted: "#5d6c80", accent: "#2f72cf",
-      accentStrong: "#1f63bd", accentSoft: "#2f72cf1f", accentContrast: "#ffffff",
-      border: "#ccd4de", borderSubtle: "#dce2e9", borderStrong: "#aeb9c6",
+      background: "#ffffff", backgroundElevated: "#f7f8fa", activityBackground: "#f1f3f5",
+      sidebarBackground: "#f7f8fa", panelBackground: "#ffffff", editorBackground: "#ffffff",
+      tabBackground: "#f1f3f5", tabActiveBackground: "#ffffff", inputBackground: "#ffffff",
+      surface: "#f5f6f8", surfaceRaised: "#ffffff", surfaceSunken: "#f0f2f5",
+      hoverBackground: "#263b5810", activeBackground: "#356bb117", textPrimary: "#282d35",
+      textSecondary: "#586272", textMuted: "#667181", accent: "#356bb1",
+      accentStrong: "#275990", accentSoft: "#356bb112", accentContrast: "#ffffff",
+      border: "#dce1e7", borderSubtle: "#e9edf1", borderStrong: "#b5bfcc",
       success: "#1f8b58", warning: "#9b6511", danger: "#c94250", focusRing: "#2f72cf42",
     },
   },
@@ -236,9 +236,29 @@ export function resolveThemeColors(settings: Pick<AppSettings, "activeCustomThem
   return { ...UI_THEME_COLORS[base][variant], ...(custom?.variants[variant].colors ?? {}) };
 }
 
-export function resolveEditorThemeColors(settings: Pick<AppSettings, "activeCustomTheme" | "colorTheme" | "customThemes">, variant: ResolvedTheme): Required<EditorSyntaxOverrides> {
-  const custom = getActiveCustomTheme(settings);
-  const base = custom?.inherits ?? settings.colorTheme;
+type EditorThemeSettings = Pick<AppSettings, "activeCustomTheme" | "colorTheme" | "customThemes"> & Partial<Pick<AppSettings, "editorTheme">>;
+
+function editorThemeSettings(settings: EditorThemeSettings): EditorThemeSettings {
+  const selection = settings.editorTheme ?? "inherit";
+  if (selection === "inherit") return settings;
+  if (selection.startsWith("custom:")) {
+    const theme = settings.customThemes.find((theme) => `custom:${theme.id}` === selection);
+    return theme ? { ...settings, activeCustomTheme: theme.id, colorTheme: theme.inherits } : settings;
+  }
+  if (selection === "signal" || selection === "graphite" || selection === "forest") {
+    return { ...settings, activeCustomTheme: "", colorTheme: selection };
+  }
+  return settings;
+}
+
+export function resolveEditorBackground(settings: EditorThemeSettings, variant: ResolvedTheme): string {
+  return resolveThemeColors(editorThemeSettings(settings), variant).editorBackground;
+}
+
+export function resolveEditorThemeColors(settings: EditorThemeSettings, variant: ResolvedTheme): Required<EditorSyntaxOverrides> {
+  const resolved = editorThemeSettings(settings);
+  const custom = getActiveCustomTheme(resolved);
+  const base = custom?.inherits ?? resolved.colorTheme;
   return { ...EDITOR_THEME_COLORS[base][variant], ...(custom?.variants[variant].syntax ?? {}) };
 }
 

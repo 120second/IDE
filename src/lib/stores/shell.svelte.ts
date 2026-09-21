@@ -22,6 +22,7 @@ export class ShellStore {
   bottomPanelVisible = $state(true);
   activeBottomPanel = $state<BottomPanelId>("output");
   zenMode = $state(false);
+  generatorOpen = $state(false);
   themeStudioOpen = $state(false);
   themeStudioDirty = $state(false);
   settingsWindowOpen = $state(false);
@@ -46,6 +47,12 @@ export class ShellStore {
     }
     this.activeActivity = activity;
     this.sidebarVisible = true;
+  }
+
+  openGenerator(): void {
+    this.activeActivity = "testcases";
+    this.sidebarVisible = true;
+    this.generatorOpen = true;
   }
 
   openThemeStudio(): void {

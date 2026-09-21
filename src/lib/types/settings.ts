@@ -72,6 +72,7 @@ export interface CustomThemeDefinition {
 export interface AppSettings {
   theme: ThemePreference;
   colorTheme: ColorThemeId;
+  editorTheme: string;
   activeCustomTheme: string;
   customThemes: CustomThemeDefinition[];
   uiDensity: UiDensity;
@@ -80,8 +81,13 @@ export interface AppSettings {
   backgroundImageOpacity: number;
   backgroundDim: number;
   backgroundFit: BackgroundFit;
+  backgroundPositionX: number;
+  backgroundPositionY: number;
+  backgroundScale: number;
   sidebarOpacity: number;
   editorOpacity: number;
+  panelOpacity: number;
+  popupOpacity: number;
   surfaceBlur: number;
   fontFamily: string;
   fontSize: number;

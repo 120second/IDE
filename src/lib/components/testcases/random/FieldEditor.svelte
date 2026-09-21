@@ -2,6 +2,7 @@
   import { STRATEGIES } from "../../../generator/visualRules";
   import type { GeneratorStrategy, VisualDiagnostic, VisualField } from "../../../types/generator";
   import ValueExpressionInput from "./ValueExpressionInput.svelte";
+  import Icon from "../../shell/Icon.svelte";
 
   interface Props {
     field: VisualField;
@@ -18,9 +19,9 @@
   }
 </script>
 
-<div class:invalid={diagnostics.length > 0} class="field-editor">
-  <header><strong>{field.type === "integer" ? "整数" : field.type === "array" ? "数组" : field.type === "string" ? "字符串" : "排列"}</strong><button title="删除字段" aria-label="删除字段" onclick={remove}>×</button></header>
-  <label><span>名称</span><input value={field.name} oninput={(event) => setName(event.currentTarget.value)} /></label>
+<div class:invalid={diagnostics.length > 0} class:scalar-field={field.type === "integer"} class="field-editor">
+  <header><strong>{field.type === "integer" ? "整数" : field.type === "array" ? "数组" : field.type === "string" ? "字符串" : "排列"}</strong><button type="button" title="删除字段" aria-label={`删除字段 ${field.name || "未命名"}`} onclick={remove}><Icon name="trash" size={13} /></button></header>
+  <label><span>变量名</span><input spellcheck="false" autocomplete="off" value={field.name} oninput={(event) => setName(event.currentTarget.value)} /></label>
 
   {#if field.type === "integer"}
     <div class="range-editor">

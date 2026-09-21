@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import type { UxStore } from "../../stores/ux.svelte";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
 
   interface Props { ux: UxStore }
@@ -13,6 +14,8 @@
   let previousDialogKey: string | undefined;
   let dragX = $state(0);
   let dragY = $state(0);
+  const confirmationBackdrop = createBackdropDismiss(() => ux.cancelConfirmation());
+  const textPromptBackdrop = createBackdropDismiss(() => ux.cancelTextPrompt());
 
   interface DragState {
     pointerId: number;
@@ -135,7 +138,7 @@
 </div>
 
 {#if ux.confirmation}
-  <div class="modal-backdrop confirmation-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) ux.cancelConfirmation(); }}>
+  <div class="modal-backdrop confirmation-backdrop" role="presentation" onpointerdown={confirmationBackdrop.onPointerDown} onclick={confirmationBackdrop.onClick} onpointercancel={confirmationBackdrop.onPointerCancel}>
     <div
       class="confirmation-dialog"
       class:dragging={Boolean(dragState)}
@@ -177,7 +180,7 @@
 {/if}
 
 {#if ux.textPrompt}
-  <div class="modal-backdrop confirmation-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) ux.cancelTextPrompt(); }}>
+  <div class="modal-backdrop confirmation-backdrop" role="presentation" onpointerdown={textPromptBackdrop.onPointerDown} onclick={textPromptBackdrop.onClick} onpointercancel={textPromptBackdrop.onPointerCancel}>
     <div
       class="confirmation-dialog text-prompt-dialog"
       class:dragging={Boolean(dragState)}

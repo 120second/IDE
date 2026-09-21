@@ -4,10 +4,12 @@
     integerField,
     newRuleId,
     scopeAfterLineField,
+    suggestIntegerName,
     variable,
   } from "../../../generator/visualRules";
   import type { VisualDiagnostic, VisualField, VisualNode } from "../../../types/generator";
   import FieldEditor from "./FieldEditor.svelte";
+  import Icon from "../../shell/Icon.svelte";
 
   interface Props {
     node: Extract<VisualNode, { type: "line" }>;
@@ -27,9 +29,10 @@
   }
 
   function addField(type: "integer" | "string" | "permutation"): void {
-    const fallback = scope.at(-1) ?? "n";
+    const available = scopeAfterLineField(node.fields, node.fields.length, scope);
+    const fallback = available.at(-1) ?? "n";
     const field: VisualField = type === "integer"
-      ? integerField(`x${node.fields.length + 1}`)
+      ? integerField(suggestIntegerName(available))
       : type === "string"
         ? { type: "string", id: newRuleId("field"), name: "s", length: variable(fallback), alphabet: "lowercase" }
         : { type: "permutation", id: newRuleId("field"), name: "p", length: variable(fallback) };
@@ -48,9 +51,9 @@
     />
   {/each}
   <div class="add-field-row">
-    <span>添加到同一行：</span>
-    <button onclick={() => addField("integer")}>＋ 整数</button>
-    <button onclick={() => addField("string")}>字符串</button>
-    <button onclick={() => addField("permutation")}>排列</button>
+    <span>同一行添加</span>
+    <button type="button" onclick={() => addField("integer")}><Icon name="plus" size={12} />整数</button>
+    <button type="button" onclick={() => addField("string")}>字符串</button>
+    <button type="button" onclick={() => addField("permutation")}>排列</button>
   </div>
 </div>

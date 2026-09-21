@@ -26,6 +26,7 @@
   let { workspace, togglePanel, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile, lsp }: Props = $props();
   let tabStrip: HTMLDivElement;
   let menu = $state<{ x: number; y: number; tabId: string }>();
+  let canRun = $derived(Boolean(workspace.activeTab?.path && !workspace.activeTab.deleted && !workspace.activeTab.loading));
 
   async function closeTab(id: string): Promise<void> {
     await requestCloseTabs(workspace, ux, [id]);
@@ -145,11 +146,11 @@
     </button>
   </div>
   <div class="editor-actions">
-    <button class="tab-run-action" disabled={busy} title="编译当前文件" onclick={compile}>编译</button>
+    <button class="tab-run-action" disabled={busy || !canRun} title={canRun ? "编译当前文件" : "先打开一个 C++ 文件"} onclick={compile}>编译</button>
     {#if running}
       <button class="tab-run-action stop" title="停止" onclick={stop}>停止</button>
     {:else}
-      <button class="tab-run-action" disabled={busy} title={`运行当前文件 · ${keybindings.runCurrent}`} onclick={run}>运行</button>
+      <button class="tab-run-action" disabled={busy || !canRun} title={canRun ? `编译并运行 · ${keybindings.runCurrent}` : "先打开一个 C++ 文件"} onclick={run}>运行</button>
     {/if}
     <button class="tab-action" aria-label="切换底部面板" title={`切换底部面板 · ${keybindings.togglePanel}`} onclick={togglePanel}>
       <Icon name="panel" size={16} />

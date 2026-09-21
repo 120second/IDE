@@ -100,8 +100,13 @@ impl DebugManager {
             .active
             .lock()
             .map_err(|_| debugger_error("debug manager lock was poisoned"))?;
-        if active.is_some() {
-            return Err(debugger_error("a debug session is already active"));
+        if let Some(previous) = active.as_ref() {
+            if matches!(previous.state(), DebugSessionState::Starting | DebugSessionState::Running | DebugSessionState::Stopped) {
+                return Err(debugger_error("调试正在进行，请先停止当前调试。"));
+            }
+        }
+        if let Some(previous) = active.take() {
+            previous.shutdown();
         }
         let session = DebugSession::spawn(request, &self.data_dir, Arc::new(emit))?;
         if let Err(error) = session.initialize() {
@@ -154,7 +159,13 @@ impl DebugManager {
             .map_err(|_| debugger_error("debug manager lock was poisoned"))?
             .take()
             .ok_or_else(|| debugger_error("no active debug session"))?;
-        let request = old.request.clone();
+        let mut request = old.request.clone();
+        request.breakpoints = old.breakpoints.lock()
+            .map_err(|_| debugger_error("breakpoint lock was poisoned"))?
+            .iter().map(|bp| DebugBreakpointInput {
+                id: bp.id.clone(), file: bp.file.clone(), line: bp.line,
+                enabled: bp.enabled, condition: bp.condition.clone(),
+            }).collect();
         let emit = old.emit.clone();
         old.shutdown();
         let session = DebugSession::spawn(request, &self.data_dir, emit)?;
@@ -297,14 +308,12 @@ impl DebugSession {
                 .unwrap_or_default()
                 .as_nanos()
         );
-        let input_file = if request.stdin.is_empty() {
-            None
-        } else {
-            fs::create_dir_all(data_dir)?;
-            let path = data_dir.join(format!("{id}.stdin"));
-            fs::write(&path, request.stdin.as_bytes())?;
-            Some(path)
-        };
+        // Even empty input needs its own EOF. The inferior must never read the
+        // pipe carrying GDB/MI commands.
+        fs::create_dir_all(data_dir)?;
+        let path = data_dir.join(format!("{id}.stdin"));
+        fs::write(&path, request.stdin.as_bytes())?;
+        let input_file = Some(path);
 
         let gdb_path = request.gdb_path.trim();
         let gdb_path = if gdb_path.is_empty() { "gdb" } else { gdb_path };
@@ -317,6 +326,7 @@ impl DebugSession {
             .stderr(Stdio::piped());
         configure_hidden(&mut command);
         let mut child = command.spawn().map_err(|error| {
+            if let Some(path) = &input_file { let _ = fs::remove_file(path); }
             if error.kind() == std::io::ErrorKind::NotFound {
                 debugger_start_error(format!(
                     "找不到 GDB（{gdb_path}）。请在设置中填写 gdb.exe 的完整路径，或将 GDB 加入 PATH。"
@@ -399,6 +409,11 @@ impl DebugSession {
             .lock()
             .map_err(|_| debugger_error("breakpoint lock was poisoned"))? = installed;
         self.emit_breakpoints();
+        if self.request.stop_on_entry {
+            self.command_unlocked("-break-insert -t main").map_err(|_| {
+                debugger_start_error("无法在 main 暂停。请确认程序包含 main，并在调试编译参数中启用 -g -O0。")
+            })?;
+        }
         self.launch_unlocked()?;
         Ok(())
     }
@@ -430,9 +445,17 @@ impl DebugSession {
                 "the target must be stopped before stepping or continuing",
             ));
         }
-        self.command_unlocked(command)?;
+        // Mark running before sending the command: a fast *stopped event can
+        // arrive before the command response, and must remain authoritative.
+        let previous = self.status();
         if command != "-exec-interrupt --all" {
             self.set_state(DebugSessionState::Running, "程序正在运行");
+        }
+        if let Err(error) = self.command_unlocked(command) {
+            if self.state() == DebugSessionState::Running {
+                self.set_state(previous.0, previous.1);
+            }
+            return Err(error);
         }
         Ok(())
     }
@@ -833,8 +856,11 @@ impl DebugSession {
                 }
             }
             Ok(_) => pending_output.flush(self),
-            Err(error) => {
-                pending_output.push("log", format!("[MI 解析警告] {error}\n"));
+            Err(_) => {
+                // Native targets may write unframed stdout on GDB's stream.
+                // Keep the actual program output instead of replacing it with
+                // a parser warning (e.g. a plain "42" or a Chinese string).
+                pending_output.push("target", format!("{line}\n"));
                 if pending_output.should_flush() {
                     pending_output.flush(self);
                 }
@@ -1182,6 +1208,7 @@ mod tests {
                     source_path: source.to_string_lossy().into_owned(),
                     working_directory: root.to_string_lossy().into_owned(),
                     stdin: "41\n".to_owned(),
+                    stop_on_entry: false,
                     breakpoints: vec![DebugBreakpointInput {
                         id: "bp-1".to_owned(),
                         file: source.to_string_lossy().into_owned(),
@@ -1231,5 +1258,86 @@ mod tests {
         assert_eq!(replaced.breakpoints[0].id, "bp-replacement");
         manager.stop().unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn gdb_real_program_supports_entry_steps_arrays_output_restart_and_empty_input() {
+        let _guard = crate::PROCESS_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        if Command::new("gdb").arg("--version").output().is_err()
+            || Command::new("g++").arg("--version").output().is_err() {
+            eprintln!("skipping real debugger test: gdb/g++ unavailable");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("lightcp-debug-flow-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("流程 with spaces.cpp");
+        let executable = root.join("flow.exe");
+        fs::write(&source, "#include <iostream>\nint twice(int value) {\n  int result = value * 2;\n  return result;\n}\nint main() {\n  int n = 0;\n  if (!(std::cin >> n)) return 0;\n  int data[3] = {n, 2, 3};\n  int answer = twice(data[0]);\n  std::cout << \"answer=\" << answer << std::endl;\n  return 0;\n}\n").unwrap();
+        let compiled = Command::new("g++").args(["-g", "-O0"]).arg(&source).arg("-o").arg(&executable).output().unwrap();
+        assert!(compiled.status.success(), "{}", String::from_utf8_lossy(&compiled.stderr));
+        let manager = DebugManager::new(root.join("io"));
+        let (sender, receiver) = mpsc::channel();
+        let request = DebugStartRequest {
+            gdb_path: "gdb".into(), executable_path: executable.to_string_lossy().into_owned(),
+            source_path: source.to_string_lossy().into_owned(), working_directory: root.to_string_lossy().into_owned(),
+            stdin: "21\n".into(), stop_on_entry: true, breakpoints: vec![],
+        };
+        manager.start(request.clone(), move |event| { let _ = sender.send(event); }).unwrap();
+        wait_for_state(&manager, DebugSessionState::Stopped);
+        assert_eq!(manager.snapshot(0, &[]).unwrap().frames[0].line, Some(7));
+        for expected_line in [8, 9, 10] {
+            manager.step_over().unwrap();
+            wait_for_state(&manager, DebugSessionState::Stopped);
+            assert_eq!(manager.snapshot(0, &[]).unwrap().frames[0].line, Some(expected_line));
+        }
+        let children = manager.fetch_children(0, "data", None, 0, 2).unwrap();
+        assert_eq!(children.children[0].value, "21");
+        assert!(children.has_more);
+        let rest = manager.fetch_children(0, "data", Some(&children.variable_object), 2, 2).unwrap();
+        assert_eq!(rest.children[0].value, "3");
+        manager.step_into().unwrap();
+        wait_for_state(&manager, DebugSessionState::Stopped);
+        let frame = manager.snapshot(0, &[]).unwrap();
+        assert!(frame.frames[0].function.contains("twice"));
+        assert_eq!(manager.snapshot(1, &["n".into()]).unwrap().watches[0].value, "21");
+        manager.snapshot(0, &[]).unwrap();
+        manager.step_over().unwrap();
+        wait_for_state(&manager, DebugSessionState::Stopped);
+        assert_eq!(manager.snapshot(0, &["result".into()]).unwrap().watches[0].value, "42");
+        manager.step_out().unwrap();
+        wait_for_state(&manager, DebugSessionState::Stopped);
+        assert_eq!(manager.snapshot(0, &[]).unwrap().frames[0].function, "main");
+        manager.set_breakpoint(DebugBreakpointInput { id: "added".into(), file: request.source_path.clone(), line: 11, enabled: true, condition: "n == 21".into() }).unwrap();
+        manager.restart().unwrap();
+        wait_for_state(&manager, DebugSessionState::Stopped);
+        assert_eq!(manager.snapshot(0, &[]).unwrap().breakpoints[0].id, "added");
+        manager.continue_execution().unwrap();
+        wait_for_state(&manager, DebugSessionState::Stopped);
+        assert_eq!(manager.snapshot(0, &[]).unwrap().frames[0].line, Some(11));
+        manager.continue_execution().unwrap();
+        wait_for_state(&manager, DebugSessionState::Exited);
+        let mut output = String::new();
+        for event in receiver.try_iter() {
+            if let DebugEvent::Output { text, .. } = event { output.push_str(&text); }
+        }
+        assert!(output.contains("answer=42"), "program output missing: {output}");
+        // Starting after exit replaces the old session; empty stdin must produce
+        // EOF instead of consuming MI commands or waiting indefinitely.
+        manager.start(DebugStartRequest { stdin: String::new(), stop_on_entry: false, ..request }, |_| {}).unwrap();
+        wait_for_state(&manager, DebugSessionState::Exited);
+        manager.stop().unwrap();
+        assert!(!manager.is_active());
+        assert_eq!(fs::read_dir(root.join("io")).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn wait_for_state(manager: &DebugManager, expected: DebugSessionState) {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let session = manager.session().unwrap();
+            if session.state() == expected { return; }
+            assert!(Instant::now() < deadline, "expected {expected:?}, got {:?}", session.status());
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }

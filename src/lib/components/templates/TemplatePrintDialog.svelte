@@ -13,6 +13,7 @@
     TemplateFilter,
     TemplateKind,
   } from "../../types/templates";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
   import TemplateBookPage from "./TemplateBookPage.svelte";
 
@@ -26,6 +27,9 @@
   }
 
   let { categories, selectedCategoryId, onclose }: Props = $props();
+  const backdrop = createBackdropDismiss(() => {
+    if (!printing) onclose();
+  });
   let dialogElement: HTMLDivElement;
   let previewViewport = $state<HTMLDivElement>();
   let templates = $state.raw<TemplateDetail[]>([]);
@@ -324,7 +328,7 @@
   }
 </script>
 
-<div class="template-print-overlay" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !printing) onclose(); }}>
+<div class="template-print-overlay" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
   <div
     class="template-print-dialog"
     role="dialog"

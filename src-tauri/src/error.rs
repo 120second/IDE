@@ -52,6 +52,11 @@ pub struct CommandError {
 impl From<AppError> for CommandError {
     fn from(error: AppError) -> Self {
         let (category, code, user_message) = match &error {
+            AppError::FileSystem(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (
+                ErrorCategory::FileSystem,
+                "FILE_ALREADY_EXISTS",
+                "此目录下已存在同名文件或文件夹，请使用其他名称。",
+            ),
             AppError::FileSystem(_) | AppError::FileSystemOperation(_) => (
                 ErrorCategory::FileSystem,
                 "FILE_SYSTEM_ERROR",

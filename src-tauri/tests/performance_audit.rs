@@ -214,6 +214,7 @@ fn repeated_debug_20_sessions_cleanup() {
                     source_path: path_text(&source),
                     working_directory: path_text(&root),
                     stdin: String::new(),
+                    stop_on_entry: false,
                     breakpoints: Vec::new(),
                 },
                 move |_| {

@@ -8,12 +8,12 @@
     toggleSettingsMenu: (anchor: HTMLButtonElement) => void;
   }
 
-  const primaryItems: { id: ActivityId; label: string; icon: IconName }[] = [
-    { id: "explorer", label: "资源管理器", icon: "explorer" },
-    { id: "testcases", label: "测试点", icon: "testcases" },
-    { id: "templates", label: "模板", icon: "templates" },
-    { id: "debug", label: "调试", icon: "debug" },
-    { id: "judge", label: "对拍", icon: "judge" },
+  const primaryItems: { id: ActivityId; label: string; shortLabel: string; icon: IconName }[] = [
+    { id: "explorer", label: "资源管理器", shortLabel: "文件", icon: "explorer" },
+    { id: "testcases", label: "测试点", shortLabel: "测试", icon: "testcases" },
+    { id: "templates", label: "模板", shortLabel: "模板", icon: "templates" },
+    { id: "debug", label: "调试", shortLabel: "调试", icon: "debug" },
+    { id: "judge", label: "对拍", shortLabel: "对拍", icon: "judge" },
   ];
 
   let { shell, settingsMenuOpen, toggleSettingsMenu }: Props = $props();
@@ -32,6 +32,7 @@
         onclick={() => shell.selectActivity(item.id)}
       >
         <Icon name={item.icon} size={21} />
+        <span>{item.shortLabel}</span>
       </button>
     {/each}
   </div>
@@ -46,6 +47,7 @@
       onclick={() => settingsButton && toggleSettingsMenu(settingsButton)}
     >
       <Icon name="settings" size={21} />
+      <span>设置</span>
     </button>
   </div>
 </nav>

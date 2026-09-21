@@ -5,7 +5,6 @@
     defaultKeymap,
     history,
     historyKeymap,
-    insertNewlineAndIndent,
   } from "@codemirror/commands";
   import { bracketMatching, indentOnInput } from "@codemirror/language";
   import { Compartment, EditorState } from "@codemirror/state";
@@ -21,6 +20,7 @@
   import { createAppearanceExtension } from "../../editor/appearance";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import { templateReferenceCode } from "../../editor/templateCompletion";
+  import { templateReferencePrimaryKeymap } from "../../editor/templateReferenceKeymap";
   import Icon from "../shell/Icon.svelte";
 
   interface Props {
@@ -68,8 +68,7 @@
             spellcheck: "false",
           }),
           keymap.of([
-            { key: "Enter", run: insertDraft },
-            { key: "Shift-Enter", run: insertNewlineAndIndent },
+            ...templateReferencePrimaryKeymap(insertDraft),
             ...closeBracketsKeymap,
             ...defaultKeymap,
             ...historyKeymap,
@@ -159,7 +158,7 @@
   }
 
   function moveWithKeyboard(event: KeyboardEvent): void {
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && event.shiftKey) {
       event.preventDefault();
       insertDraft();
       return;
@@ -207,8 +206,8 @@
     <button
       class="template-reference-drag-handle"
       type="button"
-      aria-label="模板临时副本；按回车插入，可拖动或使用方向键移动"
-      title="Enter 插入 · Shift+Enter 换行 · 拖动窗口 · 方向键微调"
+      aria-label="模板临时副本；按 Shift 加回车插入，可拖动或使用方向键移动"
+      title="Enter 换行 · Shift+Enter 插入 · 拖动窗口 · 方向键微调"
       onpointerdown={beginDrag}
       onpointermove={moveDrag}
       onpointerup={finishDrag}
@@ -218,14 +217,14 @@
       <span class="drag-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
       <strong>{reference.name}</strong>
       <span class:edited={draftDirty} class="template-reference-hint" aria-live="polite">
-        {draftDirty ? "临时已修改" : "临时副本"} · Enter 插入
+        {draftDirty ? "临时已修改" : "临时副本"} · Shift+Enter 插入
       </span>
     </button>
     <button class="template-reference-close" type="button" aria-label="关闭模板对照窗" title="关闭 · Esc" onclick={close}>
       <Icon name="close" size={13} />
     </button>
   </header>
-  <div class="template-reference-code" aria-label="可编辑模板临时副本；按回车插入，Shift 加回车换行" translate="no" bind:this={codeHost}></div>
+  <div class="template-reference-code" aria-label="可编辑模板临时副本；按回车换行，Shift 加回车插入" translate="no" bind:this={codeHost}></div>
 </aside>
 
 <style>
@@ -352,7 +351,7 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: var(--editor-background);
+    background: var(--code-background, var(--editor-background));
   }
 
   .template-reference-code :global(.cm-editor) {

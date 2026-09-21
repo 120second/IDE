@@ -463,7 +463,8 @@ pub fn create_file(root: &Path, parent: &str, name: &str, content: &str) -> AppR
     ensure_directory(&parent)?;
     let target = new_child_path(&parent, name)?;
     ensure_missing(&target)?;
-    fs::write(&target, content.as_bytes())?;
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&target)?;
+    file.write_all(content.as_bytes())?;
     Ok(PathResult {
         path: path_text(&target),
     })
@@ -564,10 +565,10 @@ fn ensure_directory(path: &Path) -> AppResult<()> {
 
 fn ensure_missing(path: &Path) -> AppResult<()> {
     if path.exists() {
-        Err(operation_error(format!(
-            "path already exists: {}",
-            path.display()
-        )))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("path already exists: {}", path.display()),
+        ).into())
     } else {
         Ok(())
     }
@@ -630,6 +631,20 @@ mod tests {
         assert!(new_child_path(parent, "../escape.cpp").is_err());
         assert!(new_child_path(parent, "folder/file.cpp").is_err());
         assert!(new_child_path(parent, "main.cpp").is_ok());
+    }
+
+    #[test]
+    fn duplicate_file_reports_conflict_without_overwriting() {
+        let root = temporary_directory("duplicate-file");
+        let parent = path_text(&root);
+        let name = "解法 1.cpp";
+        create_file(&root, &parent, name, "original").expect("create original");
+        let error = create_file(&root, &parent, name, "replacement").expect_err("reject duplicate");
+        let error = crate::error::CommandError::from(error);
+        assert_eq!(error.code, "FILE_ALREADY_EXISTS");
+        assert!(error.user_message.contains("同名"));
+        assert_eq!(fs::read_to_string(root.join(name)).unwrap(), "original");
+        fs::remove_dir_all(root).expect("remove temporary directory");
     }
 
     #[test]

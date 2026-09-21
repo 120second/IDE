@@ -11,6 +11,17 @@ import {
   type AppSettings,
 } from "../types/settings";
 
+export function editorAppearanceKey(settings: Partial<AppSettings>): string {
+  const variant = resolveThemePreference(settings.theme ?? "system");
+  const colors = resolveEditorThemeColors({
+    colorTheme: settings.colorTheme ?? "signal",
+    editorTheme: settings.editorTheme ?? "inherit",
+    activeCustomTheme: settings.activeCustomTheme ?? "",
+    customThemes: settings.customThemes ?? [],
+  }, variant);
+  return JSON.stringify([variant, colors, settings.fontFamily, settings.fontSize, settings.lineHeight]);
+}
+
 export function createAppearanceExtension(settings: Partial<AppSettings>): Extension {
   const variant = resolveThemePreference(settings.theme ?? "system");
   const light = variant === "light";
@@ -19,6 +30,7 @@ export function createAppearanceExtension(settings: Partial<AppSettings>): Exten
   const lineHeight = settings.lineHeight ?? 1.55;
   const colors = resolveEditorThemeColors({
     colorTheme: settings.colorTheme ?? "signal",
+    editorTheme: settings.editorTheme ?? "inherit",
     activeCustomTheme: settings.activeCustomTheme ?? "",
     customThemes: settings.customThemes ?? [],
   }, variant);

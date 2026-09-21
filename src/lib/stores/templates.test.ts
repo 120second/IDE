@@ -3,6 +3,33 @@ import { describe, expect, it } from "vitest";
 import { TemplateStore } from "./templates.svelte";
 
 describe("template store", () => {
+  it("shows only file templates and their ancestor categories in the file tree", () => {
+    const store = new TemplateStore({ setTemplateCompletionProvider: () => {} } as never, {} as never);
+    store.kind = "file";
+    const category = (id: number, name: string, parentId?: number) => ({
+      id, name, parentId, sortOrder: 0, createdAt: "", updatedAt: "",
+    });
+    store.categories = [category(1, "图论"), category(2, "文件"), category(3, "竞赛", 2), category(4, "片段", 2)];
+    const base = { trigger: "", aliases: [], description: "", language: "cpp", favorite: false, sortOrder: 0, useCount: 0, createdAt: "", updatedAt: "" };
+    store.treeTemplates = [
+      { ...base, id: 1, name: "Dijkstra", kind: "snippet", categoryId: 1 },
+      { ...base, id: 2, name: "Contest C++", kind: "file", categoryId: 3 },
+      { ...base, id: 3, name: "Empty C++", kind: "file" },
+      { ...base, id: 4, name: "片段", kind: "snippet", categoryId: 4 },
+    ];
+    store.toggleCategory(2);
+    store.toggleCategory(3);
+    expect(store.treeRows.map((row) => row.kind === "category" ? row.category.name : row.template.name))
+      .toEqual(["文件", "竞赛", "Contest C++", "Empty C++"]);
+  });
+
+  it("hides all snippet categories when file templates are uncategorized", () => {
+    const store = new TemplateStore({ setTemplateCompletionProvider: () => {} } as never, {} as never);
+    store.kind = "file";
+    store.categories = [{ id: 1, name: "图论", sortOrder: 0, createdAt: "", updatedAt: "" }];
+    expect(store.treeRows).toEqual([]);
+  });
+
   it("keeps a new snippet draft when the editor is collapsed", () => {
     const store = new TemplateStore({ setTemplateCompletionProvider: () => {} } as never, {} as never);
     store.beginCreate("snippet");

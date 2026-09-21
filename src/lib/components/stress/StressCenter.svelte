@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import Icon from "../shell/Icon.svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { GeneratorStore } from "../../stores/generator.svelte";
   import type { StressStore } from "../../stores/stress.svelte";
@@ -12,13 +12,13 @@
 
   let { stress, generator, workspace }: Props = $props();
   let activeSource = $derived(workspace.activeTab?.path ?? "");
-  let observedSource = "";
-
-  $effect(() => {
-    if (activeSource === observedSource) return;
-    observedSource = activeSource;
-    untrack(() => void generator.syncSource(activeSource));
-  });
+  let startHint = $derived(
+    !activeSource.toLowerCase().endsWith(".cpp") ? "先从文件列表打开待测的 C++ 程序。"
+      : !stress.brutePath ? "选择一个答案正确的暴力程序，用来比较输出。"
+      : generator.loading ? "正在加载输入格式…"
+      : !generator.valid ? "输入格式有误，请先修改生成规则。"
+      : "",
+  );
 
   const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
   const seconds = (milliseconds: number) => (milliseconds / 1000).toFixed(milliseconds >= 10_000 ? 1 : 2);
@@ -37,9 +37,8 @@
 <main class="stress-center">
   <header class="stress-page-header">
     <div>
-      <span class="stress-eyebrow">算法竞赛 · 随机对拍</span>
       <h1>对拍</h1>
-      <p>持续生成随机输入，比较待测程序与暴力程序，并在发现首个反例时停止。</p>
+      <p>用相同的随机输入运行两个程序，找出答案不一致的用例。</p>
     </div>
     <div class="stress-header-state" class:failed={stress.status === "failed"} class:running={stress.running}>
       <strong>{statusLabel()}</strong>
@@ -50,49 +49,55 @@
   <section class="stress-config" aria-label="对拍配置">
     <div class="stress-source-card generator">
       <span>数据生成器</span>
-      <strong>当前可视化随机规则</strong>
-      <small>{generator.nodes.length} 个顶层规则 · {generator.valid ? "配置有效" : `${generator.diagnostics.length} 处错误`}</small>
-      <button class="secondary-button" disabled={stress.running} onclick={() => stress.openGenerator()}>编辑生成器</button>
+      <strong>随机输入格式</strong>
+      <small>{generator.nodes.length} 条规则 · {generator.valid ? "可生成数据" : `${generator.diagnostics.length} 处待修改`}</small>
+      <button class="secondary-button" disabled={stress.running} onclick={() => stress.openGenerator()}>修改格式</button>
     </div>
     <div class="stress-source-card">
       <span>待测程序</span>
       <strong title={activeSource}>{activeSource ? fileName(activeSource) : "未选择"}</strong>
-      <small title={activeSource}>{activeSource || "当前编辑器中的工作区 C++ 文件"}</small>
+      <small title={activeSource}>{activeSource || "打开要检查的 C++ 文件"}</small>
     </div>
     <div class="stress-source-card">
-      <span>暴力程序</span>
+      <span>暴力程序（参考答案）</span>
       <strong title={stress.brutePath}>{stress.brutePath ? fileName(stress.brutePath) : "未选择"}</strong>
-      <small title={stress.brutePath}>{stress.brutePath || "选择用于校验答案的暴力程序"}</small>
+      <small title={stress.brutePath}>{stress.brutePath || "选择能得到正确答案的程序"}</small>
       <button class="secondary-button" disabled={stress.running} onclick={() => void stress.chooseBrute()}>选择文件</button>
     </div>
 
     <div class="stress-options">
       <label>
-        <span>迭代次数</span>
+        <span>测试组数</span>
         <input type="number" min="1" max="10000000" disabled={stress.infinite || stress.running} bind:value={stress.iterations} />
       </label>
       <label class="stress-infinite">
         <input type="checkbox" disabled={stress.running} bind:checked={stress.infinite} />
-        <span>持续对拍，直到手动停止</span>
+        <span>不限组数，直到手动停止</span>
       </label>
+    </div>
+    <details class="stress-advanced">
+      <summary>更多设置<span>随机种子与超时</span></summary>
+      <div class="stress-options">
       <label class="stress-seed">
-        <span>uint64 种子</span>
+        <span>随机种子</span>
         <div>
           <input inputmode="numeric" disabled={stress.running} bind:value={stress.seed} />
-          <button title="随机种子" aria-label="随机种子" disabled={stress.running} onclick={() => stress.randomizeSeed()}>↻</button>
+          <button title="换一个随机种子" aria-label="换一个随机种子" disabled={stress.running} onclick={() => stress.randomizeSeed()}><Icon name="refresh" size={14} /></button>
         </div>
       </label>
       <label>
         <span>单程序超时</span>
         <div class="stress-timeout"><input type="number" min="50" max="60000" step="50" disabled={stress.running} bind:value={stress.timeoutMs} /><em>ms</em></div>
       </label>
-    </div>
+      </div>
+    </details>
 
     <div class="stress-actions">
+      {#if startHint && !stress.running}<span class="stress-start-hint">{startHint}</span>{/if}
       {#if stress.running}
         <button class="stress-stop" disabled={stress.stopping} onclick={() => void stress.stop()}>{stress.stopping ? "正在停止…" : "停止"}</button>
       {:else}
-        <button class="primary-button" disabled={generator.loading} onclick={() => void stress.start()}>{generator.loading ? "正在加载生成器…" : "开始对拍"}</button>
+        <button class="primary-button" disabled={Boolean(startHint)} onclick={() => void stress.start()}>开始对拍</button>
       {/if}
       <button class="secondary-button" disabled={stress.running || (!stress.logs.length && !stress.failure)} onclick={() => stress.clear()}>清空结果</button>
     </div>
@@ -108,7 +113,7 @@
 
   <div class="stress-content-grid" class:with-failure={Boolean(stress.failure)}>
     <section class="stress-log-panel">
-      <header><div><h2>运行记录</h2><span>最多保留最近 500 条，不会无限增长</span></div><strong>{stress.logs.length}</strong></header>
+      <header><div><h2>运行记录</h2></div><strong>{stress.logs.length} 条</strong></header>
       <div class="stress-log" aria-live="polite">
         {#each stress.logs as entry (`${entry.index}-${entry.seed}-${entry.status}`)}
           <div class:failed={entry.status === "FAILED"} class="stress-log-row">
@@ -123,7 +128,7 @@
           </div>
         {/each}
         {#if !stress.logs.length}
-          <div class="stress-log-empty">开始后将在这里依次显示 #1 AC、#2 AC…或失败用例。</div>
+          <div class="stress-log-empty">开始对拍后，这里会显示每组数据的结果。发现答案不一致时会自动停止。</div>
         {/if}
       </div>
     </section>

@@ -3,6 +3,7 @@
   import { findWorkspaceFiles } from "../../api/workspace";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { WorkspaceFileMatch, WorkspaceFileResponse } from "../../types/workspace";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
 
   interface Props {
@@ -21,6 +22,7 @@
   let error = $state("");
   let timer: ReturnType<typeof setTimeout> | undefined;
   let requestId = 0;
+  const backdrop = createBackdropDismiss(() => close());
 
   onMount(() => {
     input.focus();
@@ -101,7 +103,7 @@
   }
 </script>
 
-<div class="quick-search-backdrop" role="presentation" onclick={close}>
+<div class="quick-search-backdrop" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
   <div class="template-quick-search file-quick-open" role="dialog" aria-modal="true" aria-label="快速打开文件" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
     <header>
       <Icon name="search" size={17} />

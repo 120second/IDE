@@ -61,7 +61,7 @@ import type {
   EditorRecoveryTab,
 } from "../types/session";
 import { documentRevision, documentRevisionExtension } from "./documentRevision";
-import { createAppearanceExtension } from "./appearance";
+import { createAppearanceExtension, editorAppearanceKey } from "./appearance";
 import {
   detectLineEnding,
   editorDocument,
@@ -204,6 +204,7 @@ export class EditorWorkspace {
 
   private view: EditorView | undefined;
   private readonly appearance = new Compartment();
+  private appearanceKey = "";
   private readonly lineEnding = new Compartment();
   private currentAppearance: Extension;
   private nextTabNumber = 1;
@@ -869,6 +870,9 @@ export class EditorWorkspace {
   }
 
   updateAppearance(settings: AppSettings): void {
+    const key = editorAppearanceKey(settings);
+    if (key === this.appearanceKey) return;
+    this.appearanceKey = key;
     const extension = createAppearanceExtension(settings);
     this.currentAppearance = extension;
 

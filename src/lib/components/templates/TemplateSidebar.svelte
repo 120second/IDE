@@ -44,6 +44,12 @@
   );
   let renderedRows = $derived(treeRows.slice(categoryStart, categoryEnd));
 
+  $effect(() => {
+    templateStore.kind;
+    categoryScrollTop = 0;
+    if (categoryViewport) categoryViewport.scrollTop = 0;
+  });
+
   onMount(() => {
     void templateStore.initialize();
     const observer = new ResizeObserver(([entry]) => {

@@ -5,10 +5,13 @@ import {
   defaultVisualProfile,
   integerField,
   line,
+  repeatNode,
   scopeAfterLineField,
   scopeBefore,
+  suggestIntegerName,
   validateVisualProfile,
   variable,
+  wrapNodesInRepeat,
 } from "./visualRules";
 import type { VisualGeneratorProfile, VisualNode } from "../types/generator";
 
@@ -79,5 +82,34 @@ describe("visual generator rules", () => {
       }],
     };
     expect(validateVisualProfile(profile([nested]))).toEqual([]);
+  });
+
+  it("prefers conventional loop counters when creating a repeat block", () => {
+    expect(repeatNode(["n", "m", "t"]).count).toEqual(variable("t"));
+    expect(repeatNode(["T", "n", "m"]).count).toEqual(variable("T"));
+    expect(repeatNode(["n", "m"]).count).toEqual(variable("m"));
+    expect(repeatNode([]).count).toEqual(constant(1));
+  });
+
+  it("wraps existing trailing rules in a valid repeat block", () => {
+    const t = line([integerField("t", constant(2), constant(2))]);
+    const n = line([integerField("n")]);
+    const values = line([{ ...integerField("m"), name: "m" }]);
+    const wrapped = wrapNodesInRepeat([t, n, values], 1);
+
+    expect(wrapped).toHaveLength(2);
+    expect(wrapped[1]).toMatchObject({
+      type: "repeat",
+      count: variable("t"),
+      children: [n, values],
+    });
+    expect(validateVisualProfile(profile(wrapped))).toEqual([]);
+  });
+
+  it("suggests conventional unique integer names in each scope", () => {
+    expect(suggestIntegerName([])).toBe("n");
+    expect(suggestIntegerName(["n"])).toBe("m");
+    expect(suggestIntegerName(["t", "n", "m"])).toBe("q");
+    expect(suggestIntegerName(["n", "m", "t", "q", "k", "x1"])).toBe("x2");
   });
 });

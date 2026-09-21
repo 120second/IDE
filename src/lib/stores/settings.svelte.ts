@@ -19,6 +19,8 @@ import {
   getActiveCustomTheme,
   getEffectiveBaseTheme,
   isThemeColor,
+  resolveThemeColors,
+  resolveEditorBackground,
   SYNTAX_COLOR_GROUPS,
   THEME_COLOR_GROUPS,
   THEME_CSS_VARIABLES,
@@ -27,16 +29,22 @@ import {
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   colorTheme: "signal",
+  editorTheme: "inherit",
   activeCustomTheme: "",
   customThemes: [],
-  uiDensity: "compact",
+  uiDensity: "standard",
   backgroundImage: "",
   backgroundImageName: "",
   backgroundImageOpacity: 0.42,
   backgroundDim: 0.28,
   backgroundFit: "cover",
-  sidebarOpacity: 0.92,
-  editorOpacity: 0.96,
+  backgroundPositionX: 50,
+  backgroundPositionY: 50,
+  backgroundScale: 1,
+  sidebarOpacity: 1,
+  editorOpacity: 1,
+  panelOpacity: 1,
+  popupOpacity: 1,
   surfaceBlur: 10,
   fontFamily: "Cascadia Code, JetBrains Mono, Consolas, monospace",
   fontSize: 14,
@@ -128,6 +136,7 @@ export class SettingsStore {
     this.update({
       theme: DEFAULT_SETTINGS.theme,
       colorTheme: DEFAULT_SETTINGS.colorTheme,
+      editorTheme: DEFAULT_SETTINGS.editorTheme,
       activeCustomTheme: "",
       uiDensity: DEFAULT_SETTINGS.uiDensity,
       backgroundImage: DEFAULT_SETTINGS.backgroundImage,
@@ -135,8 +144,13 @@ export class SettingsStore {
       backgroundImageOpacity: DEFAULT_SETTINGS.backgroundImageOpacity,
       backgroundDim: DEFAULT_SETTINGS.backgroundDim,
       backgroundFit: DEFAULT_SETTINGS.backgroundFit,
+      backgroundPositionX: DEFAULT_SETTINGS.backgroundPositionX,
+      backgroundPositionY: DEFAULT_SETTINGS.backgroundPositionY,
+      backgroundScale: DEFAULT_SETTINGS.backgroundScale,
       sidebarOpacity: DEFAULT_SETTINGS.sidebarOpacity,
       editorOpacity: DEFAULT_SETTINGS.editorOpacity,
+      panelOpacity: DEFAULT_SETTINGS.panelOpacity,
+      popupOpacity: DEFAULT_SETTINGS.popupOpacity,
       surfaceBlur: DEFAULT_SETTINGS.surfaceBlur,
       fontFamily: DEFAULT_SETTINGS.fontFamily,
       fontSize: DEFAULT_SETTINGS.fontSize,
@@ -341,7 +355,7 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   root.dataset.density = settings.uiDensity;
   root.classList.toggle("performance-mode", settings.performanceMode);
   const hasBackground = Boolean(settings.backgroundImage);
-  const controlOpacity = Math.max(0.96, settings.sidebarOpacity, settings.editorOpacity);
+  const controlOpacity = settings.popupOpacity;
   root.style.setProperty("--background-opacity", hasBackground ? `${settings.backgroundImageOpacity}` : "0");
   root.style.setProperty("--background-dim-percent", hasBackground ? `${settings.backgroundDim * 100}%` : "100%");
   root.style.setProperty("--window-opacity", "1");
@@ -350,22 +364,24 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   root.style.setProperty("--sidebar-opacity-percent", `${settings.sidebarOpacity * 100}%`);
   root.style.setProperty("--editor-opacity", `${settings.editorOpacity}`);
   root.style.setProperty("--editor-opacity-percent", `${settings.editorOpacity * 100}%`);
+  root.style.setProperty("--panel-opacity-percent", `${settings.panelOpacity * 100}%`);
+  root.style.setProperty("--popup-opacity-percent", `${settings.popupOpacity * 100}%`);
   root.style.setProperty("--control-opacity-percent", `${controlOpacity * 100}%`);
   root.style.setProperty("--surface-blur", `${hasBackground && !settings.performanceMode ? settings.surfaceBlur : 0}px`);
   root.style.setProperty("--editor-font-family", settings.fontFamily);
   root.style.setProperty("--editor-font-size", `${settings.fontSize}px`);
   root.style.setProperty("--editor-line-height", `${settings.lineHeight}`);
-  root.style.setProperty("--workspace-background-size", settings.backgroundFit);
+  root.style.setProperty("--workspace-background-size", settings.backgroundFit === "fill" ? "100% 100%" : settings.backgroundFit);
+  root.style.setProperty("--workspace-background-position", `${settings.backgroundPositionX}% ${settings.backgroundPositionY}%`);
+  root.style.setProperty("--workspace-background-scale", String(settings.backgroundScale));
+  root.style.setProperty("--code-background", resolveEditorBackground(settings, variant));
   const backgroundUrl = resolveBackgroundUrl(settings.backgroundImage);
   root.style.setProperty(
     "--workspace-background-image",
     backgroundUrl ? `url("${escapeCssUrl(backgroundUrl)}")` : "none",
   );
-  for (const cssVariable of Object.values(THEME_CSS_VARIABLES)) root.style.removeProperty(cssVariable);
-  if (custom) {
-    for (const [token, value] of Object.entries(custom.variants[variant].colors)) {
-      root.style.setProperty(THEME_CSS_VARIABLES[token as ThemeColorToken], value);
-    }
+  for (const [token, value] of Object.entries(resolveThemeColors(settings, variant))) {
+    root.style.setProperty(THEME_CSS_VARIABLES[token as ThemeColorToken], value);
   }
 }
 
@@ -375,6 +391,8 @@ function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     theme: normalizeTheme(settings.theme),
     colorTheme: normalizeColorTheme(settings.colorTheme),
+    editorTheme: ["inherit", "signal", "graphite", "forest", ...customThemes.map((theme) => `custom:${theme.id}`)].includes(settings.editorTheme)
+      ? settings.editorTheme : "inherit",
     activeCustomTheme: customThemes.some((theme) => theme.id === requestedCustomTheme)
       ? requestedCustomTheme
       : "",
@@ -385,8 +403,13 @@ function normalizeSettings(settings: AppSettings): AppSettings {
     backgroundImageOpacity: clamp(settings.backgroundImageOpacity, 0, 1, DEFAULT_SETTINGS.backgroundImageOpacity),
     backgroundDim: clamp(settings.backgroundDim, 0, 0.8, DEFAULT_SETTINGS.backgroundDim),
     backgroundFit: normalizeBackgroundFit(settings.backgroundFit),
+    backgroundPositionX: clamp(settings.backgroundPositionX, 0, 100, 50),
+    backgroundPositionY: clamp(settings.backgroundPositionY, 0, 100, 50),
+    backgroundScale: clamp(settings.backgroundScale, 1, 3, 1),
     sidebarOpacity: clamp(settings.sidebarOpacity, 0.2, 1, DEFAULT_SETTINGS.sidebarOpacity),
     editorOpacity: clamp(settings.editorOpacity, 0.2, 1, DEFAULT_SETTINGS.editorOpacity),
+    panelOpacity: clamp(settings.panelOpacity ?? settings.editorOpacity, 0.2, 1, DEFAULT_SETTINGS.panelOpacity),
+    popupOpacity: clamp(settings.popupOpacity, 0.6, 1, DEFAULT_SETTINGS.popupOpacity),
     surfaceBlur: clamp(settings.surfaceBlur, 0, 20, DEFAULT_SETTINGS.surfaceBlur),
     fontFamily:
       String(settings.fontFamily ?? "").trim().slice(0, 256) || DEFAULT_SETTINGS.fontFamily,

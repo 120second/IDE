@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { ArchiveStore } from "../../stores/archive.svelte";
   import type { ArchiveStatus, SmartCollection, SmartCollectionInput } from "../../types/archive";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import { DialogDragController } from "../../ux/dialogDrag.svelte";
   import Icon from "../shell/Icon.svelte";
 
@@ -14,6 +15,7 @@
   let { archiveStore, collection, close }: Props = $props();
   let dialog = $state<HTMLDivElement>();
   let drag = new DialogDragController();
+  const backdrop = createBackdropDismiss(() => close());
   let tagsText = $state("");
   let draft = $state<SmartCollectionInput>({
     name: "",
@@ -57,7 +59,7 @@
   }
 </script>
 
-<div class="modal-backdrop" role="presentation" onclick={close}>
+<div class="modal-backdrop" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
   <div class="smart-collection-dialog" class:dragging={drag.active} role="dialog" aria-modal="true" aria-label="智能集合" tabindex="-1" style:transform={`translate3d(${drag.x}px, ${drag.y}px, 0)`} bind:this={dialog} onclick={(event) => event.stopPropagation()} onkeydown={handleDialogKey}>
     <header class="dialog-drag-handle" role="group" aria-label="智能集合标题栏，可拖动" onpointerdown={(event) => drag.begin(event, dialog)} onpointermove={(event) => drag.move(event)} onpointerup={(event) => drag.end(event)} onpointercancel={(event) => drag.end(event)}><div><strong>{collection ? "编辑智能集合" : "新建智能集合"}</strong><span>所有条件在 SQLite 中查询，不复制代码文件。</span></div><button aria-label="关闭" onclick={close}><Icon name="close" size={14} /></button></header>
     <form onsubmit={(event) => { event.preventDefault(); void submit(); }}>

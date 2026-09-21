@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
 
   interface Props {
@@ -13,6 +14,7 @@
   let query = $state("");
   let selectedIndex = $state(0);
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const backdrop = createBackdropDismiss(() => close());
 
   onMount(() => {
     input.focus();
@@ -56,7 +58,7 @@
   }
 </script>
 
-<div class="quick-search-backdrop" role="presentation" onclick={close}>
+<div class="quick-search-backdrop" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
   <div class="template-quick-search" role="dialog" aria-modal="true" aria-label="搜索模板" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
     <header>
       <Icon name="search" size={17} />

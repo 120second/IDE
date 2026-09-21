@@ -33,7 +33,10 @@
     | "step-into"
     | "step-out"
     | "stop"
-    | "trash";
+    | "trash"
+    | "copy"
+    | "grip"
+    | "repeat";
 
   interface Props {
     name: IconName;
@@ -124,5 +127,14 @@
     <rect x="6" y="6" width="12" height="12" rx="1.5" />
   {:else if name === "trash"}
     <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+  {:else if name === "copy"}
+    <rect x="8" y="8" width="11" height="11" rx="1.5" /><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-10A1.5 1.5 0 0 0 3 5.5v10A1.5 1.5 0 0 0 4.5 17H8" />
+  {:else if name === "grip"}
+    <circle cx="9" cy="7" r=".8" fill="currentColor" stroke="none" /><circle cx="15" cy="7" r=".8" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="12" r=".8" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r=".8" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="17" r=".8" fill="currentColor" stroke="none" /><circle cx="15" cy="17" r=".8" fill="currentColor" stroke="none" />
+  {:else if name === "repeat"}
+    <path d="M17 2.8 20.2 6 17 9.2" /><path d="M4 11V9a3 3 0 0 1 3-3h13" />
+    <path d="M7 21.2 3.8 18 7 14.8" /><path d="M20 13v2a3 3 0 0 1-3 3H4" />
   {/if}
 </svg>

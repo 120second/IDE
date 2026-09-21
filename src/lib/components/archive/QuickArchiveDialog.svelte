@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { ArchiveStore } from "../../stores/archive.svelte";
   import type { ArchiveInput, ArchiveStatus } from "../../types/archive";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
 
   interface Props {
@@ -11,6 +12,7 @@
   }
 
   let { archiveStore, path, close }: Props = $props();
+  const backdrop = createBackdropDismiss(() => close());
   let loading = $state(true);
   let tagsText = $state("");
   let draft = $state<ArchiveInput>({
@@ -68,7 +70,7 @@
   }
 </script>
 
-<div class="modal-backdrop" role="presentation" onclick={close}>
+<div class="modal-backdrop" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
   <div class="quick-archive-dialog" role="dialog" aria-modal="true" aria-label="快速归档" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
     <header>
       <div><strong>快速归档</strong><span>{fileName(path)}</span></div>

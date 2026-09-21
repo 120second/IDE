@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
+  import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
 
   interface Props {
@@ -17,8 +18,10 @@
   let name = $state("solution.cpp");
   let selectedId = $state<number>();
   let creating = $state(false);
+  let creationError = $state("");
   let dragX = $state(0);
   let dragY = $state(0);
+  const backdrop = createBackdropDismiss(() => close());
 
   interface DragState {
     pointerId: number;
@@ -51,6 +54,7 @@
   async function submit(): Promise<void> {
     const fileName = name.trim();
     if (!fileName || creating) return;
+    creationError = "";
     creating = true;
     let code = "";
     if (selectedId) {
@@ -64,6 +68,10 @@
     const created = await fileWorkspace.create(parent, fileName, "file", code);
     creating = false;
     if (created) close();
+    else {
+      creationError = fileWorkspace.error;
+      nameInput.focus();
+    }
   }
 
   function displayName(value: string): string {
@@ -126,7 +134,7 @@
   }
 </script>
 
-<div class="modal-backdrop" role="presentation" onclick={close}>
+<div class="modal-backdrop" role="presentation" onpointerdown={backdrop.onPointerDown} onclick={backdrop.onClick} onpointercancel={backdrop.onPointerCancel}>
   <div
     class="file-template-dialog"
     class:dragging={Boolean(dragState)}
@@ -148,7 +156,11 @@
       onpointerup={endDrag}
       onpointercancel={endDrag}
     ><div><strong>新建 C++ 文件</strong><span>选择文件模板</span></div><button aria-label="关闭" onclick={close}><Icon name="close" size={14} /></button></header>
-    <label><span>文件名</span><input bind:this={nameInput} bind:value={name} onkeydown={(event) => { if (event.key === "Enter") void submit(); }} /></label>
+    <label>
+      <span>文件名</span>
+      <input bind:this={nameInput} bind:value={name} disabled={creating} aria-invalid={Boolean(creationError)} aria-describedby={creationError ? "file-creation-error" : undefined} oninput={() => (creationError = "")} onkeydown={(event) => { if (event.key === "Enter") void submit(); }} />
+      {#if creationError}<small id="file-creation-error" role="alert" style:color="var(--danger)">{creationError}</small>{/if}
+    </label>
     <div class="file-template-options" role="radiogroup" aria-label="文件模板">
       {#each templateStore.fileTemplates as template (template.id)}
         <button class:active={selectedId === template.id} role="radio" aria-checked={selectedId === template.id} onclick={() => (selectedId = template.id)}>

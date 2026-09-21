@@ -69,6 +69,41 @@ export function line(fields: VisualField[] = [integerField()]): VisualNode {
   return { type: "line", id: newRuleId("line"), fields };
 }
 
+export function repeatNode(
+  scope: string[],
+  children: VisualNode[] = [],
+): Extract<VisualNode, { type: "repeat" }> {
+  const countName = preferredRepeatVariable(scope);
+  return {
+    type: "repeat",
+    id: newRuleId("repeat"),
+    count: countName ? variable(countName) : constant(1),
+    children,
+  };
+}
+
+export function suggestIntegerName(scope: string[]): string {
+  for (const candidate of ["n", "m", "t", "q", "k"]) {
+    if (!scope.includes(candidate)) return candidate;
+  }
+  let index = 1;
+  while (scope.includes(`x${index}`)) index += 1;
+  return `x${index}`;
+}
+
+export function wrapNodesInRepeat(
+  nodes: VisualNode[],
+  startIndex: number,
+  parentScope: string[] = [],
+): VisualNode[] {
+  if (startIndex < 0 || startIndex >= nodes.length) return nodes;
+  const repeat = repeatNode(
+    scopeBefore(nodes, startIndex, parentScope),
+    nodes.slice(startIndex),
+  );
+  return [...nodes.slice(0, startIndex), repeat];
+}
+
 export function defaultVisualProfile(): VisualGeneratorProfile {
   return {
     version: 1,
@@ -400,4 +435,9 @@ function validSeed(value: string): boolean {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function preferredRepeatVariable(scope: string[]): string | undefined {
+  const preferred = [...scope].reverse().find((name) => /^(t|q)$/i.test(name));
+  return preferred ?? scope.at(-1);
 }

@@ -20,6 +20,7 @@ export interface DebugStartRequest {
   sourcePath: string;
   workingDirectory: string;
   stdin: string;
+  stopOnEntry: boolean;
   breakpoints: DebugBreakpointInput[];
 }
 

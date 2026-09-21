@@ -85,6 +85,7 @@ export class TemplateStore {
   private fileTemplatesPromise: Promise<void> | undefined;
   private treeRowsCache: TemplateTreeRow[] = [];
   private treeRowsCacheRevision = -1;
+  private newFileCategoryIds = new Set<number>();
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -245,7 +246,9 @@ export class TemplateStore {
     if (!name) return;
     this.error = "";
     try {
-      await createTemplateCategory(name, parentId);
+      const kind = this.kind;
+      const category = await createTemplateCategory(name, parentId);
+      if (kind === "file") this.newFileCategoryIds.add(category.id);
       if (parentId) this.expandedCategories.add(parentId);
       await this.refreshCategories();
     } catch (error) {
@@ -608,7 +611,24 @@ export class TemplateStore {
   }
 
   private buildTreeRows(): TemplateTreeRow[] {
-    return buildTemplateTreeRows(this.categories, this.treeTemplates, this.expandedCategories);
+    const templates = this.treeTemplates.filter((template) => template.kind === this.kind);
+    if (this.kind !== "file") {
+      return buildTemplateTreeRows(this.categories, templates, this.expandedCategories);
+    }
+
+    // Categories are shared, so only show branches containing file templates here.
+    const categoriesById = new Map(this.categories.map((category) => [category.id, category]));
+    const visibleCategoryIds = new Set<number>();
+    // Keep newly created empty folders available while the user adds templates.
+    const categoryIds = [...templates.map((template) => template.categoryId), ...this.newFileCategoryIds];
+    for (let categoryId of categoryIds) {
+      while (categoryId !== undefined && !visibleCategoryIds.has(categoryId)) {
+        visibleCategoryIds.add(categoryId);
+        categoryId = categoriesById.get(categoryId)?.parentId;
+      }
+    }
+    const categories = this.categories.filter((category) => visibleCategoryIds.has(category.id));
+    return buildTemplateTreeRows(categories, templates, this.expandedCategories);
   }
 
   private rememberCreateDraft(): void {
