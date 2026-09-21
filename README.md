@@ -77,7 +77,13 @@ src-tauri\target\release\lightcp.exe
 
 发布版本需要通过 Tauri CLI 构建。不要用 `cargo build --release` 代替上面的命令，否则生成的程序可能仍会尝试连接开发地址 `localhost:1420`。
 
-当前 `tauri.conf.json` 没有启用安装包，所以构建结果是一个独立 EXE。需要 MSI 或 NSIS 时，再在发布配置中开启 Tauri bundle。
+当前 `tauri.conf.json` 没有启用 Tauri 内置安装包，所以构建结果是一个独立 EXE。发布 Windows 安装包时执行：
+
+```powershell
+npm run package:windows
+```
+
+该命令会生成 `release\LightCP_<版本>_x64-setup.exe`。打包机需要安装 NSIS 3；可用 `winget install --id NSIS.NSIS --exact` 安装。
 
 ## 检查与测试
 

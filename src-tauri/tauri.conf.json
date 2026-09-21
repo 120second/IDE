@@ -32,7 +32,7 @@
     }
   },
   "bundle": {
-    "active": true,
-    "targets": ["nsis"]
+    "active": false,
+    "targets": "all"
   }
 }
