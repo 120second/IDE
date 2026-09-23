@@ -1931,7 +1931,7 @@ dependencies = [
 
 [[package]]
 name = "lightcp"
-version = "0.1.0"
+version = "0.1.1-dev.1"
 dependencies = [
  "dunce",
  "keyring",
