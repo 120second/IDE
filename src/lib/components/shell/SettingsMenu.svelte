@@ -11,6 +11,8 @@
     openSettings: (page: SettingsPage) => void;
     openSnippets: () => void;
     openTasks: () => void;
+    username: string;
+    logout: () => void;
   }
 
   let {
@@ -21,6 +23,8 @@
     openSettings,
     openSnippets,
     openTasks,
+    username,
+    logout,
   }: Props = $props();
   let menu: HTMLDivElement;
   let menuX = $state(50);
@@ -130,4 +134,8 @@
 
   <button data-main-item role="menuitem" onclick={() => choose(openSnippets)}><span>代码片段</span></button>
   <button data-main-item role="menuitem" onclick={() => choose(openTasks)}><span>测试与任务</span></button>
+
+  <span class="settings-menu-separator" role="separator"></span>
+  <span class="settings-menu-label" aria-label={`当前账号 ${username}`}>{username}</span>
+  <button data-main-item role="menuitem" onclick={() => choose(logout)}><span>退出登录</span></button>
 </div>

@@ -9,23 +9,35 @@ import type {
   TemplateVersionMetadata,
 } from "../types/templates";
 
+export interface LocalTemplateImportResult {
+  categoriesCreated: number;
+  categoriesReused: number;
+  templatesCreated: number;
+  templatesSkipped: number;
+  historiesSkipped: boolean;
+}
+
+export function importLocalTemplatesToCloud(): Promise<LocalTemplateImportResult> {
+  return invoke<LocalTemplateImportResult>("cloud_import_local_templates");
+}
+
 export function listTemplateCategories(): Promise<TemplateCategory[]> {
   return isTauri()
-    ? invoke<TemplateCategory[]>("list_template_categories").then((items) => items.map(normalizeCategory))
+    ? invoke<TemplateCategory[]>("cloud_list_template_categories").then((items) => items.map(normalizeCategory))
     : Promise.resolve([]);
 }
 
 export function createTemplateCategory(name: string, parentId?: number): Promise<TemplateCategory> {
-  return invoke<TemplateCategory>("create_template_category", { name, parentId: parentId ?? null })
+  return invoke<TemplateCategory>("cloud_create_template_category", { name, parentId: parentId ?? null })
     .then(normalizeCategory);
 }
 
 export function renameTemplateCategory(id: number, name: string): Promise<void> {
-  return invoke<void>("rename_template_category", { id, name });
+  return invoke<void>("cloud_rename_template_category", { id, name });
 }
 
 export function deleteTemplateCategory(id: number): Promise<void> {
-  return invoke<void>("delete_template_category", { id });
+  return invoke<void>("cloud_delete_template_category", { id });
 }
 
 export function moveTemplateCategory(
@@ -33,12 +45,12 @@ export function moveTemplateCategory(
   parentId: number | undefined,
   targetIndex: number,
 ): Promise<void> {
-  return invoke<void>("move_template_category", { id, parentId: parentId ?? null, targetIndex });
+  return invoke<void>("cloud_move_template_category", { id, parentId: parentId ?? null, targetIndex });
 }
 
 export function listTemplates(filter: TemplateFilter): Promise<TemplateMetadata[]> {
   return isTauri()
-    ? invoke<TemplateMetadata[]>("list_templates", { filter }).then((items) => items.map(normalizeMetadata))
+    ? invoke<TemplateMetadata[]>("cloud_list_templates", { filter }).then((items) => items.map(normalizeMetadata))
     : Promise.resolve([]);
 }
 
@@ -47,39 +59,39 @@ export function searchTemplateCompletions(
   limit = 20,
 ): Promise<TemplateDetail[]> {
   return isTauri()
-    ? invoke<TemplateDetail[]>("search_template_completions", { query, limit })
+    ? invoke<TemplateDetail[]>("cloud_search_template_completions", { query, limit })
       .then((items) => items.map(normalizeDetail))
     : Promise.resolve([]);
 }
 
 export function getTemplate(id: number): Promise<TemplateDetail> {
-  return invoke<TemplateDetail>("get_template", { id }).then(normalizeDetail);
+  return invoke<TemplateDetail>("cloud_get_template", { id }).then(normalizeDetail);
 }
 
 export function getTemplates(ids: number[]): Promise<TemplateDetail[]> {
   return isTauri()
-    ? invoke<TemplateDetail[]>("get_templates", { ids }).then((items) => items.map(normalizeDetail))
+    ? invoke<TemplateDetail[]>("cloud_get_templates", { ids }).then((items) => items.map(normalizeDetail))
     : Promise.resolve([]);
 }
 
 export function createTemplate(input: TemplateInput): Promise<TemplateDetail> {
-  return invoke<TemplateDetail>("create_template", { input }).then(normalizeDetail);
+  return invoke<TemplateDetail>("cloud_create_template", { input }).then(normalizeDetail);
 }
 
 export function updateTemplate(id: number, input: TemplateInput): Promise<TemplateDetail> {
-  return invoke<TemplateDetail>("update_template", { id, input }).then(normalizeDetail);
+  return invoke<TemplateDetail>("cloud_update_template", { id, input }).then(normalizeDetail);
 }
 
 export function deleteTemplate(id: number): Promise<void> {
-  return invoke<void>("delete_template", { id });
+  return invoke<void>("cloud_delete_template", { id });
 }
 
 export function setTemplateFavorite(id: number, favorite: boolean): Promise<void> {
-  return invoke<void>("set_template_favorite", { id, favorite });
+  return invoke<void>("cloud_set_template_favorite", { id, favorite });
 }
 
 export function recordTemplateUse(id: number): Promise<void> {
-  return invoke<void>("record_template_use", { id });
+  return invoke<void>("cloud_record_template_use", { id });
 }
 
 export function moveTemplate(
@@ -87,27 +99,32 @@ export function moveTemplate(
   categoryId: number | undefined,
   targetIndex: number,
 ): Promise<void> {
-  return invoke<void>("move_template", { id, categoryId: categoryId ?? null, targetIndex });
+  return invoke<void>("cloud_move_template", { id, categoryId: categoryId ?? null, targetIndex });
 }
 
 export function listTemplateVersions(templateId: number): Promise<TemplateVersionMetadata[]> {
-  return invoke<TemplateVersionMetadata[]>("list_template_versions", { templateId });
+  void templateId;
+  return Promise.resolve([]);
 }
 
 export function getTemplateVersion(versionId: number): Promise<TemplateVersionDetail> {
-  return invoke<TemplateVersionDetail>("get_template_version", { versionId }).then(normalizeVersion);
+  void versionId;
+  return Promise.reject(new Error("云模板第一版暂不提供历史版本。"));
 }
 
 export function deleteTemplateVersion(templateId: number, versionId: number): Promise<void> {
-  return invoke<void>("delete_template_version", { templateId, versionId });
+  void templateId;
+  void versionId;
+  return Promise.reject(new Error("云模板第一版暂不提供历史版本。"));
 }
 
 export function restoreTemplateVersion(
   templateId: number,
   versionId: number,
 ): Promise<TemplateDetail> {
-  return invoke<TemplateDetail>("restore_template_version", { templateId, versionId })
-    .then(normalizeDetail);
+  void templateId;
+  void versionId;
+  return Promise.reject(new Error("云模板第一版暂不提供历史版本。"));
 }
 
 function normalizeCategory(category: TemplateCategory): TemplateCategory {
@@ -124,8 +141,4 @@ function normalizeMetadata(template: TemplateMetadata): TemplateMetadata {
 
 function normalizeDetail(template: TemplateDetail): TemplateDetail {
   return { ...normalizeMetadata(template), code: template.code };
-}
-
-function normalizeVersion(version: TemplateVersionDetail): TemplateVersionDetail {
-  return { ...version, categoryId: version.categoryId ?? undefined };
 }

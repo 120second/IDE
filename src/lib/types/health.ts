@@ -23,6 +23,9 @@ export interface CommandError {
     | "DATABASE"
     | "PROCESS"
     | "CONFIGURATION"
+    | "NETWORK"
+    | "AUTHENTICATION"
+    | "SERVER"
     | "INTERNAL";
   code: string;
   userMessage: string;

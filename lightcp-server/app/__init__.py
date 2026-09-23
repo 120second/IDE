@@ -1,0 +1,2 @@
+"""LightCP server package."""
+

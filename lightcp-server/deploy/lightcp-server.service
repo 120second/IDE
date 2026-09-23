@@ -1,0 +1,50 @@
+[Unit]
+Description=LightCP FastAPI server
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/opt/lightcp-server/alembic.ini
+ConditionPathExists=/etc/lightcp-server.env
+
+[Service]
+Type=simple
+User=lightcp
+Group=lightcp
+WorkingDirectory=/opt/lightcp-server
+EnvironmentFile=/etc/lightcp-server.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Apply committed migrations before accepting traffic. A migration failure
+# prevents the application from starting instead of serving a partial schema.
+ExecStartPre=/opt/lightcp-server/.venv/bin/python -m alembic upgrade head
+ExecStart=/opt/lightcp-server/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8100 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
+
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=90
+TimeoutStopSec=30
+KillSignal=SIGINT
+UMask=0077
+
+# systemd creates and owns /var/lib/lightcp-server for the service account.
+StateDirectory=lightcp-server
+StateDirectoryMode=0700
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/lightcp-server
+
+[Install]
+WantedBy=multi-user.target

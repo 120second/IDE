@@ -12,6 +12,7 @@
   import type { WorkspaceStore } from "../../stores/workspace.svelte";
   import type { LspStore } from "../../stores/lsp.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
+  import type { AuthStore } from "../../stores/auth.svelte";
   import type { HealthStatus } from "../../types/health";
   import EditorHost from "../editor/EditorHost.svelte";
   import TabBar from "../editor/TabBar.svelte";
@@ -51,11 +52,12 @@
     stressStore: StressStore;
     lspStore: LspStore;
     ux: UxStore;
+    auth: AuthStore;
     backendState: "checking" | "ready" | "error";
     health?: HealthStatus;
   }
 
-  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, ux, backendState, health }: Props = $props();
+  let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, ux, auth, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
   let quickFileOpen = $state(false);
   let commandPaletteOpen = $state(false);
@@ -549,6 +551,8 @@
     openSettings={openSettingsPage}
     {openSnippets}
     openTasks={() => showActivity("testcases")}
+    username={auth.user?.username ?? ""}
+    logout={() => void auth.signOut()}
   />
 {/if}
 

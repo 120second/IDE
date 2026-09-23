@@ -3,6 +3,7 @@
   import { healthCheck } from "./lib/api/health";
   import TitleBar from "./lib/components/shell/TitleBar.svelte";
   import Workbench from "./lib/components/shell/Workbench.svelte";
+  import AuthView from "./lib/components/auth/AuthView.svelte";
   import type { EditorWorkspace } from "./lib/editor/workspace.svelte";
   import {
     applyDocumentAppearance,
@@ -19,6 +20,7 @@
   import { LspStore } from "./lib/stores/lsp.svelte";
   import { UxStore } from "./lib/stores/ux.svelte";
   import { SessionStore } from "./lib/stores/session";
+  import { AuthStore } from "./lib/stores/auth.svelte";
   import type { CommandError, HealthStatus } from "./lib/types/health";
   import {
     installPerformanceConsole,
@@ -29,6 +31,7 @@
   const shell = new ShellStore();
   const settings = new SettingsStore();
   const ux = new UxStore();
+  const auth = new AuthStore();
 
   let workspace = $state<EditorWorkspace>();
   let fileWorkspace = $state<WorkspaceStore>();
@@ -43,6 +46,15 @@
   let backendState = $state<"checking" | "ready" | "error">("checking");
   let health = $state<HealthStatus>();
   let editorLoadError = $state("");
+  let templateOwner = "";
+
+  $effect(() => {
+    const userId = auth.user?.id;
+    const store = templateStore;
+    if (!userId || !store || templateOwner === userId) return;
+    templateOwner = userId;
+    untrack(() => void store.reload());
+  });
 
   $effect(() => {
     const appearance = settings.value;
@@ -100,6 +112,7 @@
     };
     systemTheme.addEventListener("change", refreshSystemTheme);
     installPerformanceConsole();
+    void auth.initialize();
     void Promise.all([
       settings.initialize(),
       import("./lib/editor/workspace.svelte"),
@@ -194,6 +207,7 @@
       lspStore?.dispose();
       workspace?.dispose();
       generator.dispose();
+      auth.dispose();
       settings.dispose();
       ux.dispose();
     };
@@ -207,8 +221,15 @@
 <div class="window-frame">
   <TitleBar />
   <div class="window-content">
-    {#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
-      <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {backendState} {health} />
+    {#if auth.loading}
+      <main class="boot-screen" aria-live="polite">
+        <div class="boot-mark">L</div>
+        <p>正在验证登录状态…</p>
+      </main>
+    {:else if !auth.user}
+      <AuthView {auth} />
+    {:else if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
+      <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {auth} {backendState} {health} />
     {:else}
       <main class="boot-screen" aria-live="polite">
         <div class="boot-mark">L</div>

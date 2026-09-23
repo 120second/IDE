@@ -11,6 +11,7 @@ use crate::{
     paths::AppPaths,
     performance::PerformanceMetrics,
     runner::RunnerManager,
+    server_api::ServerApi,
     stress::StressManager,
 };
 
@@ -25,10 +26,11 @@ pub struct AppState {
     pub stress: Arc<StressManager>,
     pub lsp: Arc<ClangdManager>,
     pub performance: Arc<PerformanceMetrics>,
+    pub server_api: ServerApi,
 }
 
 impl AppState {
-    pub fn new(paths: AppPaths, database_schema_version: i64) -> Self {
+    pub fn new(paths: AppPaths, database_schema_version: i64, server_api: ServerApi) -> Self {
         let debug_data_dir = paths.data_dir.join("debug");
         Self {
             paths,
@@ -41,6 +43,7 @@ impl AppState {
             stress: Arc::new(StressManager::default()),
             lsp: Arc::new(ClangdManager::default()),
             performance: Arc::new(PerformanceMetrics::default()),
+            server_api,
         }
     }
 

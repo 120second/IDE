@@ -38,6 +38,7 @@ LightCP 是一款面向算法竞赛的桌面 IDE。写代码、编译运行、�
 - CodeMirror 6 提供代码编辑、片段占位符和补全界面。
 - clangd 提供 C++ 诊断、补全与代码导航。
 - SQLite 保存模板、测试点、归档、生成规则和最近工作区等本地数据。
+- `lightcp-server` 使用 FastAPI、SQLAlchemy 和独立 SQLite 提供账号及模板云端 API。
 
 ## 环境要求
 
@@ -61,7 +62,11 @@ npm ci
 npm run tauri dev
 ```
 
-开发桌面端时请使用 `npm run tauri dev`。`npm run dev` 只会启动 Vite 网页服务，浏览器里无法调用 Tauri 提供的 Rust 后端。
+开发桌面端默认通过 `http://127.0.0.1:18100` 的 SSH tunnel 访问 API，例如先建立
+`ssh -N -L 18100:127.0.0.1:8100 <server>`，再使用 `npm run tauri dev`。
+如需连接本机 API，可临时设置
+`LIGHTCP_API_BASE_URL=http://127.0.0.1:8100/api`。`npm run dev` 只会启动
+Vite 网页服务，浏览器里无法调用 Tauri 提供的 Rust 后端。Release 构建仍只接受 HTTPS 地址。
 
 ## 构建 Windows Release
 
@@ -174,7 +179,7 @@ lightcp.db
 settings.json
 ```
 
-工作区源文件始终留在用户选择的目录中。数据库 migration 只追加、不回写历史；模板、测试点、归档元数据和随机生成规则也都属于本地数据，不会提交到仓库。
+工作区源文件始终留在用户选择的目录中。测试点、归档元数据、模板历史和随机生成规则仍是本地数据；登录后的当前模板及分类以 LightCP Server 为真源。JWT 只保存在操作系统凭据库，不写入 `localStorage` 或 SQLite。
 
 ## 项目结构
 
@@ -182,6 +187,7 @@ settings.json
 LightCP/
 ├─ src/                 # Svelte / TypeScript 前端
 ├─ src-tauri/           # Rust Core、Tauri commands 与配置
+├─ lightcp-server/      # 独立 FastAPI 账号与模板服务
 ├─ docs/                # 架构及性能审计文档
 ├─ assets/              # 项目资源
 ├─ package.json

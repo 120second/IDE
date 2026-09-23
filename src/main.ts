@@ -3,6 +3,7 @@ import App from "./App.svelte";
 import "./app.css";
 import "./workbench.css";
 import "./appearance.css";
+import "./auth.css";
 
 const target = document.getElementById("app");
 

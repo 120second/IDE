@@ -631,6 +631,27 @@ export class TemplateStore {
     return buildTemplateTreeRows(categories, templates, this.expandedCategories);
   }
 
+  async reload(): Promise<void> {
+    this.listRequest += 1;
+    this.treeRequest += 1;
+    this.quickRequest += 1;
+    this.initialized = false;
+    this.fileTemplatesLoaded = false;
+    this.categories = [];
+    this.templates = [];
+    this.treeTemplates = [];
+    this.fileTemplates = [];
+    this.quickResults = [];
+    this.selectedCategoryId = undefined;
+    this.selectedId = undefined;
+    this.detail = undefined;
+    this.versions = [];
+    this.versionPreview = undefined;
+    this.mode = "empty";
+    this.treeRevision += 1;
+    await this.initialize();
+  }
+
   private rememberCreateDraft(): void {
     if (this.mode !== "create") return;
     this.createDrafts.set(this.draft.kind, cloneTemplateInput(this.draft));

@@ -26,6 +26,15 @@ pub enum AppError {
     #[error("configuration error: {0}")]
     Configuration(String),
 
+    #[error("network error: {0}")]
+    Network(String),
+
+    #[error("authentication error: {0}")]
+    Authentication(String),
+
+    #[error("server error: {0}")]
+    Server(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }
@@ -37,6 +46,9 @@ pub enum ErrorCategory {
     Database,
     Process,
     Configuration,
+    Network,
+    Authentication,
+    Server,
     Internal,
 }
 
@@ -87,6 +99,17 @@ impl From<AppError> for CommandError {
                 "CONFIGURATION_ERROR",
                 "LightCP 配置不可用或无效。",
             ),
+            AppError::Network(_) => (
+                ErrorCategory::Network,
+                "NETWORK_ERROR",
+                "无法连接 LightCP 服务器，请检查网络后重试。",
+            ),
+            AppError::Authentication(message) => (
+                ErrorCategory::Authentication,
+                "AUTHENTICATION_REQUIRED",
+                message.as_str(),
+            ),
+            AppError::Server(message) => (ErrorCategory::Server, "SERVER_ERROR", message.as_str()),
             AppError::Internal(_) => (
                 ErrorCategory::Internal,
                 "INTERNAL_ERROR",

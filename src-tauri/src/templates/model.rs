@@ -41,7 +41,7 @@ pub struct TemplateFilter {
     pub sort: TemplateSort,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateCategory {
     pub id: i64,
@@ -52,7 +52,7 @@ pub struct TemplateCategory {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateMetadata {
     pub id: i64,
@@ -71,7 +71,7 @@ pub struct TemplateMetadata {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateDetail {
     #[serde(flatten)]
@@ -79,7 +79,7 @@ pub struct TemplateDetail {
     pub code: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemplateInput {
     pub kind: TemplateKind,

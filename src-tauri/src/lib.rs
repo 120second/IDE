@@ -11,6 +11,7 @@ pub mod paths;
 pub mod performance;
 pub mod recovery;
 pub mod runner;
+pub mod server_api;
 pub mod settings;
 pub mod state;
 pub mod stress;
@@ -19,7 +20,7 @@ pub mod testcase;
 
 use tauri::Manager;
 
-use crate::{paths::AppPaths, state::AppState};
+use crate::{paths::AppPaths, server_api::ServerApi, state::AppState};
 
 #[cfg(test)]
 pub(crate) static PROCESS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -45,7 +46,8 @@ pub fn run() {
                 paths.data_dir.display()
             );
 
-            let state = AppState::new(paths, database.schema_version);
+            let server_api = ServerApi::new(app.handle().clone())?;
+            let state = AppState::new(paths, database.schema_version, server_api);
             state.performance.set_backend_startup_duration(
                 backend_started
                     .elapsed()
@@ -58,6 +60,29 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::health::health_check,
             commands::health::diagnose_toolchain,
+            commands::auth::auth_restore,
+            commands::auth::auth_register,
+            commands::auth::auth_login,
+            commands::auth::auth_me,
+            commands::auth::auth_logout,
+            commands::auth::auth_forgot_password,
+            commands::auth::auth_reset_password,
+            commands::cloud_templates::cloud_list_template_categories,
+            commands::cloud_templates::cloud_create_template_category,
+            commands::cloud_templates::cloud_rename_template_category,
+            commands::cloud_templates::cloud_delete_template_category,
+            commands::cloud_templates::cloud_move_template_category,
+            commands::cloud_templates::cloud_list_templates,
+            commands::cloud_templates::cloud_search_template_completions,
+            commands::cloud_templates::cloud_get_template,
+            commands::cloud_templates::cloud_get_templates,
+            commands::cloud_templates::cloud_create_template,
+            commands::cloud_templates::cloud_update_template,
+            commands::cloud_templates::cloud_delete_template,
+            commands::cloud_templates::cloud_set_template_favorite,
+            commands::cloud_templates::cloud_record_template_use,
+            commands::cloud_templates::cloud_move_template,
+            commands::cloud_templates::cloud_import_local_templates,
             commands::performance::get_performance_snapshot,
             commands::lsp::start_clangd,
             commands::lsp::stop_clangd,

@@ -199,8 +199,11 @@
         {#if !templateStore.loading && templateStore.templates.length === 0}
           <div class="template-list-empty">
             <Icon name="templates" size={27} />
-            <span>没有匹配的模板</span>
+            <span>{templateStore.selectedCategoryId === undefined ? "没有匹配的模板" : "此分类及其子分类中暂无模板"}</span>
             <button onclick={() => templateStore.beginCreate()}>新建模板</button>
+            {#if templateStore.selectedCategoryId !== undefined}
+              <button onclick={() => void templateStore.setCollection("all")}>查看全部模板</button>
+            {/if}
           </div>
         {/if}
       </div>
