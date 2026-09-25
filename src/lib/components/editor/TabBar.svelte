@@ -11,6 +11,8 @@
   interface Props {
     workspace: EditorWorkspace;
     togglePanel: () => void;
+    toggleReader: () => void;
+    toggleSketch: () => void;
     toggleZen: () => void;
     compile: () => void;
     run: () => void;
@@ -21,9 +23,11 @@
     keybindings: KeybindingMap;
     newFile: () => void;
     lsp: LspStore;
+    readerOpen: boolean;
+    sketchOpen: boolean;
   }
 
-  let { workspace, togglePanel, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile, lsp }: Props = $props();
+  let { workspace, togglePanel, toggleReader, toggleSketch, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile, lsp, readerOpen, sketchOpen }: Props = $props();
   let tabStrip: HTMLDivElement;
   let menu = $state<{ x: number; y: number; tabId: string }>();
   let canRun = $derived(Boolean(workspace.activeTab?.path && !workspace.activeTab.deleted && !workspace.activeTab.loading));
@@ -152,6 +156,12 @@
     {:else}
       <button class="tab-run-action" disabled={busy || !canRun} title={canRun ? `编译并运行 · ${keybindings.runCurrent}` : "先打开一个 C++ 文件"} onclick={run}>运行</button>
     {/if}
+    <button class:active={readerOpen} class="tab-reader-action" aria-pressed={readerOpen} title="打开读题面板" onclick={toggleReader}>
+      <Icon name="book" size={15} /><span>读题</span>
+    </button>
+    <button class:active={sketchOpen} class="tab-reader-action" aria-pressed={sketchOpen} title="打开思路画板" onclick={toggleSketch}>
+      <Icon name="sketch" size={15} /><span>画板</span>
+    </button>
     <button class="tab-action" aria-label="切换底部面板" title={`切换底部面板 · ${keybindings.togglePanel}`} onclick={togglePanel}>
       <Icon name="panel" size={16} />
     </button>

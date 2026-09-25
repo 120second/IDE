@@ -3,7 +3,6 @@
   import { healthCheck } from "./lib/api/health";
   import TitleBar from "./lib/components/shell/TitleBar.svelte";
   import Workbench from "./lib/components/shell/Workbench.svelte";
-  import AuthView from "./lib/components/auth/AuthView.svelte";
   import type { EditorWorkspace } from "./lib/editor/workspace.svelte";
   import {
     applyDocumentAppearance,
@@ -46,14 +45,10 @@
   let backendState = $state<"checking" | "ready" | "error">("checking");
   let health = $state<HealthStatus>();
   let editorLoadError = $state("");
-  let templateOwner = "";
-
   $effect(() => {
-    const userId = auth.user?.id;
     const store = templateStore;
-    if (!userId || !store || templateOwner === userId) return;
-    templateOwner = userId;
-    untrack(() => void store.reload());
+    if (auth.user || !store || store.storage !== "cloud") return;
+    untrack(() => void store.setStorage("local"));
   });
 
   $effect(() => {
@@ -68,8 +63,12 @@
     shell.sidebarVisible;
     shell.bottomPanelVisible;
     shell.activeBottomPanel;
+    shell.problemReaderVisible;
+    shell.sketchBoardVisible;
+    shell.problemReaderDock;
     shell.sidebarWidth;
     shell.bottomPanelHeight;
+    shell.problemReaderWidth;
     untrack(() => sessionStore?.schedulePersist());
   });
 
@@ -221,14 +220,7 @@
 <div class="window-frame">
   <TitleBar />
   <div class="window-content">
-    {#if auth.loading}
-      <main class="boot-screen" aria-live="polite">
-        <div class="boot-mark">L</div>
-        <p>正在验证登录状态…</p>
-      </main>
-    {:else if !auth.user}
-      <AuthView {auth} />
-    {:else if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
+    {#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
       <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {auth} {backendState} {health} />
     {:else}
       <main class="boot-screen" aria-live="polite">

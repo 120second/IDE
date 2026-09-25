@@ -67,6 +67,7 @@ import {
   editorDocument,
   editorText,
   lineEndingText,
+  normalizePastedLineEndings,
   type LineEnding,
 } from "./lineEndings";
 import { usesLanguageServices } from "./languageServicePolicy";
@@ -1280,6 +1281,9 @@ export class EditorWorkspace {
         dropCursor(),
         rectangularSelection(),
         crosshairCursor(),
+        EditorView.clipboardInputFilter.of((text, state) =>
+          normalizePastedLineEndings(text, state.lineBreak)
+        ),
         keymap.of([
           ...closeBracketsKeymap,
           ...defaultKeymap,

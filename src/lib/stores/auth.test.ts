@@ -36,7 +36,20 @@ describe("AuthStore", () => {
     await store.initialize();
 
     expect(store.loading).toBe(false);
+    expect(store.connection).toBe("online");
     expect(store.user).toEqual(user);
+  });
+
+  it("falls back to offline mode when the cloud server is unavailable", async () => {
+    authApi.restoreAuth.mockRejectedValue(new Error("server unavailable"));
+    const store = new AuthStore();
+
+    await store.initialize();
+
+    expect(store.loading).toBe(false);
+    expect(store.connection).toBe("offline");
+    expect(store.user).toBeUndefined();
+    expect(store.error).toBe("server unavailable");
   });
 
   it("keeps reset state without persisting secrets in browser storage", async () => {

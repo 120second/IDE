@@ -35,8 +35,15 @@
     | "stop"
     | "trash"
     | "copy"
+    | "download"
     | "grip"
-    | "repeat";
+    | "repeat"
+    | "book"
+    | "sketch"
+    | "pencil"
+    | "eraser"
+    | "undo"
+    | "redo";
 
   interface Props {
     name: IconName;
@@ -129,6 +136,8 @@
     <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
   {:else if name === "copy"}
     <rect x="8" y="8" width="11" height="11" rx="1.5" /><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-10A1.5 1.5 0 0 0 3 5.5v10A1.5 1.5 0 0 0 4.5 17H8" />
+  {:else if name === "download"}
+    <path d="M12 3v12M7.5 10.5 12 15l4.5-4.5M5 20h14" />
   {:else if name === "grip"}
     <circle cx="9" cy="7" r=".8" fill="currentColor" stroke="none" /><circle cx="15" cy="7" r=".8" fill="currentColor" stroke="none" />
     <circle cx="9" cy="12" r=".8" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r=".8" fill="currentColor" stroke="none" />
@@ -136,5 +145,18 @@
   {:else if name === "repeat"}
     <path d="M17 2.8 20.2 6 17 9.2" /><path d="M4 11V9a3 3 0 0 1 3-3h13" />
     <path d="M7 21.2 3.8 18 7 14.8" /><path d="M20 13v2a3 3 0 0 1-3 3H4" />
+  {:else if name === "book"}
+    <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5z" />
+    <path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5z" />
+  {:else if name === "sketch"}
+    <path d="M4 4h16v16H4z" /><path d="m7 16 3.2-3.2 2.2 2.2L17 9.5" /><path d="m15.5 8 2.5-2.5" />
+  {:else if name === "pencil"}
+    <path d="M4 20l4.2-1 10.5-10.5-3.2-3.2L5 15.8z" /><path d="m13.8 7 3.2 3.2M5 15.8 8.2 19" />
+  {:else if name === "eraser"}
+    <path d="m4.2 14.8 8.9-9a2 2 0 0 1 2.8 0l2.3 2.3a2 2 0 0 1 0 2.8L10.1 19H7.8l-3.6-3.6a.5.5 0 0 1 0-.6z" /><path d="m10.2 8.7 5.1 5.1M11 19h9" />
+  {:else if name === "undo"}
+    <path d="M9 7 4 12l5 5" /><path d="M5 12h8a6 6 0 0 1 6 6" />
+  {:else if name === "redo"}
+    <path d="m15 7 5 5-5 5" /><path d="M19 12h-8a6 6 0 0 0-6 6" />
   {/if}
 </svg>

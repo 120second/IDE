@@ -21,6 +21,7 @@
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import { templateReferenceCode } from "../../editor/templateCompletion";
   import { templateReferencePrimaryKeymap } from "../../editor/templateReferenceKeymap";
+  import { nextFloatingZIndex } from "../../floatingLayer";
   import Icon from "../shell/Icon.svelte";
 
   interface Props {
@@ -40,11 +41,13 @@
   }
 
   let { workspace, settings, reference }: Props = $props();
+  let anchorElement: HTMLSpanElement;
   let windowElement: HTMLElement;
   let codeHost: HTMLDivElement;
   let previewView = $state.raw<EditorView>();
   let x = $state(16);
   let y = $state(16);
+  let zIndex = $state(nextFloatingZIndex());
   let dragging = $state<DragState>();
   let draftDirty = $state(false);
   const appearance = new Compartment();
@@ -86,12 +89,18 @@
       }),
     });
 
-    const parent = windowElement.parentElement;
     placeAtUpperRight();
-    const observer = parent ? new ResizeObserver(() => clampPosition()) : undefined;
-    if (parent) observer?.observe(parent);
+    const anchorParent = anchorElement.parentElement;
+    const bringForward = () => (zIndex = nextFloatingZIndex());
+    const observer = new ResizeObserver(() => clampPosition());
+    observer.observe(windowElement);
+    if (anchorParent) observer.observe(anchorParent);
+    window.addEventListener("resize", clampPosition);
+    windowElement.addEventListener("pointerdown", bringForward, true);
     return () => {
-      observer?.disconnect();
+      observer.disconnect();
+      window.removeEventListener("resize", clampPosition);
+      windowElement.removeEventListener("pointerdown", bringForward, true);
       previewView?.destroy();
       previewView = undefined;
     };
@@ -106,18 +115,19 @@
   });
 
   function bounds(): { maxX: number; maxY: number } {
-    const parent = windowElement.parentElement;
-    if (!parent) return { maxX: 0, maxY: 0 };
     return {
-      maxX: Math.max(0, parent.clientWidth - windowElement.offsetWidth),
-      maxY: Math.max(0, parent.clientHeight - windowElement.offsetHeight),
+      maxX: Math.max(0, window.innerWidth - windowElement.offsetWidth),
+      maxY: Math.max(0, window.innerHeight - windowElement.offsetHeight),
     };
   }
 
   function placeAtUpperRight(): void {
     const limits = bounds();
-    x = Math.max(0, limits.maxX - 18);
-    y = Math.min(24, limits.maxY);
+    const editorBounds = anchorElement.parentElement?.getBoundingClientRect();
+    const preferredX = (editorBounds?.right ?? window.innerWidth) - windowElement.offsetWidth - 18;
+    const preferredY = (editorBounds?.top ?? 0) + 24;
+    x = Math.min(limits.maxX, Math.max(0, preferredX));
+    y = Math.min(limits.maxY, Math.max(0, preferredY));
   }
 
   function clampPosition(): void {
@@ -191,16 +201,24 @@
     event.preventDefault();
     close();
   }
+
+  function portal(node: HTMLElement): { destroy: () => void } {
+    window.document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  }
 </script>
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
+<span class="template-reference-anchor" aria-hidden="true" bind:this={anchorElement}></span>
 <aside
+  use:portal
   class:dragging
   class="template-reference-window"
   aria-label={`模板对照：${reference.name}`}
   bind:this={windowElement}
   style:transform={`translate3d(${x}px, ${y}px, 0)`}
+  style:z-index={zIndex}
 >
   <header>
     <button
@@ -229,8 +247,7 @@
 
 <style>
   .template-reference-window {
-    position: absolute;
-    z-index: 36;
+    position: fixed;
     inset: 0 auto auto 0;
     display: grid;
     width: min(680px, calc(100% - 32px));
@@ -244,6 +261,13 @@
     color: var(--text-primary);
     background: var(--editor-background);
     box-shadow: 0 18px 54px var(--shadow), inset 0 1px 0 color-mix(in srgb, var(--text-primary) 5%, transparent);
+  }
+
+  .template-reference-anchor {
+    position: absolute;
+    width: 0;
+    height: 0;
+    pointer-events: none;
   }
 
   .template-reference-window.dragging {

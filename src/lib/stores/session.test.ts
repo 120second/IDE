@@ -85,6 +85,32 @@ describe("workspace session persistence", () => {
     store.dispose();
   });
 
+  it("migrates the removed test results panel to output", async () => {
+    values.set("lightcp.session.v1", JSON.stringify({
+      version: 1,
+      activeActivity: "testcases",
+      sidebarVisible: true,
+      bottomPanelVisible: true,
+      activeBottomPanel: "tests",
+      sidebarWidth: 264,
+      bottomPanelHeight: 190,
+    }));
+    const shell = new ShellStore();
+    const workspace = workspaceStub("");
+    workspace.recent = [];
+    const store = new SessionStore(
+      workspace as never,
+      editorStub() as never,
+      shell,
+      { error: vi.fn() } as never,
+    );
+
+    await store.initialize();
+
+    expect(shell.activeBottomPanel).toBe("output");
+    store.dispose();
+  });
+
   it("migrates the former settings workspace back to explorer", async () => {
     values.set("lightcp.session.v1", JSON.stringify({
       version: 1,
@@ -109,6 +135,39 @@ describe("workspace session persistence", () => {
 
     expect(shell.activeActivity).toBe("explorer");
     expect(shell.settingsWindowOpen).toBe(false);
+    store.dispose();
+  });
+
+  it("restores the local problem reader layout", async () => {
+    values.set("lightcp.session.v1", JSON.stringify({
+      version: 1,
+      activeActivity: "explorer",
+      sidebarVisible: true,
+      bottomPanelVisible: true,
+      activeBottomPanel: "output",
+      problemReaderVisible: true,
+      sketchBoardVisible: true,
+      problemReaderDock: "left",
+      problemReaderWidth: 520,
+      sidebarWidth: 264,
+      bottomPanelHeight: 190,
+    }));
+    const shell = new ShellStore();
+    const workspace = workspaceStub("");
+    workspace.recent = [];
+    const store = new SessionStore(
+      workspace as never,
+      editorStub() as never,
+      shell,
+      { error: vi.fn() } as never,
+    );
+
+    await store.initialize();
+
+    expect(shell.problemReaderVisible).toBe(true);
+    expect(shell.sketchBoardVisible).toBe(true);
+    expect(shell.problemReaderDock).toBe("left");
+    expect(shell.problemReaderWidth).toBe(520);
     store.dispose();
   });
 });

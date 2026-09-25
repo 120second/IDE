@@ -2704,6 +2704,33 @@ button.status-item:hover {
   box-shadow: none;
 }
 
+.tab-reader-action {
+  display: inline-flex;
+  min-width: 58px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  color: var(--text-secondary);
+  background: var(--surface);
+  font-size: var(--ui-font-small);
+  font-weight: 600;
+}
+
+.tab-reader-action:hover,
+.tab-reader-action.active {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--accent-soft);
+}
+
+.tab-reader-action.active {
+  box-shadow: inset 0 -2px var(--accent);
+}
+
 .testcase-main strong {
   font-size: var(--ui-font-small);
 }
@@ -4058,6 +4085,216 @@ button.status-item:hover {
   align-items: center;
   justify-content: center;
   gap: 5px;
+}
+
+.template-storage-switch {
+  display: inline-flex;
+  flex-direction: row;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-sunken);
+}
+
+.template-storage-switch button {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: var(--ui-font-caption);
+}
+
+.template-storage-switch button:hover {
+  color: var(--text-primary);
+  background: var(--hover);
+}
+
+.template-storage-switch button.active {
+  color: var(--accent-contrast);
+  background: var(--accent);
+}
+
+/* Offline-first account and optional cloud sync settings. */
+.account-settings {
+  display: grid;
+  gap: 14px;
+}
+
+.offline-first-card,
+.account-card,
+.cloud-sync-card,
+.account-login-card {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.offline-first-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.offline-first-card p,
+.cloud-sync-heading p,
+.account-login-heading p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--ui-font-small);
+  line-height: 1.5;
+}
+
+.offline-mark,
+.account-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  color: #07130f;
+  background: var(--accent);
+  font-family: var(--display-font);
+  font-weight: 800;
+}
+
+.connection-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--warning);
+  font-size: var(--ui-font-caption);
+  white-space: nowrap;
+}
+
+.connection-state::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.connection-state.online {
+  color: var(--success);
+}
+
+.account-card,
+.account-login-heading,
+.cloud-sync-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.account-card {
+  padding: 12px 13px;
+}
+
+.account-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-identity div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.account-identity small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+}
+
+.cloud-sync-card,
+.account-login-card {
+  padding: 14px;
+}
+
+.cloud-sync-actions,
+.account-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 13px;
+  flex-wrap: wrap;
+}
+
+.account-login-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 13px;
+}
+
+.account-login-form label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--ui-font-small);
+}
+
+.account-login-form input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  outline: 0;
+  color: var(--text-primary);
+  background: var(--input-background);
+}
+
+.account-login-form input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.account-form-actions,
+.account-notice,
+.account-error {
+  grid-column: 1 / -1;
+}
+
+.text-button {
+  padding: 5px 2px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+}
+
+.text-button:hover {
+  text-decoration: underline;
+}
+
+.account-notice,
+.account-error {
+  margin: 10px 0 0;
+  font-size: var(--ui-font-small);
+  line-height: 1.45;
+}
+
+.account-notice { color: var(--success); }
+.account-error { color: var(--danger); }
+
+@media (max-width: 720px) {
+  .offline-first-card { grid-template-columns: auto minmax(0, 1fr); }
+  .connection-state { grid-column: 1 / -1; }
+  .account-login-form { grid-template-columns: minmax(0, 1fr); }
 }
 
 .template-print-overlay {

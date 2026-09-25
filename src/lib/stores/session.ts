@@ -9,13 +9,13 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { loadEditorRecovery, saveEditorRecovery } from "../api/session";
 import type { EditorWorkspace } from "../editor/workspace.svelte";
 import type { EditorRecoverySnapshot } from "../types/session";
-import type { ActivityId, BottomPanelId, ShellStore } from "./shell.svelte";
+import type { ActivityId, BottomPanelId, ProblemReaderDock, ShellStore } from "./shell.svelte";
 import type { UxStore } from "./ux.svelte";
 import type { WorkspaceStore } from "./workspace.svelte";
 
 const STORAGE_KEY = "lightcp.session.v1";
 const ACTIVITIES = new Set<ActivityId>(["explorer", "testcases", "templates", "debug", "judge"]);
-const PANELS = new Set<BottomPanelId>(["problems", "output", "tests", "debugConsole"]);
+const PANELS = new Set<BottomPanelId>(["problems", "output", "debugConsole"]);
 
 interface WindowGeometry {
   x: number;
@@ -32,8 +32,12 @@ interface SessionSnapshot {
   sidebarVisible: boolean;
   bottomPanelVisible: boolean;
   activeBottomPanel: BottomPanelId;
+  problemReaderVisible: boolean;
+  sketchBoardVisible: boolean;
+  problemReaderDock: ProblemReaderDock;
   sidebarWidth: number;
   bottomPanelHeight: number;
+  problemReaderWidth: number;
   window?: WindowGeometry;
 }
 
@@ -169,8 +173,12 @@ export class SessionStore {
     this.shell.sidebarVisible = snapshot.sidebarVisible;
     this.shell.bottomPanelVisible = snapshot.bottomPanelVisible;
     this.shell.activeBottomPanel = snapshot.activeBottomPanel;
+    this.shell.problemReaderVisible = snapshot.problemReaderVisible;
+    this.shell.sketchBoardVisible = snapshot.sketchBoardVisible;
+    this.shell.problemReaderDock = snapshot.problemReaderDock;
     this.shell.setSidebarWidth(snapshot.sidebarWidth);
     this.shell.setBottomPanelHeight(snapshot.bottomPanelHeight);
+    this.shell.setProblemReaderWidth(snapshot.problemReaderWidth);
   }
 
   private persistNow(): void {
@@ -184,8 +192,12 @@ export class SessionStore {
       sidebarVisible: this.shell.sidebarVisible,
       bottomPanelVisible: this.shell.bottomPanelVisible,
       activeBottomPanel: this.shell.activeBottomPanel,
+      problemReaderVisible: this.shell.problemReaderVisible,
+      sketchBoardVisible: this.shell.sketchBoardVisible,
+      problemReaderDock: this.shell.problemReaderDock,
       sidebarWidth: this.shell.sidebarWidth,
       bottomPanelHeight: this.shell.bottomPanelHeight,
+      problemReaderWidth: this.shell.problemReaderWidth,
       window: this.geometry,
     };
     try {
@@ -285,7 +297,7 @@ function readSnapshot(): SessionSnapshot | undefined {
       ? parsed.activeActivity as ActivityId
       : "explorer";
     const persistedPanel = parsed.activeBottomPanel as string | undefined;
-    const activeBottomPanel = persistedPanel === "terminal"
+    const activeBottomPanel = persistedPanel === "terminal" || persistedPanel === "tests"
       ? "output"
       : PANELS.has(persistedPanel as BottomPanelId)
       ? persistedPanel as BottomPanelId
@@ -297,8 +309,12 @@ function readSnapshot(): SessionSnapshot | undefined {
       sidebarVisible: parsed.sidebarVisible !== false,
       bottomPanelVisible: parsed.bottomPanelVisible !== false,
       activeBottomPanel,
+      problemReaderVisible: parsed.problemReaderVisible === true,
+      sketchBoardVisible: parsed.sketchBoardVisible === true,
+      problemReaderDock: parsed.problemReaderDock === "left" ? "left" : "right",
       sidebarWidth: finite(parsed.sidebarWidth, 210, 380, 264),
       bottomPanelHeight: finite(parsed.bottomPanelHeight, 120, 420, 190),
+      problemReaderWidth: finite(parsed.problemReaderWidth, 300, 760, 460),
       window: sanitizeGeometry(parsed.window),
     };
   } catch {

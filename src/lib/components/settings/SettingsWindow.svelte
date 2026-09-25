@@ -3,6 +3,8 @@
   import type { SettingsStore } from "../../stores/settings.svelte";
   import type { ShellStore } from "../../stores/shell.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
+  import type { AuthStore } from "../../stores/auth.svelte";
+  import type { TemplateStore } from "../../stores/templates.svelte";
   import Icon from "../shell/Icon.svelte";
   import SettingsNavigation from "./SettingsNavigation.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
@@ -11,6 +13,8 @@
     settings: SettingsStore;
     shell: ShellStore;
     ux: UxStore;
+    auth: AuthStore;
+    templateStore: TemplateStore;
   }
 
   type Interaction = "drag" | "resize";
@@ -19,7 +23,7 @@
   const MIN_WIDTH = 420;
   const MIN_HEIGHT = 360;
 
-  let { settings, shell, ux }: Props = $props();
+  let { settings, shell, ux, auth, templateStore }: Props = $props();
   let layer = $state<HTMLDivElement>();
   let left = $state(EDGE_GAP);
   let top = $state(EDGE_GAP);
@@ -188,7 +192,7 @@
     >
       <div>
         <strong>设置</strong>
-        <small>外观</small>
+        <small>{shell.settingsPage === "account" ? "在线服务" : "偏好设置"}</small>
       </div>
       <div class="settings-window-actions">
         <button aria-label="窗口居中" title="窗口居中" onclick={centerWindow}>
@@ -208,7 +212,7 @@
         <SettingsNavigation {shell} />
       </aside>
       <div class="settings-window-content">
-        <SettingsPanel {settings} {shell} {ux} />
+        <SettingsPanel {settings} {shell} {ux} {auth} {templateStore} />
       </div>
     </div>
 

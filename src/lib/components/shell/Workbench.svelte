@@ -66,6 +66,12 @@
   let TemplateReferenceWindow = $state.raw<
     (typeof import("../editor/TemplateReferenceWindow.svelte"))["default"]
   >();
+  let ProblemReader = $state.raw<
+    (typeof import("../reader/ProblemReader.svelte"))["default"]
+  >();
+  let SketchBoard = $state.raw<
+    (typeof import("../editor/SketchBoard.svelte"))["default"]
+  >();
   let activeFileReady = $derived(Boolean(
     workspace.activeTab?.path
     && !workspace.activeTab.deleted
@@ -102,6 +108,8 @@
     command("view.settings", "打开设置", "视图", undefined, () => openSettingsPage("theme")),
     command("view.problems", "显示问题面板", "视图", undefined, () => shell.showBottomPanel("problems")),
     command("view.output", "显示输出面板", "视图", undefined, () => shell.showBottomPanel("output")),
+    command("view.problemReader", "切换读题面板", "视图", undefined, () => shell.toggleProblemReader()),
+    command("view.sketchBoard", "切换思路画板", "视图", undefined, () => shell.toggleSketchBoard()),
     command("view.toggleSidebar", "切换侧栏", "视图", "toggleSidebar", () => shell.toggleSidebar()),
     command("view.togglePanel", "切换底部面板", "视图", "togglePanel", () => shell.toggleBottomPanel()),
     { id: "view.zen", label: "切换禅模式", category: "视图", shortcut: "Ctrl+K Z", run: () => shell.toggleZenMode() },
@@ -110,6 +118,13 @@
 
   $effect(() => {
     if (shell.activeActivity === "templates") void templateStore.initialize();
+  });
+
+  $effect(() => {
+    if (!shell.sketchBoardVisible || SketchBoard) return;
+    void import("../editor/SketchBoard.svelte").then((module) => {
+      SketchBoard = module.default;
+    });
   });
 
   $effect(() => {
@@ -137,6 +152,13 @@
     if (!workspace.templateReference || TemplateReferenceWindow) return;
     void import("../editor/TemplateReferenceWindow.svelte").then((module) => {
       TemplateReferenceWindow = module.default;
+    });
+  });
+
+  $effect(() => {
+    if (!shell.problemReaderVisible || ProblemReader) return;
+    void import("../reader/ProblemReader.svelte").then((module) => {
+      ProblemReader = module.default;
     });
   });
 
@@ -424,6 +446,42 @@
     }
   }
 
+  async function importStatementSample(sample: { name: string; input: string; expectedOutput: string }): Promise<boolean> {
+    const sourcePath = workspace.activeTab?.path;
+    if (!sourcePath) {
+      ux.error("请先打开一个代码文件，再导入样例。");
+      return false;
+    }
+    await execution.syncActiveSource(sourcePath);
+    const duplicate = execution.testcases.find((testcase) =>
+      testcase.input === sample.input && testcase.expectedOutput === sample.expectedOutput
+    );
+    if (duplicate) {
+      showActivity("testcases");
+      ux.info(`“${duplicate.name}”已经包含这组样例。`);
+      return true;
+    }
+
+    const names = new Set(execution.testcases.map((testcase) => testcase.name));
+    let name = sample.name;
+    for (let suffix = 2; names.has(name); suffix += 1) name = `${sample.name} (${suffix})`;
+    const saved = await execution.saveTestcase({
+      sourcePath,
+      kind: "sample",
+      name,
+      input: sample.input,
+      expectedOutput: sample.expectedOutput,
+      enabled: true,
+    });
+    if (!saved) {
+      ux.error(execution.error || "样例导入失败。");
+      return false;
+    }
+    showActivity("testcases");
+    ux.success(`${name} 已导入测试点。`);
+    return true;
+  }
+
   async function createSourceFile(parent?: string): Promise<void> {
     if (!fileWorkspace.info) await fileWorkspace.openFolderPicker();
     const root = fileWorkspace.info?.path;
@@ -467,7 +525,7 @@
             setDirty={(dirty) => shell.setThemeStudioDirty(dirty)}
           />
         {:else if shell.activeActivity === "templates" && !shell.zenMode}
-          <TemplateCenter {templateStore} />
+          <TemplateCenter {templateStore} {auth} {shell} />
         {:else if shell.activeActivity === "judge" && !shell.zenMode}
           <StressCenter stress={stressStore} {generator} {workspace} />
         {:else if shell.activeActivity === "testcases" && shell.generatorOpen && !shell.zenMode}
@@ -488,6 +546,8 @@
             lsp={lspStore}
             keybindings={settings.value.keybindings}
             togglePanel={() => shell.toggleBottomPanel()}
+            toggleReader={() => shell.toggleProblemReader()}
+            toggleSketch={() => shell.toggleSketchBoard()}
             toggleZen={() => shell.toggleZenMode()}
             compile={() => void execution.compileCurrent()}
             run={() => void execution.runCurrent()}
@@ -495,6 +555,8 @@
             busy={execution.compiling || execution.running}
             running={execution.running}
             newFile={() => void createSourceFile()}
+            readerOpen={shell.problemReaderVisible}
+            sketchOpen={shell.sketchBoardVisible}
           />
           {#if workspace.activeTab && !shell.zenMode}
             <EditorBreadcrumbs
@@ -503,25 +565,48 @@
               showExplorer={() => showActivity("explorer")}
             />
           {/if}
-          <div class="editor-surface">
-            {#if workspace.activeTab}
-              <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
-            {:else}
-              <WelcomeView
-                {fileWorkspace}
-                {shell}
-                keybindings={settings.value.keybindings}
-                newFile={() => void createSourceFile()}
+          <div class="editor-workspace">
+            <div class="editor-surface">
+              {#if workspace.activeTab}
+                <EditorHost {workspace} saveAsSnippet={saveSelectionAsSnippet} />
+              {:else}
+                <WelcomeView
+                  {fileWorkspace}
+                  {shell}
+                  keybindings={settings.value.keybindings}
+                  newFile={() => void createSourceFile()}
+                />
+              {/if}
+              {#if workspace.templateReference && TemplateReferenceWindow}
+                {#key workspace.templateReference.template.id}
+                  <TemplateReferenceWindow
+                    {workspace}
+                    {settings}
+                    reference={workspace.templateReference.template}
+                  />
+                {/key}
+              {/if}
+            </div>
+            {#if shell.problemReaderVisible && !shell.zenMode && ProblemReader}
+              <ProblemReader
+                sourcePath={workspace.activeTab?.path}
+                sourceTitle={workspace.activeTab?.title}
+                width={shell.problemReaderWidth}
+                dock={shell.problemReaderDock}
+                setWidth={(width) => shell.setProblemReaderWidth(width)}
+                toggleDock={() => shell.toggleProblemReaderDock()}
+                close={() => shell.toggleProblemReader()}
+                importSample={importStatementSample}
+                {ux}
               />
             {/if}
-            {#if workspace.templateReference && TemplateReferenceWindow}
-              {#key workspace.templateReference.template.id}
-                <TemplateReferenceWindow
-                  {workspace}
-                  {settings}
-                  reference={workspace.templateReference.template}
-                />
-              {/key}
+            {#if shell.sketchBoardVisible && !shell.zenMode && SketchBoard}
+              <SketchBoard
+                sourcePath={workspace.activeTab?.path}
+                sourceTitle={workspace.activeTab?.title}
+                close={() => shell.toggleSketchBoard()}
+                {ux}
+              />
             {/if}
           </div>
           {#if shell.bottomPanelVisible && !shell.zenMode && (workspace.activeTab || execution.running)}
@@ -529,7 +614,7 @@
           {/if}
         {/if}
         {#if shell.settingsWindowOpen && !shell.zenMode && !shell.themeStudioOpen}
-          <SettingsWindow {settings} {shell} {ux} />
+          <SettingsWindow {settings} {shell} {ux} {auth} {templateStore} />
         {/if}
       </section>
     </div>

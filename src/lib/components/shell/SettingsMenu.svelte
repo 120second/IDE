@@ -136,6 +136,11 @@
   <button data-main-item role="menuitem" onclick={() => choose(openTasks)}><span>测试与任务</span></button>
 
   <span class="settings-menu-separator" role="separator"></span>
-  <span class="settings-menu-label" aria-label={`当前账号 ${username}`}>{username}</span>
-  <button data-main-item role="menuitem" onclick={() => choose(logout)}><span>退出登录</span></button>
+  {#if username}
+    <span class="settings-menu-label" aria-label={`当前账号 ${username}`}>{username}</span>
+    <button data-main-item role="menuitem" onclick={() => choose(logout)}><span>退出登录</span></button>
+  {:else}
+    <span class="settings-menu-label">本地模式</span>
+    <button data-main-item role="menuitem" onclick={() => choose(() => openSettings("account"))}><span>登录与云同步…</span></button>
+  {/if}
 </div>

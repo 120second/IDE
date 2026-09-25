@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { detectLineEnding, editorDocument, editorText, lineEndingText } from "./lineEndings";
+import {
+  detectLineEnding,
+  editorDocument,
+  editorText,
+  lineEndingText,
+  normalizePastedLineEndings,
+} from "./lineEndings";
 
 describe("line ending preservation", () => {
   it.each([
@@ -27,5 +33,14 @@ describe("line ending preservation", () => {
     const document = editorDocument("a\r\nb\nc\r\nd");
     expect(document.eol).toBe("crlf");
     expect(document.text.toString()).toBe("a\nb\nc\nd");
+  });
+
+  it.each([
+    ["first\r\nsecond\r\n", "\n", "first\nsecond\n"],
+    ["first\nsecond\n", "\r\n", "first\r\nsecond\r\n"],
+    ["first\rsecond\nthird\r\n", "\r\n", "first\r\nsecond\r\nthird\r\n"],
+    ["no line break", "\n", "no line break"],
+  ])("normalizes pasted line endings to the active document", (content, lineBreak, expected) => {
+    expect(normalizePastedLineEndings(content, lineBreak)).toBe(expected);
   });
 });

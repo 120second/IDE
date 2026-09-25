@@ -29,6 +29,10 @@ export function lineEndingText(lineEnding: LineEnding): string {
   return "\n";
 }
 
+export function normalizePastedLineEndings(content: string, lineBreak: string): string {
+  return content.replace(LINE_BREAK, lineBreak);
+}
+
 export function editorText(content: string): Text {
   return Text.of(content.split(LINE_BREAK));
 }

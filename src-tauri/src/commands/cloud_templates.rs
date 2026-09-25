@@ -36,6 +36,15 @@ pub async fn cloud_import_local_templates(
 }
 
 #[tauri::command]
+pub async fn cloud_sync_templates_to_local(
+    state: State<'_, AppState>,
+) -> Result<LocalTemplateImportResult, CommandError> {
+    sync_cloud_templates_to_local(&state.server_api, &state.paths.database_file)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub async fn cloud_list_template_categories(
     state: State<'_, AppState>,
 ) -> Result<Vec<TemplateCategory>, CommandError> {
@@ -343,6 +352,167 @@ async fn import_local_templates(
                 local_template.metadata.sort_order,
             )
             .await?;
+        }
+        templates_created += 1;
+    }
+
+    Ok(LocalTemplateImportResult {
+        categories_created,
+        categories_reused,
+        templates_created,
+        templates_skipped,
+        histories_skipped: true,
+    })
+}
+
+async fn sync_cloud_templates_to_local(
+    api: &ServerApi,
+    database_path: &Path,
+) -> AppResult<LocalTemplateImportResult> {
+    let cloud_categories = cloud::list_categories(api).await?;
+    let mut local_categories = local::list_categories(database_path)?;
+    let mut category_map = HashMap::<i64, i64>::new();
+    let mut claimed_local_categories = HashSet::<i64>::new();
+    let mut pending_categories = cloud_categories;
+    let mut categories_created = 0;
+    let mut categories_reused = 0;
+
+    while !pending_categories.is_empty() {
+        let previous_count = pending_categories.len();
+        let mut still_pending = Vec::new();
+        for cloud_category in pending_categories {
+            let parent_id = match cloud_category.parent_id {
+                Some(cloud_parent_id) => match category_map.get(&cloud_parent_id).copied() {
+                    Some(local_parent_id) => Some(local_parent_id),
+                    None => {
+                        still_pending.push(cloud_category);
+                        continue;
+                    }
+                },
+                None => None,
+            };
+
+            let existing = local_categories.iter().find(|candidate| {
+                !claimed_local_categories.contains(&candidate.id)
+                    && candidate.parent_id == parent_id
+                    && candidate.name == cloud_category.name
+            });
+            let local_id = if let Some(existing) = existing {
+                categories_reused += 1;
+                existing.id
+            } else {
+                let mut created =
+                    local::create_category(database_path, &cloud_category.name, parent_id)?;
+                if created.sort_order != cloud_category.sort_order {
+                    local::move_category(
+                        database_path,
+                        created.id,
+                        parent_id,
+                        cloud_category.sort_order.max(0) as usize,
+                    )?;
+                    created.sort_order = cloud_category.sort_order;
+                }
+                let local_id = created.id;
+                local_categories.push(created);
+                categories_created += 1;
+                local_id
+            };
+            claimed_local_categories.insert(local_id);
+            category_map.insert(cloud_category.id, local_id);
+        }
+        if still_pending.len() == previous_count {
+            return Err(AppError::Internal(
+                "cloud template categories could not be ordered for sync".to_owned(),
+            ));
+        }
+        pending_categories = still_pending;
+    }
+
+    let mut existing_templates = Vec::new();
+    for kind in [TemplateKind::File, TemplateKind::Snippet] {
+        let metadata = local::list_templates(
+            database_path,
+            &TemplateFilter {
+                kind,
+                search: String::new(),
+                favorite_only: false,
+                recent_only: false,
+                category_id: None,
+                sort: TemplateSort::Manual,
+            },
+        )?;
+        let ids = metadata.iter().map(|template| template.id).collect::<Vec<_>>();
+        existing_templates.extend(local::get_templates(database_path, &ids)?);
+    }
+    let mut existing_fingerprints = HashMap::<String, usize>::new();
+    for template in &existing_templates {
+        *existing_fingerprints
+            .entry(template_fingerprint(template, template.metadata.category_id))
+            .or_default() += 1;
+    }
+
+    let mut cloud_templates = Vec::new();
+    for kind in [TemplateKind::File, TemplateKind::Snippet] {
+        cloud_templates.extend(
+            cloud::list_templates(
+                api,
+                &TemplateFilter {
+                    kind,
+                    search: String::new(),
+                    favorite_only: false,
+                    recent_only: false,
+                    category_id: None,
+                    sort: TemplateSort::Manual,
+                },
+            )
+            .await?,
+        );
+    }
+
+    let mut templates_created = 0;
+    let mut templates_skipped = 0;
+    for cloud_template in cloud_templates {
+        let category_id = match cloud_template.metadata.category_id {
+            Some(cloud_category_id) => Some(
+                category_map
+                    .get(&cloud_category_id)
+                    .copied()
+                    .ok_or_else(|| {
+                        AppError::Internal(format!(
+                            "cloud category {cloud_category_id} was not mapped"
+                        ))
+                    })?,
+            ),
+            None => None,
+        };
+        let fingerprint = template_fingerprint(&cloud_template, category_id);
+        if let Some(count) = existing_fingerprints.get_mut(&fingerprint) {
+            if *count > 0 {
+                *count -= 1;
+                templates_skipped += 1;
+                continue;
+            }
+        }
+
+        let input = TemplateInput {
+            kind: cloud_template.metadata.kind,
+            name: cloud_template.metadata.name,
+            trigger: cloud_template.metadata.trigger,
+            aliases: cloud_template.metadata.aliases,
+            description: cloud_template.metadata.description,
+            language: cloud_template.metadata.language,
+            category_id,
+            favorite: cloud_template.metadata.favorite,
+            code: cloud_template.code,
+        };
+        let created = local::create_template(database_path, &input)?;
+        if created.metadata.sort_order != cloud_template.metadata.sort_order {
+            local::move_template(
+                database_path,
+                created.metadata.id,
+                category_id,
+                cloud_template.metadata.sort_order.max(0) as usize,
+            )?;
         }
         templates_created += 1;
     }

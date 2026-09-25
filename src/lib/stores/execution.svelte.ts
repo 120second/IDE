@@ -197,10 +197,8 @@ export class ExecutionStore {
     const compiled = await this.compileSource(sourcePath, "release", false);
     if (!compiled?.success || !compiled.executablePath) {
       this.setResult(compileFailureResult(testcase));
-      this.shell.showBottomPanel("tests");
       return;
     }
-    this.shell.showBottomPanel("tests");
     await this.executeTestcase(compiled.executablePath, sourcePath, testcase);
   }
 
@@ -217,7 +215,6 @@ export class ExecutionStore {
     this.results = [];
     this.clearOutput();
     const compiled = await this.compileSource(sourcePath, "release", false);
-    this.shell.showBottomPanel("tests");
     if (!compiled?.success || !compiled.executablePath) {
       this.results = enabled.map(compileFailureResult);
       return;

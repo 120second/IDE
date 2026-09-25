@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
+  import type { AuthStore } from "../../stores/auth.svelte";
+  import type { ShellStore } from "../../stores/shell.svelte";
   import type { TemplateMetadata } from "../../types/templates";
   import { createBackdropDismiss } from "../../ux/backdropDismiss";
   import Icon from "../shell/Icon.svelte";
@@ -8,9 +10,11 @@
 
   interface Props {
     templateStore: TemplateStore;
+    auth: AuthStore;
+    shell: ShellStore;
   }
 
-  let { templateStore }: Props = $props();
+  let { templateStore, auth, shell }: Props = $props();
   let historyOpen = $state(false);
   let printOpen = $state(false);
   let printButton: HTMLButtonElement;
@@ -131,6 +135,14 @@
     printOpen = false;
     requestAnimationFrame(() => printButton?.focus());
   }
+
+  function selectCloudStorage(): void {
+    if (!auth.user) {
+      shell.openSettings("account");
+      return;
+    }
+    void templateStore.setStorage("cloud");
+  }
 </script>
 
 <svelte:window onclick={collapseFromBlank} />
@@ -139,9 +151,22 @@
   <header class="template-center-header">
     <div>
       <strong>模板中心</strong>
-      <span>{templateStore.kind === "snippet" ? "可重复使用的代码片段" : "新文件的起始模板"}</span>
+      <span>{templateStore.storage === "local" ? "本地存储 · 离线可用" : "云端存储 · 随账号同步"}</span>
     </div>
     <div class="template-center-actions">
+      <div class="template-storage-switch" role="group" aria-label="模板存储位置">
+        <button
+          class:active={templateStore.storage === "local"}
+          aria-pressed={templateStore.storage === "local"}
+          onclick={() => void templateStore.setStorage("local")}
+        >本地</button>
+        <button
+          class:active={templateStore.storage === "cloud"}
+          aria-pressed={templateStore.storage === "cloud"}
+          title={auth.user ? "查看云端模板" : "前往设置登录后使用云端模板"}
+          onclick={selectCloudStorage}
+        >云端{auth.user ? "" : " · 登录"}</button>
+      </div>
       <button class="secondary-button" bind:this={printButton} onclick={() => (printOpen = true)}><Icon name="printer" size={13} /> 打印/导出</button>
       <button class="primary-button" onclick={() => templateStore.beginCreate()}><Icon name="plus" size={13} /> 新建</button>
     </div>
@@ -225,7 +250,9 @@
                 {#if templateStore.detail.kind === "snippet"}
                   <button type="button" class="secondary-button" onclick={() => void templateStore.insertTemplate(templateStore.detail!)}>插入</button>
                 {/if}
-                <button type="button" class="secondary-button" onclick={() => void showHistory()}>版本历史</button>
+                {#if templateStore.supportsHistory}
+                  <button type="button" class="secondary-button" onclick={() => void showHistory()}>版本历史</button>
+                {/if}
                 <button type="button" class="danger-button" onclick={() => void templateStore.deleteSelected()}>删除</button>
               {/if}
               <button class="primary-button" type="submit" disabled={templateStore.saving}>{templateStore.saving ? "正在保存…" : "保存"}</button>

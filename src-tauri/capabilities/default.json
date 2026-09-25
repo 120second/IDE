@@ -15,6 +15,7 @@
     "core:window:allow-destroy",
     "core:window:allow-available-monitors",
     "core:window:allow-set-effects",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

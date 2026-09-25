@@ -5,9 +5,11 @@ export type ActivityId =
   | "debug"
   | "judge";
 
-export type BottomPanelId = "problems" | "output" | "tests" | "debugConsole";
+export type BottomPanelId = "problems" | "output" | "debugConsole";
+export type ProblemReaderDock = "left" | "right";
 
 export type SettingsPage =
+  | "account"
   | "theme"
   | "interface"
   | "background"
@@ -21,6 +23,9 @@ export class ShellStore {
   sidebarVisible = $state(true);
   bottomPanelVisible = $state(true);
   activeBottomPanel = $state<BottomPanelId>("output");
+  problemReaderVisible = $state(false);
+  sketchBoardVisible = $state(false);
+  problemReaderDock = $state<ProblemReaderDock>("right");
   zenMode = $state(false);
   generatorOpen = $state(false);
   themeStudioOpen = $state(false);
@@ -29,6 +34,7 @@ export class ShellStore {
   settingsPage = $state<SettingsPage>("theme");
   sidebarWidth = $state(264);
   bottomPanelHeight = $state(190);
+  problemReaderWidth = $state(460);
 
   selectActivity(activity: ActivityId): void {
     if (this.themeStudioOpen) {
@@ -103,6 +109,18 @@ export class ShellStore {
     this.zenMode = !this.zenMode;
   }
 
+  toggleProblemReader(): void {
+    if (!this.zenMode) this.problemReaderVisible = !this.problemReaderVisible;
+  }
+
+  toggleSketchBoard(): void {
+    if (!this.zenMode) this.sketchBoardVisible = !this.sketchBoardVisible;
+  }
+
+  toggleProblemReaderDock(): void {
+    this.problemReaderDock = this.problemReaderDock === "right" ? "left" : "right";
+  }
+
   private confirmThemeStudioExit(): boolean {
     return !this.themeStudioDirty
       || typeof window === "undefined"
@@ -115,5 +133,9 @@ export class ShellStore {
 
   setBottomPanelHeight(height: number): void {
     this.bottomPanelHeight = Math.min(420, Math.max(120, height));
+  }
+
+  setProblemReaderWidth(width: number): void {
+    this.problemReaderWidth = Math.min(760, Math.max(300, width));
   }
 }

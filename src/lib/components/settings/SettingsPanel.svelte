@@ -2,6 +2,9 @@
   import type { SettingsStore } from "../../stores/settings.svelte";
   import type { SettingsPage, ShellStore } from "../../stores/shell.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
+  import type { AuthStore } from "../../stores/auth.svelte";
+  import type { TemplateStore } from "../../stores/templates.svelte";
+  import AccountSettings from "./AccountSettings.svelte";
   import AppearanceRange from "./AppearanceRange.svelte";
   import AppearancePreview from "./AppearancePreview.svelte";
   import {
@@ -28,9 +31,11 @@
     settings: SettingsStore;
     shell: ShellStore;
     ux: UxStore;
+    auth: AuthStore;
+    templateStore: TemplateStore;
   }
 
-  let { settings, shell, ux }: Props = $props();
+  let { settings, shell, ux, auth, templateStore }: Props = $props();
 
   const parseArguments = (value: string) => value.split(/\s+/).map((argument) => argument.trim()).filter(Boolean);
   let conflicts = $derived(shortcutConflicts(settings.value.keybindings));
@@ -60,6 +65,7 @@
     { id: "fill", label: "拉伸" },
   ];
   const pageDetails: Record<SettingsPage, { title: string; description: string }> = {
+    account: { title: "账户与云同步", description: "LightCP 始终可以离线使用；登录只用于可选的云端模板。" },
     theme: { title: "主题", description: "显示模式、内置颜色主题与自定义主题。" },
     interface: { title: "界面", description: "调整工作台密度、透明度与背景模糊。" },
     background: { title: "背景", description: "管理背景图片、填充方式、可见度与明暗。" },
@@ -223,6 +229,10 @@
       {/if}
     </span>
   </header>
+
+  {#if shell.settingsPage === "account"}
+    <AccountSettings {auth} {templateStore} {ux} />
+  {/if}
 
   {#if appearancePage}
   <div class="appearance-layout">

@@ -13,6 +13,7 @@ import type { AuthScreen, AuthUser } from "../types/auth";
 export class AuthStore {
   user = $state<AuthUser>();
   screen = $state<AuthScreen>("login");
+  connection = $state<"checking" | "online" | "offline">("checking");
   loading = $state(true);
   submitting = $state(false);
   error = $state("");
@@ -22,6 +23,7 @@ export class AuthStore {
 
   async initialize(): Promise<void> {
     this.loading = true;
+    this.connection = "checking";
     this.error = "";
     try {
       if (isTauri() && !this.unlistenExpired) {
@@ -32,7 +34,10 @@ export class AuthStore {
         });
       }
       this.user = (await restoreAuth()) ?? undefined;
+      this.connection = "online";
     } catch (error) {
+      this.user = undefined;
+      this.connection = "offline";
       this.error = errorMessage(error);
     } finally {
       this.loading = false;
@@ -53,6 +58,7 @@ export class AuthStore {
   async signIn(identifier: string, password: string): Promise<boolean> {
     return this.submit(async () => {
       this.user = await login(identifier, password);
+      this.connection = "online";
       this.notice = "";
     });
   }
@@ -60,6 +66,7 @@ export class AuthStore {
   async signUp(username: string, email: string, password: string): Promise<boolean> {
     return this.submit(async () => {
       this.user = await register(username, email, password);
+      this.connection = "online";
       this.notice = "";
     });
   }

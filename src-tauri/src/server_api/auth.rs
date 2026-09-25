@@ -95,6 +95,9 @@ pub async fn login(api: &ServerApi, identifier: &str, password: &str) -> AppResu
 
 pub async fn restore(api: &ServerApi) -> AppResult<Option<AuthUser>> {
     if load_access_token()?.is_none() {
+        // Verify the optional cloud service even when there is no saved login,
+        // so the settings status reflects real connectivity.
+        let _: serde_json::Value = api.get("/health", false).await?;
         return Ok(None);
     }
     match api.get::<AuthUser>("/auth/me", true).await {

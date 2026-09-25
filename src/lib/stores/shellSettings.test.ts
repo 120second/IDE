@@ -7,14 +7,14 @@ describe("settings navigation", () => {
     shell.activeActivity = "templates";
     shell.sidebarVisible = false;
     shell.bottomPanelVisible = true;
-    shell.activeBottomPanel = "tests";
+    shell.activeBottomPanel = "output";
 
     expect(shell.openSettings()).toBe(true);
     expect(shell.settingsWindowOpen).toBe(true);
     expect(shell.activeActivity).toBe("templates");
     expect(shell.sidebarVisible).toBe(false);
     expect(shell.bottomPanelVisible).toBe(true);
-    expect(shell.activeBottomPanel).toBe("tests");
+    expect(shell.activeBottomPanel).toBe("output");
     expect(shell.settingsPage).toBe("theme");
 
     shell.openSettings("background");
@@ -29,7 +29,7 @@ describe("settings navigation", () => {
     expect(shell.activeActivity).toBe("templates");
     expect(shell.sidebarVisible).toBe(false);
     expect(shell.bottomPanelVisible).toBe(true);
-    expect(shell.activeBottomPanel).toBe("tests");
+    expect(shell.activeBottomPanel).toBe("output");
   });
 
   it("returns from the theme studio to the theme board", () => {

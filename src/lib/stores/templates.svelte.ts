@@ -1,23 +1,5 @@
-import {
-  createTemplate,
-  createTemplateCategory,
-  deleteTemplate,
-  deleteTemplateCategory,
-  deleteTemplateVersion,
-  getTemplate,
-  getTemplateVersion,
-  listTemplateCategories,
-  listTemplates,
-  listTemplateVersions,
-  moveTemplate,
-  moveTemplateCategory,
-  recordTemplateUse,
-  renameTemplateCategory,
-  restoreTemplateVersion,
-  searchTemplateCompletions,
-  setTemplateFavorite,
-  updateTemplate,
-} from "../api/templates";
+import * as localTemplateApi from "../api/templates";
+import * as cloudTemplateApi from "../api/cloudTemplates";
 import type { EditorWorkspace } from "../editor/workspace.svelte";
 import type {
   TemplateCategory,
@@ -48,6 +30,7 @@ const EMPTY_DRAFT: TemplateInput = {
 };
 
 export class TemplateStore {
+  storage = $state<"local" | "cloud">("local");
   categories = $state.raw<TemplateCategory[]>([]);
   templates = $state.raw<TemplateMetadata[]>([]);
   treeTemplates = $state.raw<TemplateMetadata[]>([]);
@@ -106,6 +89,14 @@ export class TemplateStore {
     return this.treeRowsCache;
   }
 
+  get supportsHistory(): boolean {
+    return this.storage === "local";
+  }
+
+  private get templateApi(): typeof localTemplateApi {
+    return this.storage === "local" ? localTemplateApi : cloudTemplateApi;
+  }
+
   async initialize(): Promise<void> {
     if (this.initialized) return;
     if (this.initializePromise) return this.initializePromise;
@@ -119,8 +110,8 @@ export class TemplateStore {
     this.loading = true;
     try {
       const [categories, snippets] = await Promise.all([
-        listTemplateCategories(),
-        listTemplates(defaultFilter("snippet")),
+        this.templateApi.listTemplateCategories(),
+        this.templateApi.listTemplates(defaultFilter("snippet")),
       ]);
       this.categories = categories;
       if (this.kind === "snippet" && this.treeRequest === initialTreeRequest) {
@@ -186,7 +177,7 @@ export class TemplateStore {
     this.loading = true;
     this.error = "";
     try {
-      const results = await listTemplates(this.currentFilter());
+      const results = await this.templateApi.listTemplates(this.currentFilter());
       if (request !== this.listRequest) return;
       this.templates = results;
     } catch (error) {
@@ -199,7 +190,7 @@ export class TemplateStore {
   async refreshTreeTemplates(): Promise<void> {
     const request = ++this.treeRequest;
     try {
-      const results = await listTemplates({
+      const results = await this.templateApi.listTemplates({
         ...defaultFilter(this.kind),
         sort: this.sort,
       });
@@ -213,7 +204,7 @@ export class TemplateStore {
 
   async refreshFileTemplates(): Promise<void> {
     try {
-      this.fileTemplates = await listTemplates(defaultFilter("file"));
+      this.fileTemplates = await this.templateApi.listTemplates(defaultFilter("file"));
       this.fileTemplatesLoaded = true;
     } catch (error) {
       this.error = errorMessage(error);
@@ -247,7 +238,7 @@ export class TemplateStore {
     this.error = "";
     try {
       const kind = this.kind;
-      const category = await createTemplateCategory(name, parentId);
+      const category = await this.templateApi.createTemplateCategory(name, parentId);
       if (kind === "file") this.newFileCategoryIds.add(category.id);
       if (parentId) this.expandedCategories.add(parentId);
       await this.refreshCategories();
@@ -265,7 +256,7 @@ export class TemplateStore {
     }))?.trim();
     if (!name || name === category.name) return;
     try {
-      await renameTemplateCategory(category.id, name);
+      await this.templateApi.renameTemplateCategory(category.id, name);
       await this.refreshCategories();
     } catch (error) {
       this.error = errorMessage(error);
@@ -281,7 +272,7 @@ export class TemplateStore {
     });
     if (!accepted) return;
     try {
-      await deleteTemplateCategory(category.id);
+      await this.templateApi.deleteTemplateCategory(category.id);
       this.selectedCategoryId = undefined;
       await Promise.all([
         this.refreshCategories(),
@@ -297,7 +288,7 @@ export class TemplateStore {
   async moveCategory(id: number, parentId: number | undefined, targetIndex: number): Promise<void> {
     this.error = "";
     try {
-      await moveTemplateCategory(id, parentId, targetIndex);
+      await this.templateApi.moveTemplateCategory(id, parentId, targetIndex);
       if (parentId) this.expandedCategories.add(parentId);
       await this.refreshCategories();
     } catch (error) {
@@ -349,7 +340,7 @@ export class TemplateStore {
     this.detailLoading = true;
     this.error = "";
     try {
-      const detail = await getTemplate(id);
+      const detail = await this.templateApi.getTemplate(id);
       if (this.selectedId !== id) return;
       this.detail = detail;
       this.draft = inputFromDetail(detail);
@@ -372,8 +363,8 @@ export class TemplateStore {
       const selectedId = this.selectedId;
       const creating = this.mode === "create" || selectedId === undefined;
       const detail = creating
-        ? await createTemplate(this.draft)
-        : await updateTemplate(selectedId, this.draft);
+        ? await this.templateApi.createTemplate(this.draft)
+        : await this.templateApi.updateTemplate(selectedId, this.draft);
       if (creating) this.createDrafts.delete(detail.kind);
       this.selectedId = detail.id;
       this.detail = detail;
@@ -404,7 +395,7 @@ export class TemplateStore {
     });
     if (!accepted) return;
     try {
-      await deleteTemplate(detail.id);
+      await this.templateApi.deleteTemplate(detail.id);
       this.selectedId = undefined;
       this.detail = undefined;
       this.mode = "empty";
@@ -422,7 +413,7 @@ export class TemplateStore {
 
   async toggleFavorite(template: TemplateMetadata): Promise<void> {
     try {
-      await setTemplateFavorite(template.id, !template.favorite);
+      await this.templateApi.setTemplateFavorite(template.id, !template.favorite);
       if (this.detail?.id === template.id) {
         this.detail = { ...this.detail, favorite: !template.favorite };
         this.draft.favorite = !template.favorite;
@@ -446,7 +437,7 @@ export class TemplateStore {
       return;
     }
     try {
-      await moveTemplate(id, categoryId, targetIndex);
+      await this.templateApi.moveTemplate(id, categoryId, targetIndex);
       if (this.detail?.id === id) {
         this.detail = { ...this.detail, categoryId };
         this.draft.categoryId = categoryId;
@@ -463,9 +454,9 @@ export class TemplateStore {
 
   async insertTemplate(template: TemplateMetadata): Promise<void> {
     try {
-      const detail = this.detail?.id === template.id ? this.detail : await getTemplate(template.id);
+      const detail = this.detail?.id === template.id ? this.detail : await this.templateApi.getTemplate(template.id);
       this.editor.insertSnippet(detail.code);
-      await recordTemplateUse(template.id);
+      await this.templateApi.recordTemplateUse(template.id);
       this.notice = `已插入 ${template.name}`;
       await Promise.all([this.refreshTemplates(), this.refreshTreeTemplates()]);
     } catch (error) {
@@ -475,7 +466,7 @@ export class TemplateStore {
 
   async loadTemplateCode(id: number): Promise<TemplateDetail | undefined> {
     try {
-      return await getTemplate(id);
+      return await this.templateApi.getTemplate(id);
     } catch (error) {
       this.error = errorMessage(error);
       return undefined;
@@ -486,7 +477,7 @@ export class TemplateStore {
     const detail = await this.loadTemplateCode(id);
     if (!detail) return undefined;
     try {
-      await recordTemplateUse(id);
+      await this.templateApi.recordTemplateUse(id);
       void Promise.all([
         this.refreshFileTemplates(),
         this.kind === "file" ? this.refreshTreeTemplates() : Promise.resolve(),
@@ -500,7 +491,7 @@ export class TemplateStore {
   async searchQuickly(search: string): Promise<void> {
     const request = ++this.quickRequest;
     try {
-      const results = await listTemplates({
+      const results = await localTemplateApi.listTemplates({
         ...defaultFilter("snippet"),
         search,
         sort: "recentlyUsed",
@@ -516,7 +507,7 @@ export class TemplateStore {
     signal: AbortSignal,
   ): Promise<readonly TemplateDetail[]> {
     try {
-      const results = await searchTemplateCompletions(query);
+      const results = await localTemplateApi.searchTemplateCompletions(query);
       return signal.aborted ? [] : results;
     } catch (error) {
       if (!signal.aborted) this.error = errorMessage(error);
@@ -525,7 +516,7 @@ export class TemplateStore {
   }
 
   private recordEditorCompletionUse(id: number): void {
-    void recordTemplateUse(id).catch((error) => {
+    void localTemplateApi.recordTemplateUse(id).catch((error) => {
       this.error = errorMessage(error);
     });
   }
@@ -534,7 +525,11 @@ export class TemplateStore {
     if (!this.selectedId) return;
     this.historyLoading = true;
     try {
-      this.versions = await listTemplateVersions(this.selectedId);
+      if (!this.supportsHistory) {
+        this.versions = [];
+        return;
+      }
+      this.versions = await this.templateApi.listTemplateVersions(this.selectedId);
     } catch (error) {
       this.error = errorMessage(error);
     } finally {
@@ -544,7 +539,7 @@ export class TemplateStore {
 
   async previewVersion(versionId: number): Promise<void> {
     try {
-      this.versionPreview = await getTemplateVersion(versionId);
+      this.versionPreview = await this.templateApi.getTemplateVersion(versionId);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -560,7 +555,7 @@ export class TemplateStore {
     });
     if (!accepted) return;
     try {
-      await deleteTemplateVersion(this.selectedId, version.id);
+      await this.templateApi.deleteTemplateVersion(this.selectedId, version.id);
       if (this.versionPreview?.id === version.id) this.versionPreview = undefined;
       await this.loadHistory();
       this.ux.success(`已删除历史版本 v${version.versionNumber}。`);
@@ -578,7 +573,7 @@ export class TemplateStore {
     });
     if (!accepted) return;
     try {
-      const detail = await restoreTemplateVersion(this.selectedId, versionId);
+      const detail = await this.templateApi.restoreTemplateVersion(this.selectedId, versionId);
       this.detail = detail;
       this.draft = inputFromDetail(detail);
       this.versionPreview = undefined;
@@ -606,7 +601,7 @@ export class TemplateStore {
   }
 
   private async refreshCategories(): Promise<void> {
-    this.categories = await listTemplateCategories();
+    this.categories = await this.templateApi.listTemplateCategories();
     this.treeRevision += 1;
   }
 
@@ -650,6 +645,14 @@ export class TemplateStore {
     this.mode = "empty";
     this.treeRevision += 1;
     await this.initialize();
+  }
+
+  async setStorage(storage: "local" | "cloud"): Promise<void> {
+    if (this.storage === storage) return;
+    this.storage = storage;
+    this.error = "";
+    this.notice = storage === "local" ? "已切换到本地模板。" : "已切换到云端模板。";
+    await this.reload();
   }
 
   private rememberCreateDraft(): void {

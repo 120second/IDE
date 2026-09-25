@@ -49,11 +49,12 @@ python -m pytest
 
 ## 客户端地址
 
-开发版客户端默认通过 SSH tunnel 访问 `http://127.0.0.1:18100/api`。
+桌面端默认通过 `https://114.55.109.162/lightcp-api` 访问当前云端部署。
 如果需要让客户端直接连接本机 8100 端口，可以在启动前设置
-`LIGHTCP_API_BASE_URL=http://127.0.0.1:8100/api`。发布构建必须在构建时提供 HTTPS 地址：
+`LIGHTCP_API_BASE_URL=http://127.0.0.1:8100/api`。发布版允许使用 HTTP 回环地址；
+连接其他远程服务时必须使用 HTTPS 地址：
 
 ```powershell
-$env:LIGHTCP_API_BASE_URL = "https://example.com/api"
+$env:LIGHTCP_API_BASE_URL = "https://example.com/lightcp-api"
 npm run tauri build
 ```

@@ -23,7 +23,6 @@
   const panels: { id: BottomPanelId; label: string }[] = [
     { id: "problems", label: "问题" },
     { id: "output", label: "输出" },
-    { id: "tests", label: "测试结果" },
     { id: "debugConsole", label: "调试控制台" },
   ];
 
@@ -43,11 +42,6 @@
     currentDiagnosticPage * LSP_PAGE_SIZE,
     (currentDiagnosticPage + 1) * LSP_PAGE_SIZE,
   ));
-  let selectedResultId = $state<number>();
-  let selectedResult = $derived(
-    execution.results.find((result) => result.testcaseId === selectedResultId)
-      ?? execution.results[0],
-  );
   let stopResize = () => {};
   onDestroy(() => stopResize());
 
@@ -75,11 +69,6 @@
     shell.setBottomPanelHeight(shell.bottomPanelHeight + (event.key === "ArrowUp" ? 12 : -12));
   }
 
-  function statusLabel(status: string): string {
-    if (status === "Stopped") return "已停止";
-    if (status === "Running") return "运行中";
-    return status;
-  }
 </script>
 
 <section class="bottom-panel" style:height={`${shell.bottomPanelHeight}px`} aria-label="底部面板">
@@ -179,27 +168,6 @@
           <span>{execution.compiling ? "正在编译…" : execution.running ? "正在运行…" : backendState === "ready" ? `后端就绪 · 数据库 v${health?.databaseSchemaVersion ?? 0}` : "后端不可用"}</span>
         </div>
         <textarea class="process-output" readonly spellcheck="false" aria-label="程序输出" value={execution.output || `[LightCP] 已就绪。当前共 ${workspace.tabs.length} 个编辑器状态。\n${workspace.notice ? `[文件] ${workspace.notice}\n` : ""}`}></textarea>
-      </div>
-    {:else if shell.activeBottomPanel === "tests"}
-      <div class="test-results-panel">
-        <div class="test-results-list">
-          {#each execution.results as result (result.testcaseId)}
-            <button class:active={selectedResult?.testcaseId === result.testcaseId} onclick={() => (selectedResultId = result.testcaseId)}>
-              <span class={`test-status status-${result.status.toLowerCase()}`}>{statusLabel(result.status)}</span>
-              <strong>{result.name}</strong>
-              <small>{result.durationMs}ms</small>
-            </button>
-          {/each}
-          {#if execution.results.length === 0}<span class="test-results-empty">运行测试点后将在此显示 AC、WA、RE、TLE、CE 或已停止。</span>{/if}
-        </div>
-        <div class="test-result-detail">
-          {#if selectedResult}
-            <header><strong>{selectedResult.name}</strong><span>{statusLabel(selectedResult.status)} · {selectedResult.durationMs}ms{selectedResult.exitCode === undefined ? "" : ` · 退出码 ${selectedResult.exitCode}`}</span></header>
-            <pre>{`预期输出：\n${selectedResult.expectedOutput}\n\n实际输出：\n${selectedResult.actualOutput}${selectedResult.stderr ? `\n\n错误输出：\n${selectedResult.stderr}` : ""}`}</pre>
-          {:else}
-            <span class="test-results-empty">尚未选择测试结果。</span>
-          {/if}
-        </div>
       </div>
     {:else}
       <div class="execution-output debug-console-panel">

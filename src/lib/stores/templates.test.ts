@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { TemplateStore } from "./templates.svelte";
 
 describe("template store", () => {
+  it("uses local storage by default and can switch storage explicitly", async () => {
+    const store = new TemplateStore({ setTemplateCompletionProvider: () => {} } as never, {} as never);
+
+    expect(store.storage).toBe("local");
+    expect(store.supportsHistory).toBe(true);
+
+    await store.setStorage("cloud");
+    expect(store.storage).toBe("cloud");
+    expect(store.supportsHistory).toBe(false);
+  });
+
   it("shows only file templates and their ancestor categories in the file tree", () => {
     const store = new TemplateStore({ setTemplateCompletionProvider: () => {} } as never, {} as never);
     store.kind = "file";

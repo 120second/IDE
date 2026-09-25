@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::error::{AppError, AppResult};
 
-const DEFAULT_API_BASE_URL: &str = "http://127.0.0.1:18100/api";
+const DEFAULT_API_BASE_URL: &str = "https://114.55.109.162/lightcp-api";
 const CREDENTIAL_SERVICE: &str = "com.lightcp.ide";
 const CREDENTIAL_USER: &str = "lightcp-access-token";
 
@@ -40,7 +40,7 @@ impl ServerApi {
             .or_else(|| option_env!("LIGHTCP_API_BASE_URL").map(str::to_owned))
             .unwrap_or_else(|| DEFAULT_API_BASE_URL.to_owned());
         let base_url = base_url.trim().trim_end_matches('/').to_owned();
-        validate_base_url(&base_url, cfg!(debug_assertions))?;
+        validate_base_url(&base_url)?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(8))
             .timeout(Duration::from_secs(20))
@@ -150,20 +150,18 @@ impl ServerApi {
     }
 }
 
-fn validate_base_url(base_url: &str, debug_build: bool) -> AppResult<()> {
+fn validate_base_url(base_url: &str) -> AppResult<()> {
     let parsed = Url::parse(base_url).map_err(|error| {
         AppError::Configuration(format!("LIGHTCP_API_BASE_URL is invalid: {error}"))
     })?;
     let is_https = parsed.scheme() == "https";
-    let is_debug_loopback = debug_build
-        && parsed.scheme() == "http"
+    let is_loopback_http = parsed.scheme() == "http"
         && matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "::1"));
-    if is_https || is_debug_loopback {
+    if is_https || is_loopback_http {
         return Ok(());
     }
     Err(AppError::Configuration(
-        "LIGHTCP_API_BASE_URL must use HTTPS; debug builds may use HTTP only on loopback"
-            .to_owned(),
+        "LIGHTCP_API_BASE_URL must use HTTPS or HTTP on a loopback address".to_owned(),
     ))
 }
 
@@ -217,19 +215,19 @@ mod tests {
 
     #[test]
     fn development_tunnel_accepts_loopback_http() {
-        assert!(validate_base_url("http://127.0.0.1:18100/api", true).is_ok());
-        assert!(validate_base_url("http://localhost:18100/api", true).is_ok());
+        assert!(validate_base_url("http://127.0.0.1:18100/api").is_ok());
+        assert!(validate_base_url("http://localhost:18100/api").is_ok());
     }
 
     #[test]
-    fn release_requires_https_even_for_loopback() {
-        assert!(validate_base_url("http://127.0.0.1:18100/api", false).is_err());
-        assert!(validate_base_url("https://api.example.com/api", false).is_ok());
+    fn public_endpoints_require_https() {
+        assert!(validate_base_url("https://api.example.com/api").is_ok());
+        assert!(validate_base_url("http://api.example.com/api").is_err());
     }
 
     #[test]
-    fn development_http_rejects_non_loopback_hosts() {
-        assert!(validate_base_url("http://114.55.109.162:8100/api", true).is_err());
-        assert!(validate_base_url("http://127.0.0.1.example.com/api", true).is_err());
+    fn http_rejects_non_loopback_hosts() {
+        assert!(validate_base_url("http://114.55.109.162:8100/api").is_err());
+        assert!(validate_base_url("http://127.0.0.1.example.com/api").is_err());
     }
 }

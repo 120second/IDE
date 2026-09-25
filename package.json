@@ -24,6 +24,10 @@
     "@lezer/highlight": "^1.2.3",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
+    "dompurify": "^3.4.16",
+    "katex": "^0.16.22",
+    "marked": "^18.0.14",
+    "marked-katex-extension": "^5.1.13",
     "svelte": "^5.56.9"
   },
   "devDependencies": {
