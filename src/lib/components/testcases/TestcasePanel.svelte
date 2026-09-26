@@ -34,6 +34,8 @@
     if (sourceTimer) clearTimeout(sourceTimer);
   });
 
+  $effect(() => execution.setBeforeTestRun(prepareTestcaseForRun));
+
   $effect(() => {
     const sourcePath = workspace.activeTab?.path;
     if ((sourcePath ?? "") === observedSource) return;
@@ -73,7 +75,7 @@
     formOpen = true;
   }
 
-  async function save(): Promise<void> {
+  async function persistDraft(closeAfterSave: boolean): Promise<Testcase | undefined> {
     if (!draft.name.trim() || saving) return;
     saving = true;
     const saved = await execution.saveTestcase(draft, editingId);
@@ -81,8 +83,19 @@
     if (saved) {
       editingId = saved.id;
       draft = inputFromTestcase(saved);
-      formOpen = false;
+      if (closeAfterSave) formOpen = false;
     }
+    return saved;
+  }
+
+  async function save(): Promise<void> {
+    await persistDraft(true);
+  }
+
+  async function prepareTestcaseForRun(testcaseId?: number): Promise<Testcase | false | undefined> {
+    if (saving) return false;
+    if (editingId === undefined || (testcaseId !== undefined && testcaseId !== editingId)) return;
+    return await persistDraft(false) ?? false;
   }
 
   async function removeTestcase(testcase: Testcase): Promise<void> {
@@ -345,7 +358,7 @@
         {#if execution.running}
           <button class="danger-button" onclick={() => void execution.stop()} disabled={execution.stopping}><Icon name="stop" size={13} />{execution.stopping ? "停止中…" : "停止"}</button>
         {:else}
-          <button class="primary-button run-all" title={`运行全部 · ${keybindings.runAll}`} onclick={() => { shell.generatorOpen = false; void execution.runAll(); }} disabled={execution.compiling || execution.testcases.every((testcase) => !testcase.enabled)}><Icon name="play" size={13} /><span>运行全部</span><kbd>{keybindings.runAll}</kbd></button>
+          <button class="primary-button run-all" title={`运行全部 · ${keybindings.runAll}`} onclick={() => { shell.generatorOpen = false; void execution.runAll(); }} disabled={saving || execution.compiling || execution.testcases.every((testcase) => !testcase.enabled)}><Icon name="play" size={13} /><span>运行全部</span><kbd>{keybindings.runAll}</kbd></button>
         {/if}
         <button class="secondary-button new-case" disabled={execution.running || execution.compiling} onclick={() => beginCreate()}><Icon name="plus" size={13} /><span>新建</span></button>
       </div>
@@ -386,7 +399,7 @@
             {:else}
               <span class="case-status pending">待运行</span>
             {/if}
-            <button class="case-run-button" title={`运行 ${testcase.name}`} disabled={execution.running || execution.compiling || !testcase.enabled} onclick={() => { shell.generatorOpen = false; void execution.runOne(testcase); }}><Icon name="play" size={13} /><span>{result?.status === "Running" ? "运行中" : "运行"}</span></button>
+            <button class="case-run-button" title={`运行 ${testcase.name}`} disabled={saving || execution.running || execution.compiling || !testcase.enabled} onclick={() => { shell.generatorOpen = false; void execution.runOne(testcase); }}><Icon name="play" size={13} /><span>{result?.status === "Running" ? "运行中" : "运行"}</span></button>
             <button class="case-delete-button" title="删除测试点" aria-label={`删除 ${testcase.name}`} onclick={() => void removeTestcase(testcase)}><Icon name="close" size={17} /></button>
             <button class="case-expand-button" title={formOpen && editingId === testcase.id ? "收起" : "展开"} aria-label={`${formOpen && editingId === testcase.id ? "收起" : "展开"} ${testcase.name}`} aria-expanded={formOpen && editingId === testcase.id} onclick={() => beginEdit(testcase)}><Icon name="chevron-right" size={16} /></button>
           </div>

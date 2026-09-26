@@ -10,10 +10,13 @@ export interface SketchStroke {
   points: SketchPoint[];
 }
 
+export type SketchBackground = "blank" | "grid";
+
 export interface SketchDocument {
-  version: 2;
+  version: 3;
   canvasWidth: number;
   canvasHeight: number;
+  background: SketchBackground;
   strokes: SketchStroke[];
   updatedAt: number;
 }
@@ -53,12 +56,13 @@ function sanitizeDocument(value: unknown): SketchDocument | undefined {
     version?: number;
     canvasWidth?: number;
     canvasHeight?: number;
+    background?: unknown;
     width?: number;
     height?: number;
     strokes?: unknown;
     updatedAt?: number;
   };
-  if ((input.version !== 1 && input.version !== 2) || !Array.isArray(input.strokes)) return undefined;
+  if ((input.version !== 1 && input.version !== 2 && input.version !== 3) || !Array.isArray(input.strokes)) return undefined;
   const strokes = input.strokes.slice(0, 2_000).flatMap((stroke) => {
     if (!stroke || typeof stroke !== "object") return [];
     const candidate = stroke as Partial<SketchStroke>;
@@ -82,13 +86,14 @@ function sanitizeDocument(value: unknown): SketchDocument | undefined {
   });
   const legacy = input.version === 1;
   return {
-    version: 2,
+    version: 3,
     canvasWidth: legacy
       ? finite(input.width, 160, 4_096, 720)
       : finite(input.canvasWidth, 160, 4_096, 960),
     canvasHeight: legacy
       ? finite(typeof input.height === "number" ? input.height - 76 : undefined, 160, 4_096, 444)
       : finite(input.canvasHeight, 160, 4_096, 640),
+    background: input.background === "grid" ? "grid" : "blank",
     strokes,
     updatedAt: finite(input.updatedAt, 0, Number.MAX_SAFE_INTEGER, 0),
   };

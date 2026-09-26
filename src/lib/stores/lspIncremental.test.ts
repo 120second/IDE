@@ -77,6 +77,7 @@ describe("LSP incremental batching", () => {
   it("flushes on the original batch deadline during continuous typing", async () => {
     const editor = {
       setLspClient: vi.fn(),
+      setLspDiagnostics: vi.fn(),
     };
     const store = new LspStore(editor as never, {} as never);
     store.state = "ready";
@@ -116,7 +117,7 @@ describe("LSP incremental batching", () => {
     store.dispose();
   });
 
-  it("ignores diagnostics published for an older document version", () => {
+  it("ignores diagnostics published for an older document version", async () => {
     const editor = {
       setLspClient: vi.fn(),
       setLspDiagnostics: vi.fn(),
@@ -126,11 +127,33 @@ describe("LSP incremental batching", () => {
     const path = "D:\\Code\\main.cpp";
     store.didOpen(path, "");
     store.didChange(path, [firstChange]);
+    await Promise.resolve();
+    editor.setLspDiagnostics.mockClear();
 
     publish(store, diagnosticEvent(path, "stale", 1));
 
     expect(store.diagnosticsFor(path)).toEqual([]);
     expect(editor.setLspDiagnostics).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it("clears diagnostics immediately when the document changes", async () => {
+    const editor = {
+      setLspClient: vi.fn(),
+      setLspDiagnostics: vi.fn(),
+    };
+    const store = new LspStore(editor as never, {} as never);
+    store.state = "ready";
+    const path = "D:\\Code\\main.cpp";
+    store.didOpen(path, "");
+    publish(store, diagnosticEvent(path, "old error", 1));
+    editor.setLspDiagnostics.mockClear();
+
+    store.didChange(path, [firstChange]);
+    await Promise.resolve();
+
+    expect(store.diagnosticsFor(path)).toEqual([]);
+    expect(editor.setLspDiagnostics).toHaveBeenCalledWith(path, []);
     store.dispose();
   });
 

@@ -141,6 +141,10 @@ export class LspStore implements LspClient {
   didChange(path: string, changes: readonly LspTextChange[]): void {
     const key = pathKey(path);
     if (!this.ready || !this.openedDocuments.has(key) || changes.length === 0) return;
+    // Published diagnostics describe the previous document revision. Clear
+    // them immediately instead of leaving a fixed error visible while clangd
+    // analyzes the newly edited source.
+    this.clearDiagnostics(path, true);
     const version = (this.documentVersions.get(key) ?? 1) + 1;
     this.documentVersions.set(key, version);
     let pending = this.pendingChanges.get(key);
@@ -525,10 +529,18 @@ export class LspStore implements LspClient {
     this.pendingChanges.clear();
   }
 
-  private clearDiagnostics(path: string): void {
+  private clearDiagnostics(path: string, deferEditorUpdate = false): void {
     this.diagnosticsByPath.delete(pathKey(path));
     this.rebuildDiagnostics();
-    this.editor.setLspDiagnostics(path, []);
+    if (deferEditorUpdate) {
+      // didChange is invoked from CodeMirror's update listener. A nested
+      // dispatch is forbidden, so clear its lint layer in the next microtask.
+      queueMicrotask(() => {
+        if (!this.disposed) this.editor.setLspDiagnostics(path, []);
+      });
+    } else {
+      this.editor.setLspDiagnostics(path, []);
+    }
   }
 
   private clearAllDiagnostics(): void {

@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  compactProblemSample,
   loadProblemDocument,
+  problemSampleContext,
   problemDocumentKey,
   saveProblemDocument,
   titleFromMarkdown,
@@ -28,6 +30,17 @@ describe("problem reader metadata", () => {
   it("extracts a readable title from the first level-one heading", () => {
     expect(titleFromMarkdown("intro\n# **Water the Trees**\nbody", "Fallback")).toBe("Water the Trees");
     expect(titleFromMarkdown("No heading", "Fallback")).toBe("Fallback");
+  });
+
+  it("recognizes common input and output sample labels", () => {
+    expect(problemSampleContext("Input")).toEqual({ kind: "input", id: undefined });
+    expect(problemSampleContext("输入 #2")).toEqual({ kind: "input", id: "2" });
+    expect(problemSampleContext("Sample Output 3")).toEqual({ kind: "output", id: "3" });
+    expect(problemSampleContext("Input format")).toBeUndefined();
+  });
+
+  it("removes blank spacer lines from problem samples", () => {
+    expect(compactProblemSample("\n5\n\n3 1\n  \n2 3 5\n\n")).toBe("5\n3 1\n2 3 5\n");
   });
 
   it("stores Markdown metadata locally", () => {

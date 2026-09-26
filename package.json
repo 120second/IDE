@@ -28,6 +28,7 @@
     "katex": "^0.16.22",
     "marked": "^18.0.14",
     "marked-katex-extension": "^5.1.13",
+    "pdfjs-dist": "^6.3.289",
     "svelte": "^5.56.9"
   },
   "devDependencies": {

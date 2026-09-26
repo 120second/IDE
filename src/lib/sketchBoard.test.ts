@@ -21,16 +21,18 @@ describe("sketch board storage", () => {
 
   it("stores resizable vector strokes", () => {
     saveSketchDocument("problem", {
-      version: 2,
+      version: 3,
       canvasWidth: 820,
       canvasHeight: 560,
+      background: "grid",
       strokes: [{ tool: "pen", color: "#ffffff", width: 4, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }],
       updatedAt: 42,
     });
     expect(loadSketchDocument("problem")).toEqual({
-      version: 2,
+      version: 3,
       canvasWidth: 820,
       canvasHeight: 560,
+      background: "grid",
       strokes: [{ tool: "pen", color: "#ffffff", width: 4, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }],
       updatedAt: 42,
     });
@@ -48,10 +50,29 @@ describe("sketch board storage", () => {
     }));
 
     expect(loadSketchDocument("problem")).toMatchObject({
-      version: 2,
+      version: 3,
       canvasWidth: 720,
       canvasHeight: 444,
+      background: "blank",
       updatedAt: 12,
+    });
+  });
+
+  it("migrates version 2 drawings to a blank background", () => {
+    values.set("lightcp.sketch-board.v1", JSON.stringify({
+      problem: {
+        version: 2,
+        canvasWidth: 960,
+        canvasHeight: 640,
+        strokes: [],
+        updatedAt: 18,
+      },
+    }));
+
+    expect(loadSketchDocument("problem")).toMatchObject({
+      version: 3,
+      background: "blank",
+      updatedAt: 18,
     });
   });
 });

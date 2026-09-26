@@ -5,6 +5,7 @@
     loadSketchDocument,
     saveSketchDocument,
     sketchDocumentKey,
+    type SketchBackground,
     type SketchPoint,
     type SketchStroke,
   } from "../../sketchBoard";
@@ -79,6 +80,7 @@
   let canvasHeight = $state(640);
   let canvasWidthDraft = $state(960);
   let canvasHeightDraft = $state(640);
+  let canvasBackground = $state<SketchBackground>("blank");
   let zoom = $state(1);
   let x = $state(80);
   let y = $state(64);
@@ -133,6 +135,7 @@
     redoStrokes = [];
     canvasWidth = stored?.canvasWidth ?? 960;
     canvasHeight = stored?.canvasHeight ?? 640;
+    canvasBackground = stored?.background ?? "blank";
     syncCanvasSizeDrafts();
     requestAnimationFrame(() => {
       fitToViewport();
@@ -157,9 +160,10 @@
   function persist(): void {
     if (!activeKey) return;
     saveSketchDocument(activeKey, {
-      version: 2,
+      version: 3,
       canvasWidth,
       canvasHeight,
+      background: canvasBackground,
       strokes,
       updatedAt: Date.now(),
     });
@@ -284,6 +288,12 @@
 
   function applyCanvasDimensions(): void {
     setCanvasSize(Number(canvasWidthDraft), Number(canvasHeightDraft));
+  }
+
+  function setCanvasBackground(background: SketchBackground): void {
+    if (canvasBackground === background) return;
+    canvasBackground = background;
+    scheduleSave();
   }
 
   function handleDimensionKeydown(event: KeyboardEvent): void {
@@ -629,6 +639,22 @@
     <div class="sketch-tool-section sketch-size-editor">
       <span class="section-label">画布</span>
       <div class="size-fields">
+        <div class="canvas-background-toggle" role="group" aria-label="画布背景">
+          <button
+            type="button"
+            class:active={canvasBackground === "blank"}
+            aria-pressed={canvasBackground === "blank"}
+            title="纯空白画布"
+            onclick={() => setCanvasBackground("blank")}
+          ><i class="background-sample blank" aria-hidden="true"></i>空白</button>
+          <button
+            type="button"
+            class:active={canvasBackground === "grid"}
+            aria-pressed={canvasBackground === "grid"}
+            title="网格画布"
+            onclick={() => setCanvasBackground("grid")}
+          ><i class="background-sample grid" aria-hidden="true"></i>网格</button>
+        </div>
         <label><span>宽</span><input type="number" min={CANVAS_MIN} max={CANVAS_MAX} step="1" bind:value={canvasWidthDraft} onkeydown={handleDimensionKeydown} aria-label="画布宽度" /></label>
         <span class="size-cross" aria-hidden="true">×</span>
         <label><span>高</span><input type="number" min={CANVAS_MIN} max={CANVAS_MAX} step="1" bind:value={canvasHeightDraft} onkeydown={handleDimensionKeydown} aria-label="画布高度" /></label>
@@ -664,7 +690,14 @@
       style:--canvas-width={`${displayedCanvasWidth}px`}
       style:--canvas-height={`${displayedCanvasHeight}px`}
     >
-      <div bind:this={paper} class="sketch-paper" style:width={`${displayedCanvasWidth}px`} style:height={`${displayedCanvasHeight}px`}>
+      <div
+        bind:this={paper}
+        class:grid-background={canvasBackground === "grid"}
+        class="sketch-paper"
+        style:width={`${displayedCanvasWidth}px`}
+        style:height={`${displayedCanvasHeight}px`}
+        style:--grid-size={`${Math.max(5, Math.round(20 * zoom))}px`}
+      >
         <canvas
           bind:this={canvas}
           class:eraser={tool === "eraser"}
@@ -693,6 +726,7 @@
 
   <footer>
     <span>画布 {canvasWidth} × {canvasHeight} px</span>
+    <span>{canvasBackground === "grid" ? "网格" : "空白"}</span>
     <span>{strokes.length} 笔</span>
     <span class="navigation-hint">右键拖动 · Ctrl+滚轮缩放</span>
     <span class="autosave-state">自动保存</span>
@@ -934,13 +968,54 @@
   .sketch-history { min-width: 112px; }
   .sketch-history button { width: 32px; padding: 0; }
 
-  .sketch-size-editor { min-width: 300px; flex: 1 0 300px; }
+  .sketch-size-editor { min-width: 418px; flex: 1 0 418px; }
   .size-fields {
     display: flex;
     height: 42px;
     align-items: center;
     justify-content: center;
     gap: 4px;
+  }
+
+  .canvas-background-toggle {
+    display: flex;
+    height: 28px;
+    flex: 0 0 auto;
+    overflow: hidden;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--surface-sunken);
+  }
+
+  .sketch-toolbar .canvas-background-toggle button {
+    min-width: 50px;
+    height: 26px;
+    gap: 4px;
+    padding: 0 6px;
+    border: 0;
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    font-size: 10px;
+  }
+
+  .sketch-toolbar .canvas-background-toggle button:last-child { border-right: 0; }
+  .sketch-toolbar .canvas-background-toggle button.active { box-shadow: inset 0 -2px var(--accent); }
+
+  .background-sample {
+    display: block;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    border: 1px solid #aab2bf;
+    border-radius: 2px;
+    background-color: #ffffff;
+  }
+
+  .background-sample.grid {
+    background-image:
+      linear-gradient(to right, #cbd1da 1px, transparent 1px),
+      linear-gradient(to bottom, #cbd1da 1px, transparent 1px);
+    background-size: 4px 4px;
   }
 
   .size-fields label {
@@ -1021,6 +1096,14 @@
     border: 1px solid #99a1ad;
     background: #ffffff;
     box-shadow: 0 2px 12px color-mix(in srgb, #000000 30%, transparent);
+  }
+
+  .sketch-paper.grid-background {
+    background-color: #ffffff;
+    background-image:
+      linear-gradient(to right, color-mix(in srgb, #64748b 25%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, #64748b 25%, transparent) 1px, transparent 1px);
+    background-size: var(--grid-size) var(--grid-size);
   }
 
   canvas {

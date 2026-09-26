@@ -1,4 +1,5 @@
 export type ProblemDocumentKind = "markdown" | "pdf";
+export type ProblemSampleKind = "input" | "output";
 
 export interface ProblemDocumentMeta {
   kind: ProblemDocumentKind;
@@ -23,6 +24,21 @@ export function titleFromMarkdown(markdown: string, fallback = "题面"): string
     ?.replace(/[*_`~[\]]/g, "")
     .trim();
   return heading || fallback;
+}
+
+export function problemSampleContext(label: string): { kind: ProblemSampleKind; id?: string } | undefined {
+  const normalized = label.replace(/\s+/g, " ").trim();
+  const input = normalized.match(/^(?:样例\s*)?(?:输入|sample\s+input|input(?:\s+sample)?)(?:\s*#?\s*(\d+))?$/i);
+  if (input) return { kind: "input", id: input[1] };
+  const output = normalized.match(/^(?:样例\s*)?(?:输出|sample\s+output|output(?:\s+sample)?)(?:\s*#?\s*(\d+))?$/i);
+  if (output) return { kind: "output", id: output[1] };
+  return undefined;
+}
+
+export function compactProblemSample(value: string): string {
+  const normalized = value.replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n").filter((line) => line.trim().length > 0);
+  return lines.length ? `${lines.join("\n")}\n` : "";
 }
 
 export function loadProblemDocument(key: string): ProblemDocumentMeta | undefined {

@@ -55,6 +55,7 @@ export class ExecutionStore {
   private outputTimer: ReturnType<typeof setTimeout> | undefined;
   private truncationNoticeQueued = false;
   private disposed = false;
+  private beforeTestRun: ((testcaseId?: number) => Promise<Testcase | false | undefined>) | undefined;
 
   get approximateOutputBytes(): number {
     return this.outputBuffer.approximateLength(this.output) * 2;
@@ -94,6 +95,15 @@ export class ExecutionStore {
     this.outputBuffer.clear();
   }
 
+  setBeforeTestRun(
+    handler: (testcaseId?: number) => Promise<Testcase | false | undefined>,
+  ): () => void {
+    this.beforeTestRun = handler;
+    return () => {
+      if (this.beforeTestRun === handler) this.beforeTestRun = undefined;
+    };
+  }
+
   async syncActiveSource(sourcePath?: string, force = false): Promise<void> {
     const source = sourcePath ?? "";
     if (!force && source === this.sourcePath && (this.testcases.length > 0 || !source)) return;
@@ -120,6 +130,9 @@ export class ExecutionStore {
     this.error = "";
     try {
       const saved = id ? await updateTestcase(id, input) : await createTestcase(input);
+      if (id) {
+        this.results = this.results.filter((result) => result.testcaseId !== id);
+      }
       await this.reloadTestcases();
       return saved;
     } catch (error) {
@@ -158,18 +171,30 @@ export class ExecutionStore {
 
   async compileCurrent(profile: CompileProfile = "release"): Promise<CompileResult | undefined> {
     if (this.compiling || this.running) return undefined;
-    const sourcePath = await this.prepareSource();
-    if (!sourcePath) return undefined;
-    return this.compileSource(sourcePath, profile, true);
+    this.compiling = true;
+    try {
+      const sourcePath = await this.prepareSource();
+      if (!sourcePath) return undefined;
+      return await this.compileSource(sourcePath, profile, true);
+    } finally {
+      this.compiling = false;
+    }
   }
 
   async runCurrent(): Promise<void> {
     if (this.compiling || this.running) return;
-    const sourcePath = await this.prepareSource();
-    if (!sourcePath) return;
-    this.results = [];
-    this.clearOutput();
-    const compiled = await this.compileSource(sourcePath, "release", false);
+    this.compiling = true;
+    let sourcePath: string | undefined;
+    let compiled: CompileResult | undefined;
+    try {
+      sourcePath = await this.prepareSource();
+      if (!sourcePath) return;
+      this.results = [];
+      this.clearOutput();
+      compiled = await this.compileSource(sourcePath, "release", false);
+    } finally {
+      this.compiling = false;
+    }
     if (!compiled?.success || !compiled.executablePath) return;
     this.shell.showBottomPanel("output");
     this.appendOutput(`\n[运行] ${fileName(sourcePath)}\n`);
@@ -178,11 +203,18 @@ export class ExecutionStore {
 
   async runInput(stdin: string, label = "随机数据"): Promise<void> {
     if (this.compiling || this.running) return;
-    const sourcePath = await this.prepareSource();
-    if (!sourcePath) return;
-    this.results = [];
-    this.clearOutput();
-    const compiled = await this.compileSource(sourcePath, "release", false);
+    this.compiling = true;
+    let sourcePath: string | undefined;
+    let compiled: CompileResult | undefined;
+    try {
+      sourcePath = await this.prepareSource();
+      if (!sourcePath) return;
+      this.results = [];
+      this.clearOutput();
+      compiled = await this.compileSource(sourcePath, "release", false);
+    } finally {
+      this.compiling = false;
+    }
     if (!compiled?.success || !compiled.executablePath) return;
     this.shell.showBottomPanel("output");
     this.appendOutput(`\n[运行] ${label}\n`);
@@ -191,10 +223,20 @@ export class ExecutionStore {
 
   async runOne(testcase: Testcase): Promise<void> {
     if (this.compiling || this.running) return;
-    const sourcePath = await this.prepareSource();
-    if (!sourcePath) return;
-    this.clearOutput();
-    const compiled = await this.compileSource(sourcePath, "release", false);
+    this.compiling = true;
+    let sourcePath: string | undefined;
+    let compiled: CompileResult | undefined;
+    try {
+      const preparedTestcase = await this.beforeTestRun?.(testcase.id);
+      if (preparedTestcase === false) return;
+      if (preparedTestcase) testcase = preparedTestcase;
+      sourcePath = await this.prepareSource();
+      if (!sourcePath) return;
+      this.clearOutput();
+      compiled = await this.compileSource(sourcePath, "release", false);
+    } finally {
+      this.compiling = false;
+    }
     if (!compiled?.success || !compiled.executablePath) {
       this.setResult(compileFailureResult(testcase));
       return;
@@ -204,17 +246,26 @@ export class ExecutionStore {
 
   async runAll(): Promise<void> {
     if (this.compiling || this.running) return;
-    const sourcePath = await this.prepareSource();
-    if (!sourcePath) return;
-    await this.syncActiveSource(sourcePath);
-    const enabled = this.testcases.filter((testcase) => testcase.enabled);
-    if (!enabled.length) {
-      this.error = "请至少添加或启用一个测试点后再全部运行。";
-      return;
+    this.compiling = true;
+    let sourcePath: string | undefined;
+    let compiled: CompileResult | undefined;
+    let enabled: Testcase[] = [];
+    try {
+      if (await this.beforeTestRun?.() === false) return;
+      sourcePath = await this.prepareSource();
+      if (!sourcePath) return;
+      await this.syncActiveSource(sourcePath);
+      enabled = this.testcases.filter((testcase) => testcase.enabled);
+      if (!enabled.length) {
+        this.error = "请至少添加或启用一个测试点后再全部运行。";
+        return;
+      }
+      this.results = [];
+      this.clearOutput();
+      compiled = await this.compileSource(sourcePath, "release", false);
+    } finally {
+      this.compiling = false;
     }
-    this.results = [];
-    this.clearOutput();
-    const compiled = await this.compileSource(sourcePath, "release", false);
     if (!compiled?.success || !compiled.executablePath) {
       this.results = enabled.map(compileFailureResult);
       return;
@@ -279,7 +330,6 @@ export class ExecutionStore {
     profile: CompileProfile,
     clearOutput: boolean,
   ): Promise<CompileResult | undefined> {
-    this.compiling = true;
     this.error = "";
     if (clearOutput) this.clearOutput();
     this.shell.showBottomPanel("output");
@@ -311,8 +361,6 @@ export class ExecutionStore {
       this.error = errorMessage(error);
       this.appendOutput(`[编译] ${this.error}\n`);
       return undefined;
-    } finally {
-      this.compiling = false;
     }
   }
 
