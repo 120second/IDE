@@ -170,6 +170,10 @@ impl StressManager {
     where
         F: FnMut(StressEvent),
     {
+        // Snapshot reads and compilation must use the same resolved root, including
+        // Windows TEMP short-name aliases and workspace paths containing `..`.
+        let canonical_root = dunce::canonicalize(workspace_root)?;
+        let workspace_root = canonical_root.as_path();
         emit_state(
             emit,
             &session.session_id,
@@ -698,6 +702,7 @@ mod tests {
             std::env::temp_dir().join(format!("lightcp-stress-{}-{nonce}", std::process::id()));
         let build = root.join("build");
         fs::create_dir_all(&root).unwrap();
+        fs::create_dir(root.join("nested")).unwrap();
         let solution = root.join("solution.cpp");
         let brute = root.join("brute.cpp");
         fs::write(
@@ -754,7 +759,9 @@ mod tests {
         let manager = StressManager::default();
         let mut events = Vec::new();
         let result = manager
-            .run(&root, &build, &request, |event| events.push(event))
+            .run(&root.join("nested").join(".."), &build, &request, |event| {
+                events.push(event)
+            })
             .unwrap();
         assert_eq!(result.status, StressStatus::Failed);
         let failure = result.failure.unwrap();
