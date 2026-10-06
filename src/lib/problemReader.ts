@@ -1,3 +1,4 @@
+import { readNotebook, writeNotebook, notebookKey } from "./notebookStorage";
 export type ProblemDocumentKind = "markdown" | "pdf";
 export type ProblemSampleKind = "input" | "output";
 
@@ -6,10 +7,10 @@ export interface ProblemDocumentMeta {
   title: string;
   markdown: string;
   pdfName?: string;
+  pdfStorageKey?: string;
   updatedAt: number;
 }
 
-const METADATA_KEY = "lightcp.problem-reader.v1";
 const DATABASE_NAME = "lightcp-problem-reader";
 const DATABASE_VERSION = 1;
 const PDF_STORE = "pdfs";
@@ -41,55 +42,81 @@ export function compactProblemSample(value: string): string {
   return lines.length ? `${lines.join("\n")}\n` : "";
 }
 
-export function loadProblemDocument(key: string): ProblemDocumentMeta | undefined {
+export async function loadProblemDocument(key: string): Promise<ProblemDocumentMeta | undefined> {
   try {
-    const all = JSON.parse(localStorage.getItem(METADATA_KEY) ?? "{}") as Record<string, ProblemDocumentMeta>;
-    const value = all[key];
+    const value = await readNotebook<ProblemDocumentMeta>("problem", key);
     if (!value || (value.kind !== "markdown" && value.kind !== "pdf")) return undefined;
     return {
       kind: value.kind,
       title: typeof value.title === "string" ? value.title : "题面",
       markdown: typeof value.markdown === "string" ? value.markdown : "",
       pdfName: typeof value.pdfName === "string" ? value.pdfName : undefined,
+      ...(typeof value.pdfStorageKey === "string" ? { pdfStorageKey: value.pdfStorageKey } : {}),
       updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : 0,
     };
-  } catch {
-    return undefined;
+  } catch (error) {
+    throw error;
   }
 }
 
 export function saveProblemDocument(key: string, value: ProblemDocumentMeta): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(METADATA_KEY) ?? "{}") as Record<string, ProblemDocumentMeta>;
-    all[key] = value;
-    const entries = Object.entries(all)
-      .sort((left, right) => (right[1].updatedAt ?? 0) - (left[1].updatedAt ?? 0))
-      .slice(0, 200);
-    localStorage.setItem(METADATA_KEY, JSON.stringify(Object.fromEntries(entries)));
-  } catch {
-    // A disabled or full localStorage must not prevent editing the statement.
-  }
+  writeNotebook("problem", key, value);
 }
 
 export async function saveProblemPdf(key: string, blob: Blob): Promise<void> {
   const database = await openDatabase();
-  await requestResult(database.transaction(PDF_STORE, "readwrite").objectStore(PDF_STORE).put(blob, key));
-  database.close();
+  try {
+    const transaction = database.transaction(PDF_STORE, "readwrite");
+    const committed = transactionResult(transaction);
+    transaction.objectStore(PDF_STORE).put(blob, notebookKey(key));
+    await committed;
+  } finally { database.close(); }
 }
-
-export async function loadProblemPdf(key: string): Promise<Blob | undefined> {
+export async function loadProblemPdf(key: string, legacyKey?: string): Promise<Blob | undefined> {
   const database = await openDatabase();
-  const value = await requestResult<Blob | undefined>(
-    database.transaction(PDF_STORE, "readonly").objectStore(PDF_STORE).get(key),
-  );
-  database.close();
-  return value;
+  try {
+    const current = await requestResult<Blob | undefined>(database.transaction(PDF_STORE, "readonly").objectStore(PDF_STORE).get(notebookKey(key)));
+    if (current || !legacyKey) return current;
+    return await requestResult<Blob | undefined>(database.transaction(PDF_STORE, "readonly").objectStore(PDF_STORE).get(legacyKey));
+  }
+  finally { database.close(); }
 }
-
 export async function deleteProblemPdf(key: string): Promise<void> {
   const database = await openDatabase();
-  await requestResult(database.transaction(PDF_STORE, "readwrite").objectStore(PDF_STORE).delete(key));
-  database.close();
+  try {
+    const transaction = database.transaction(PDF_STORE, "readwrite");
+    const committed = transactionResult(transaction);
+    transaction.objectStore(PDF_STORE).delete(notebookKey(key));
+    await committed;
+  } finally { database.close(); }
+}
+export async function remapProblemPdfs(previous: string, next: string): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  const database = await openDatabase();
+  try {
+    const transaction = database.transaction(PDF_STORE, "readwrite");
+    const committed = transactionResult(transaction);
+    const store = transaction.objectStore(PDF_STORE);
+    const cursor = store.openCursor();
+    cursor.onsuccess = () => {
+      const item = cursor.result;
+      if (!item) return;
+      const key = String(item.key).replaceAll("/", "\\").toLowerCase();
+      if (key === previous || key.startsWith(`${previous}\\`)) {
+        store.put(item.value, next + key.slice(previous.length));
+        item.delete();
+      }
+      item.continue();
+    };
+    await committed;
+  } finally { database.close(); }
+}
+function transactionResult(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error("题面存储事务已取消。"));
+    transaction.onerror = () => reject(transaction.error ?? new Error("无法保存题面。"));
+  });
 }
 
 function openDatabase(): Promise<IDBDatabase> {

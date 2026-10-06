@@ -50,9 +50,10 @@ pub async fn list_conversations(
 #[tauri::command]
 pub async fn list_chat_messages(
     user_id: String,
+    before_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<ChatMessage>, CommandError> {
-    community::list_messages(&state.server_api, &user_id)
+    community::list_messages(&state.server_api, &user_id, before_id.as_deref())
         .await
         .map_err(CommandError::from)
 }

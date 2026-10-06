@@ -3,4 +3,4 @@ mod model;
 mod service;
 
 pub use model::{CompileProfile, CompileRequest, CompileResult, CompilerConfig};
-pub use service::compile_current_file;
+pub use service::{compile_current_file, compile_with_stop, CompilerManager};

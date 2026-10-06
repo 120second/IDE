@@ -89,7 +89,7 @@
     command("editor.close", "关闭当前编辑器", "编辑器", "closeEditor", () => void closeActiveEditor(), Boolean(workspace.activeId), "没有打开的编辑器"),
     command("build.compile", "编译当前文件", "运行", undefined, () => void execution.compileCurrent(), buildReady, buildDisabledReason()),
     command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent(), buildReady, buildDisabledReason()),
-    command("build.stop", "停止当前程序", "运行", undefined, () => void execution.stop(), execution.running, "当前没有运行中的程序"),
+    command("build.stop", "停止编译或运行", "运行", undefined, () => void execution.stop(), execution.running || execution.compiling, "当前没有编译或运行中的任务"),
     command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }, buildReady && execution.testcases.length > 0, execution.testcases.length ? buildDisabledReason() : "尚未添加测试点"),
     command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }, debugStartReady(), debugDisabledReason()),
     { id: "debug.continue", label: "继续调试", category: "调试", shortcut: "F5", enabled: debugStore.active && debugStore.stopped && !debugStore.busy, disabledReason: "调试器尚未暂停", run: () => void debugStore.continueExecution() },

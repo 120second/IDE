@@ -9,6 +9,7 @@ pub mod filesystem;
 pub mod generator;
 pub mod health;
 pub mod lsp;
+pub mod notebooks;
 pub mod performance;
 pub mod recovery;
 pub mod runner;

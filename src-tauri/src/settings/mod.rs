@@ -193,8 +193,13 @@ impl AppSettings {
         self.debug_args = sanitize_arguments(self.debug_args, &["-g", "-O0"]);
         self.keybindings = sanitize_keybindings(self.keybindings);
         self.custom_themes = sanitize_custom_themes(self.custom_themes);
-        if !matches!(self.editor_theme.as_str(), "inherit" | "signal" | "graphite" | "forest")
-            && !self.custom_themes.iter().any(|theme| self.editor_theme == format!("custom:{}", theme.id))
+        if !matches!(
+            self.editor_theme.as_str(),
+            "inherit" | "signal" | "graphite" | "forest"
+        ) && !self
+            .custom_themes
+            .iter()
+            .any(|theme| self.editor_theme == format!("custom:{}", theme.id))
         {
             self.editor_theme = "inherit".to_owned();
         }
@@ -286,21 +291,26 @@ pub fn load(path: &Path) -> AppResult<AppSettings> {
     }
 
     let bytes = fs::read(path)?;
-    let settings = serde_json::from_slice::<serde_json::Value>(&bytes).and_then(|mut value| {
-        // Older versions used the editor opacity for the output panel too.
-        if let Some(object) = value.as_object_mut() {
-            if !object.contains_key("panelOpacity") {
-                let opacity = object.get("editorOpacity").cloned().unwrap_or(serde_json::json!(1.0));
-                object.insert("panelOpacity".to_owned(), opacity);
+    let settings = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .and_then(|mut value| {
+            // Older versions used the editor opacity for the output panel too.
+            if let Some(object) = value.as_object_mut() {
+                if !object.contains_key("panelOpacity") {
+                    let opacity = object
+                        .get("editorOpacity")
+                        .cloned()
+                        .unwrap_or(serde_json::json!(1.0));
+                    object.insert("panelOpacity".to_owned(), opacity);
+                }
             }
-        }
-        serde_json::from_value::<AppSettings>(value)
-    }).map_err(|error| {
-        AppError::Configuration(format!(
-            "failed to parse settings file {}: {error}",
-            path.display()
-        ))
-    })?;
+            serde_json::from_value::<AppSettings>(value)
+        })
+        .map_err(|error| {
+            AppError::Configuration(format!(
+                "failed to parse settings file {}: {error}",
+                path.display()
+            ))
+        })?;
 
     Ok(settings.sanitize())
 }
@@ -439,7 +449,8 @@ mod tests {
             panel_opacity: 0.45,
             popup_opacity: 0.75,
             ..legacy
-        }.sanitize();
+        }
+        .sanitize();
         let value = serde_json::to_value(&settings).unwrap();
         let restored: AppSettings = serde_json::from_value(value).unwrap();
         assert_eq!(restored.editor_theme, "graphite");
@@ -448,7 +459,13 @@ mod tests {
         assert_eq!(restored.background_scale, 1.8);
         assert_eq!(restored.panel_opacity, 0.45);
         assert_eq!(restored.popup_opacity, 0.75);
-        let invalid = AppSettings { editor_theme: "unknown".to_owned(), background_scale: 8.0, popup_opacity: 0.0, ..restored }.sanitize();
+        let invalid = AppSettings {
+            editor_theme: "unknown".to_owned(),
+            background_scale: 8.0,
+            popup_opacity: 0.0,
+            ..restored
+        }
+        .sanitize();
         assert_eq!(invalid.editor_theme, "inherit");
         assert_eq!(invalid.background_scale, 3.0);
         assert_eq!(invalid.popup_opacity, 0.6);

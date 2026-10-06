@@ -127,7 +127,11 @@ pub struct DebugSessionSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum DebugEvent {
     State {
         session_id: String,
@@ -152,9 +156,20 @@ mod tests {
     #[test]
     fn events_use_the_frontend_session_id_field() {
         let events = [
-            DebugEvent::State { session_id: "session-1".into(), state: DebugSessionState::Stopped, reason: "断点".into() },
-            DebugEvent::Output { session_id: "session-1".into(), stream: "target".into(), text: "42\n".into() },
-            DebugEvent::Breakpoints { session_id: "session-1".into(), breakpoints: vec![] },
+            DebugEvent::State {
+                session_id: "session-1".into(),
+                state: DebugSessionState::Stopped,
+                reason: "断点".into(),
+            },
+            DebugEvent::Output {
+                session_id: "session-1".into(),
+                stream: "target".into(),
+                text: "42\n".into(),
+            },
+            DebugEvent::Breakpoints {
+                session_id: "session-1".into(),
+                breakpoints: vec![],
+            },
         ];
         for event in events {
             let json = serde_json::to_value(event).unwrap();

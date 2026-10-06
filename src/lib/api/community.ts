@@ -19,8 +19,8 @@ export function listConversations(): Promise<Conversation[]> {
   return invoke<Conversation[]>("list_conversations");
 }
 
-export function listChatMessages(userId: string): Promise<ChatMessage[]> {
-  return invoke<ChatMessage[]>("list_chat_messages", { userId });
+export function listChatMessages(userId: string, beforeId?: string): Promise<ChatMessage[]> {
+  return invoke<ChatMessage[]>("list_chat_messages", { userId, beforeId });
 }
 
 export function sendChatMessage(recipientId: string, body: string): Promise<ChatMessage> {

@@ -1,0 +1,79 @@
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gdb
+            mingw-w64-ucrt-x86_64-clang-tools-extra
+      - name: Make C++ tools available to native tests
+        env:
+          MSYS2_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          "$env:MSYS2_LOCATION\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: Rust lint
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Rust and native C++ regressions
+        working-directory: src-tauri
+        run: cargo test --all-targets
+      - name: Build desktop release
+        run: npm run tauri -- build --no-bundle
+
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: lightcp-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: lightcp-server/pyproject.toml
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pytest
+      - name: Verify production schema migrations
+        env:
+          LIGHTCP_DATABASE_URL: sqlite:///./ci-migrations.db
+        run: python -m alembic upgrade head

@@ -20,6 +20,8 @@ export function stopProgram(): Promise<boolean> {
   return invoke<boolean>("stop_program");
 }
 
+export function stopCompilation(): Promise<boolean> { return invoke<boolean>("stop_compilation"); }
+
 export function listTestcases(sourcePath: string): Promise<Testcase[]> {
   return invoke<Testcase[]>("list_testcases", { sourcePath });
 }

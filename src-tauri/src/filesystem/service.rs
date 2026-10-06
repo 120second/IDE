@@ -463,7 +463,10 @@ pub fn create_file(root: &Path, parent: &str, name: &str, content: &str) -> AppR
     ensure_directory(&parent)?;
     let target = new_child_path(&parent, name)?;
     ensure_missing(&target)?;
-    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&target)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)?;
     file.write_all(content.as_bytes())?;
     Ok(PathResult {
         path: path_text(&target),
@@ -568,7 +571,8 @@ fn ensure_missing(path: &Path) -> AppResult<()> {
         Err(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
             format!("path already exists: {}", path.display()),
-        ).into())
+        )
+        .into())
     } else {
         Ok(())
     }

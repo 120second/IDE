@@ -1,3 +1,4 @@
+import { flushNotebookWrites } from "../notebookStorage";
 import { isTauri } from "@tauri-apps/api/core";
 import {
   availableMonitors,
@@ -265,6 +266,12 @@ export class SessionStore {
           event.preventDefault();
           if (this.closing) return;
           this.closing = true;
+          try { await flushNotebookWrites(); }
+          catch (error) {
+            this.ux.error(error instanceof Error ? error.message : String(error));
+            this.closing = false;
+            return;
+          }
           this.persistNow();
           const saved = await this.flushRecovery();
           if (!saved) {

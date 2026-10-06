@@ -43,10 +43,15 @@
     const user = auth.user;
     if (!user) {
       profileForUser = "";
+      draft = "";
+      editing = false;
       untrack(() => community.reset());
       return;
     }
     if (profileForUser !== user.id) {
+      untrack(() => community.reset());
+      draft = "";
+      editing = false;
       profileForUser = user.id;
       displayName = user.displayName;
       bio = user.bio;
@@ -63,6 +68,7 @@
   });
 
   onDestroy(() => {
+    community.reset();
     if (pollTimer) clearInterval(pollTimer);
     if (searchTimer) clearTimeout(searchTimer);
   });
@@ -103,13 +109,15 @@
 
   async function sendMessage(): Promise<void> {
     const text = draft;
+    const recipientId = community.selectedUser?.id;
     if (!(await community.send(text))) return;
+    if (community.selectedUser?.id !== recipientId || draft !== text) return;
     draft = "";
     await scrollMessages();
   }
 
   function composerKeydown(event: KeyboardEvent): void {
-    if (event.key !== "Enter" || event.shiftKey) return;
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || event.keyCode === 229) return;
     event.preventDefault();
     void sendMessage();
   }
@@ -324,6 +332,7 @@
             <div><strong>{displayLabel(selectedUser)}</strong><span>@{selectedUser.username}{selectedUser.location ? ` · ${selectedUser.location}` : ""}</span></div>
           </header>
           <div class="message-list" bind:this={messageList} aria-live="polite">
+            {#if community.hasOlder}<button class="community-ghost-button" disabled={community.olderLoading} onclick={() => void community.loadOlder()}>{community.olderLoading ? "正在加载…" : "加载更早的消息"}</button>{/if}
             {#if community.messagesLoading}
               <p class="message-state">正在加载消息…</p>
             {:else if community.messages.length === 0}

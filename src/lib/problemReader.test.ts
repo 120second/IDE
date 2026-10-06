@@ -22,35 +22,35 @@ describe("problem reader metadata", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("uses a stable key for Windows and slash-separated source paths", () => {
+  it("uses a stable key for Windows and slash-separated source paths", async () => {
     expect(problemDocumentKey("D:/Code/A.cpp")).toBe(problemDocumentKey("d:\\code\\a.cpp"));
     expect(problemDocumentKey()).toBe("__scratch__");
   });
 
-  it("extracts a readable title from the first level-one heading", () => {
+  it("extracts a readable title from the first level-one heading", async () => {
     expect(titleFromMarkdown("intro\n# **Water the Trees**\nbody", "Fallback")).toBe("Water the Trees");
     expect(titleFromMarkdown("No heading", "Fallback")).toBe("Fallback");
   });
 
-  it("recognizes common input and output sample labels", () => {
+  it("recognizes common input and output sample labels", async () => {
     expect(problemSampleContext("Input")).toEqual({ kind: "input", id: undefined });
     expect(problemSampleContext("输入 #2")).toEqual({ kind: "input", id: "2" });
     expect(problemSampleContext("Sample Output 3")).toEqual({ kind: "output", id: "3" });
     expect(problemSampleContext("Input format")).toBeUndefined();
   });
 
-  it("removes blank spacer lines from problem samples", () => {
+  it("removes blank spacer lines from problem samples", async () => {
     expect(compactProblemSample("\n5\n\n3 1\n  \n2 3 5\n\n")).toBe("5\n3 1\n2 3 5\n");
   });
 
-  it("stores Markdown metadata locally", () => {
+  it("stores Markdown metadata locally", async () => {
     saveProblemDocument("problem", {
       kind: "markdown",
       title: "A + B",
       markdown: "# A + B",
       updatedAt: 42,
     });
-    expect(loadProblemDocument("problem")).toEqual({
+    expect((await loadProblemDocument("problem"))).toEqual({
       kind: "markdown",
       title: "A + B",
       markdown: "# A + B",
@@ -59,7 +59,7 @@ describe("problem reader metadata", () => {
     });
   });
 
-  it("keeps Markdown and PDF references together so formats remain switchable", () => {
+  it("keeps Markdown and PDF references together so formats remain switchable", async () => {
     saveProblemDocument("problem", {
       kind: "pdf",
       title: "Official statement",
@@ -68,7 +68,7 @@ describe("problem reader metadata", () => {
       updatedAt: 43,
     });
 
-    expect(loadProblemDocument("problem")).toMatchObject({
+    expect((await loadProblemDocument("problem"))).toMatchObject({
       kind: "pdf",
       markdown: "# Local translation\n\nLet $n$ be an integer.",
       pdfName: "statement.pdf",

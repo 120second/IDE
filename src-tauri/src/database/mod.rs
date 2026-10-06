@@ -1,4 +1,4 @@
-mod migrations;
+pub(crate) mod migrations;
 pub mod recent_workspaces;
 
 use std::path::{Path, PathBuf};

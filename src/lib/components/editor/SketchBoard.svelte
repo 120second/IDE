@@ -107,6 +107,7 @@
   });
 
   onMount(() => {
+    window.addEventListener("notebook-flush", flushSave);
     const observer = new ResizeObserver(() => resizeBackingStore());
     observer.observe(canvas);
     const onResize = () => {
@@ -120,6 +121,7 @@
     centerWindow();
     resizeBackingStore();
     return () => {
+      window.removeEventListener("notebook-flush", flushSave);
       flushSave();
       observer.disconnect();
       window.removeEventListener("resize", onResize);
@@ -127,20 +129,31 @@
     };
   });
 
-  function loadDocument(key: string): void {
+  let loadSequence = 0;
+  let loadedKey = "";
+  let loading = $state(false);
+  async function loadDocument(key: string): Promise<void> {
     flushSave();
     activeKey = key;
-    const stored = loadSketchDocument(key);
-    strokes = stored?.strokes ?? [];
-    redoStrokes = [];
-    canvasWidth = stored?.canvasWidth ?? 960;
-    canvasHeight = stored?.canvasHeight ?? 640;
-    canvasBackground = stored?.background ?? "blank";
-    syncCanvasSizeDrafts();
-    requestAnimationFrame(() => {
-      fitToViewport();
-      resizeBackingStore();
-    });
+    const sequence = ++loadSequence;
+    loading = true;
+    try {
+      const stored = await loadSketchDocument(key);
+      if (sequence !== loadSequence) return;
+      loadedKey = key;
+      strokes = stored?.strokes ?? [];
+      redoStrokes = [];
+      canvasWidth = stored?.canvasWidth ?? 960;
+      canvasHeight = stored?.canvasHeight ?? 640;
+      canvasBackground = stored?.background ?? "blank";
+      syncCanvasSizeDrafts();
+      requestAnimationFrame(() => {
+        fitToViewport();
+        resizeBackingStore();
+      });
+    } catch (error) {
+      if (sequence === loadSequence) ux.error(`无法读取画板：${String(error)}`);
+    } finally { if (sequence === loadSequence) loading = false; }
   }
 
   function scheduleSave(): void {
@@ -158,7 +171,7 @@
   }
 
   function persist(): void {
-    if (!activeKey) return;
+    if (!activeKey || loading || loadedKey !== activeKey) return;
     saveSketchDocument(activeKey, {
       version: 3,
       canvasWidth,
@@ -485,6 +498,7 @@
   }
 
   function beginStroke(event: PointerEvent): void {
+    if (loading) return;
     if (event.button !== 0 && event.pointerType !== "pen") return;
     event.preventDefault();
     bringToFront();

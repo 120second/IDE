@@ -10,6 +10,7 @@ import {
   moveTestcase,
   runProgram,
   stopProgram,
+  stopCompilation,
   updateTestcase,
 } from "../api/execution";
 import type { EditorWorkspace } from "../editor/workspace.svelte";
@@ -55,6 +56,7 @@ export class ExecutionStore {
   private outputTimer: ReturnType<typeof setTimeout> | undefined;
   private truncationNoticeQueued = false;
   private disposed = false;
+  private compileCancelled = false;
   private beforeTestRun: ((testcaseId?: number) => Promise<Testcase | false | undefined>) | undefined;
 
   get approximateOutputBytes(): number {
@@ -88,6 +90,8 @@ export class ExecutionStore {
 
   dispose(): void {
     this.disposed = true;
+    if (this.compiling) void stopCompilation().catch(() => undefined);
+    if (this.running) void stopProgram().catch(() => undefined);
     this.unlisten?.();
     this.unlisten = undefined;
     if (this.outputTimer) clearTimeout(this.outputTimer);
@@ -171,6 +175,7 @@ export class ExecutionStore {
 
   async compileCurrent(profile: CompileProfile = "release"): Promise<CompileResult | undefined> {
     if (this.compiling || this.running) return undefined;
+    this.compileCancelled = false;
     this.compiling = true;
     try {
       const sourcePath = await this.prepareSource();
@@ -178,11 +183,13 @@ export class ExecutionStore {
       return await this.compileSource(sourcePath, profile, true);
     } finally {
       this.compiling = false;
+      this.stopping = false;
     }
   }
 
   async runCurrent(): Promise<void> {
     if (this.compiling || this.running) return;
+    this.compileCancelled = false;
     this.compiling = true;
     let sourcePath: string | undefined;
     let compiled: CompileResult | undefined;
@@ -194,6 +201,7 @@ export class ExecutionStore {
       compiled = await this.compileSource(sourcePath, "release", false);
     } finally {
       this.compiling = false;
+      this.stopping = false;
     }
     if (!compiled?.success || !compiled.executablePath) return;
     this.shell.showBottomPanel("output");
@@ -203,6 +211,7 @@ export class ExecutionStore {
 
   async runInput(stdin: string, label = "随机数据"): Promise<void> {
     if (this.compiling || this.running) return;
+    this.compileCancelled = false;
     this.compiling = true;
     let sourcePath: string | undefined;
     let compiled: CompileResult | undefined;
@@ -214,6 +223,7 @@ export class ExecutionStore {
       compiled = await this.compileSource(sourcePath, "release", false);
     } finally {
       this.compiling = false;
+      this.stopping = false;
     }
     if (!compiled?.success || !compiled.executablePath) return;
     this.shell.showBottomPanel("output");
@@ -223,6 +233,7 @@ export class ExecutionStore {
 
   async runOne(testcase: Testcase): Promise<void> {
     if (this.compiling || this.running) return;
+    this.compileCancelled = false;
     this.compiling = true;
     let sourcePath: string | undefined;
     let compiled: CompileResult | undefined;
@@ -236,6 +247,7 @@ export class ExecutionStore {
       compiled = await this.compileSource(sourcePath, "release", false);
     } finally {
       this.compiling = false;
+      this.stopping = false;
     }
     if (!compiled?.success || !compiled.executablePath) {
       this.setResult(compileFailureResult(testcase));
@@ -246,6 +258,7 @@ export class ExecutionStore {
 
   async runAll(): Promise<void> {
     if (this.compiling || this.running) return;
+    this.compileCancelled = false;
     this.compiling = true;
     let sourcePath: string | undefined;
     let compiled: CompileResult | undefined;
@@ -265,6 +278,7 @@ export class ExecutionStore {
       compiled = await this.compileSource(sourcePath, "release", false);
     } finally {
       this.compiling = false;
+      this.stopping = false;
     }
     if (!compiled?.success || !compiled.executablePath) {
       this.results = enabled.map(compileFailureResult);
@@ -283,10 +297,11 @@ export class ExecutionStore {
   }
 
   async stop(): Promise<void> {
-    if (!this.running || this.stopping) return;
+    if ((!this.running && !this.compiling) || this.stopping) return;
     this.stopping = true;
+    if (this.compiling) this.compileCancelled = true;
     try {
-      await stopProgram();
+      await Promise.all([stopProgram(), stopCompilation()]);
     } catch (error) {
       this.error = errorMessage(error);
     }
@@ -330,6 +345,10 @@ export class ExecutionStore {
     profile: CompileProfile,
     clearOutput: boolean,
   ): Promise<CompileResult | undefined> {
+    if (this.compileCancelled || this.disposed) {
+      this.stopping = false;
+      return undefined;
+    }
     this.error = "";
     if (clearOutput) this.clearOutput();
     this.shell.showBottomPanel("output");
@@ -356,11 +375,13 @@ export class ExecutionStore {
           + `${result.exitCode === undefined ? "" : ` · 退出码 ${result.exitCode}`}\n`,
       );
       if (result.outputTruncated) this.appendTruncationNotice();
-      return result;
+      return this.compileCancelled || this.disposed ? undefined : result;
     } catch (error) {
       this.error = errorMessage(error);
       this.appendOutput(`[编译] ${this.error}\n`);
       return undefined;
+    } finally {
+      this.stopping = false;
     }
   }
 

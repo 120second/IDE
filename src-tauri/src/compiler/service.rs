@@ -7,24 +7,108 @@ use std::{
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use crate::error::{AppError, AppResult};
 use crate::paths::is_within;
+use crate::process_tree::ProcessTree;
 
 use super::{CompileProfile, CompileRequest, CompileResult};
 
 const DEFAULT_OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
+
+#[derive(Default)]
+pub struct CompilerManager {
+    active: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+impl CompilerManager {
+    pub fn reserve(self: &Arc<Self>) -> AppResult<Compilation> {
+        let stop = Arc::new(AtomicBool::new(false));
+        {
+            let mut active = self
+                .active
+                .lock()
+                .map_err(|_| AppError::Internal("compiler lock poisoned".into()))?;
+            if active.is_some() {
+                return Err(AppError::Process("another compilation is running".into()));
+            }
+            *active = Some(stop.clone());
+        }
+        Ok(Compilation {
+            manager: self.clone(),
+            stop,
+        })
+    }
+    pub fn stop(&self) -> bool {
+        let Ok(active) = self.active.lock() else {
+            return false;
+        };
+        let Some(stop) = active.as_ref() else {
+            return false;
+        };
+        stop.store(true, Ordering::Release);
+        true
+    }
+}
+
+pub struct Compilation {
+    manager: Arc<CompilerManager>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Compilation {
+    pub fn compile(
+        self,
+        root: &Path,
+        build: &Path,
+        request: &CompileRequest,
+    ) -> AppResult<CompileResult> {
+        compile_with_stop(root, build, request, &self.stop, Duration::from_secs(120))
+    }
+}
+
+impl Drop for Compilation {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.manager.active.lock() {
+            if active
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &self.stop))
+            {
+                *active = None;
+            }
+        }
+    }
+}
 
 pub fn compile_current_file(
     workspace_root: &Path,
     build_root: &Path,
     request: &CompileRequest,
 ) -> AppResult<CompileResult> {
+    compile_with_stop(
+        workspace_root,
+        build_root,
+        request,
+        &AtomicBool::new(false),
+        Duration::from_secs(120),
+    )
+}
+
+pub fn compile_with_stop(
+    workspace_root: &Path,
+    build_root: &Path,
+    request: &CompileRequest,
+    stop: &AtomicBool,
+    timeout: Duration,
+) -> AppResult<CompileResult> {
+    if stop.load(Ordering::Acquire) {
+        return Err(AppError::ProcessCancelled);
+    }
     let source = checked_source(workspace_root, &request.source_path)?;
     fs::create_dir_all(build_root)?;
     let executable = output_path(build_root, &source);
@@ -67,6 +151,7 @@ pub fn compile_current_file(
             AppError::ProcessStart(format!("failed to launch {compiler}: {error}"))
         }
     })?;
+    let process_tree = ProcessTree::attach(&mut child)?;
     let Some(stdout) = child.stdout.take() else {
         terminate_child(&mut child);
         return Err(AppError::Internal(
@@ -88,15 +173,17 @@ pub fn compile_current_file(
     let truncated = Arc::new(AtomicBool::new(false));
     let stdout_reader = spawn_limited_reader(stdout, limit, used.clone(), truncated.clone());
     let stderr_reader = spawn_limited_reader(stderr, limit, used, truncated.clone());
-    let status = match child.wait() {
-        Ok(status) => status,
-        Err(error) => {
-            terminate_child(&mut child);
-            return Err(AppError::from(error));
-        }
-    };
+    let status = wait_for_compiler(&mut child, &process_tree, stop, timeout);
+    drop(process_tree);
     let stdout = join_reader(stdout_reader)?;
     let stderr = join_reader(stderr_reader)?;
+    let status = match status {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = fs::remove_file(&compiler_executable);
+            return Err(error);
+        }
+    };
     let success = status.success();
     if success && compiler_executable != executable {
         let copied = fs::copy(&compiler_executable, &executable);
@@ -115,6 +202,33 @@ pub fn compile_current_file(
         duration_ms: elapsed_millis(started),
         output_truncated: truncated.load(Ordering::Relaxed),
     })
+}
+
+fn wait_for_compiler(
+    child: &mut std::process::Child,
+    tree: &ProcessTree,
+    stop: &AtomicBool,
+    timeout: Duration,
+) -> AppResult<std::process::ExitStatus> {
+    let started = Instant::now();
+    loop {
+        if stop.load(Ordering::Acquire) {
+            tree.terminate(child);
+            return Err(AppError::ProcessCancelled);
+        }
+        if started.elapsed() >= timeout {
+            tree.terminate(child);
+            return Err(AppError::ProcessTimedOut);
+        }
+        match child.try_wait() {
+            Ok(Some(exit)) => return Ok(exit),
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+            Err(error) => {
+                tree.terminate(child);
+                return Err(error.into());
+            }
+        }
+    }
 }
 
 fn checked_source(root: &Path, source_path: &str) -> AppResult<PathBuf> {
@@ -252,6 +366,48 @@ fn configure_hidden(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compilation_is_cancellable_before_the_worker_starts() {
+        let manager = Arc::new(CompilerManager::default());
+        let compilation = manager.reserve().unwrap();
+        assert!(manager.reserve().is_err());
+        assert!(manager.stop());
+        let request = request(Path::new("missing.cpp"));
+        assert!(matches!(
+            compilation.compile(Path::new("."), Path::new("."), &request),
+            Err(AppError::ProcessCancelled)
+        ));
+        assert!(!manager.stop());
+        assert!(manager.reserve().is_ok());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn compiler_wait_can_be_cancelled_and_timed_out() {
+        use super::*;
+        for cancelled in [false, true] {
+            let mut command = Command::new("powershell");
+            command
+                .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            configure_hidden(&mut command);
+            let mut child = command.spawn().unwrap();
+            let tree = ProcessTree::attach(&mut child).unwrap();
+            let started = Instant::now();
+            let result = wait_for_compiler(
+                &mut child,
+                &tree,
+                &AtomicBool::new(cancelled),
+                Duration::from_millis(100),
+            );
+            assert!(matches!(
+                (&result, cancelled),
+                (Err(AppError::ProcessCancelled), true) | (Err(AppError::ProcessTimedOut), false)
+            ));
+            assert!(child.try_wait().unwrap().is_some());
+            assert!(started.elapsed() < Duration::from_secs(3));
+        }
+    }
     use std::time::UNIX_EPOCH;
 
     use super::*;

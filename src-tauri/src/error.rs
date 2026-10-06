@@ -17,6 +17,12 @@ pub enum AppError {
     #[error("process error: {0}")]
     Process(String),
 
+    #[error("process cancelled")]
+    ProcessCancelled,
+
+    #[error("process timed out")]
+    ProcessTimedOut,
+
     #[error("compiler not found: {0}")]
     CompilerNotFound(String),
 
@@ -83,6 +89,14 @@ impl From<AppError> for CommandError {
                 ErrorCategory::Process,
                 "PROCESS_ERROR",
                 "LightCP 无法完成请求的进程操作。",
+            ),
+            AppError::ProcessCancelled => {
+                (ErrorCategory::Process, "PROCESS_CANCELLED", "编译已停止。")
+            }
+            AppError::ProcessTimedOut => (
+                ErrorCategory::Process,
+                "PROCESS_TIMED_OUT",
+                "编译超过 120 秒，已终止。",
             ),
             AppError::CompilerNotFound(_) => (
                 ErrorCategory::Process,

@@ -29,7 +29,7 @@ thiserror = "2"
 url = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects"] }
 
 # The Tauri context embeds the complete frontend in this crate. On the current
 # Windows MSVC toolchain, LLVM opt-level 3 can overflow/crash while optimizing

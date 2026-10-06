@@ -355,7 +355,7 @@
         <small title={workspace.activeTab.title}>{workspace.activeTab.title}</small>
       </div>
       <div class="case-toolbar-actions">
-        {#if execution.running}
+        {#if execution.running || execution.compiling}
           <button class="danger-button" onclick={() => void execution.stop()} disabled={execution.stopping}><Icon name="stop" size={13} />{execution.stopping ? "停止中…" : "停止"}</button>
         {:else}
           <button class="primary-button run-all" title={`运行全部 · ${keybindings.runAll}`} onclick={() => { shell.generatorOpen = false; void execution.runAll(); }} disabled={saving || execution.compiling || execution.testcases.every((testcase) => !testcase.enabled)}><Icon name="play" size={13} /><span>运行全部</span><kbd>{keybindings.runAll}</kbd></button>

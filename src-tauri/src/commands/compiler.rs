@@ -1,7 +1,7 @@
 use tauri::State;
 
 use crate::{
-    compiler::{self as compiler_core, CompileRequest, CompileResult},
+    compiler::{CompileRequest, CompileResult},
     error::{AppError, CommandError},
     state::AppState,
 };
@@ -13,8 +13,9 @@ pub async fn compile_current_file(
 ) -> Result<CompileResult, CommandError> {
     let workspace_root = state.active_workspace_root().map_err(CommandError::from)?;
     let build_root = state.paths.data_dir.join("build");
+    let compilation = state.compiler.reserve().map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
-        compiler_core::compile_current_file(&workspace_root, &build_root, &request)
+        compilation.compile(&workspace_root, &build_root, &request)
     })
     .await
     .map_err(|error| {
@@ -23,4 +24,9 @@ pub async fn compile_current_file(
         )))
     })?
     .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn stop_compilation(state: State<'_, AppState>) -> bool {
+    state.compiler.stop()
 }

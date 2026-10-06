@@ -441,13 +441,19 @@ async fn sync_cloud_templates_to_local(
                 sort: TemplateSort::Manual,
             },
         )?;
-        let ids = metadata.iter().map(|template| template.id).collect::<Vec<_>>();
+        let ids = metadata
+            .iter()
+            .map(|template| template.id)
+            .collect::<Vec<_>>();
         existing_templates.extend(local::get_templates(database_path, &ids)?);
     }
     let mut existing_fingerprints = HashMap::<String, usize>::new();
     for template in &existing_templates {
         *existing_fingerprints
-            .entry(template_fingerprint(template, template.metadata.category_id))
+            .entry(template_fingerprint(
+                template,
+                template.metadata.category_id,
+            ))
             .or_default() += 1;
     }
 

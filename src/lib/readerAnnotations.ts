@@ -1,3 +1,4 @@
+import { readNotebook, writeNotebook, deleteNotebook } from "./notebookStorage";
 export interface ReaderAnnotationPoint {
   x: number;
   y: number;
@@ -17,39 +18,11 @@ export interface ReaderAnnotationDocument {
   updatedAt: number;
 }
 
-const STORAGE_KEY = "lightcp.reader-annotations.v1";
-
-export function loadReaderAnnotations(key: string): ReaderAnnotationDocument | undefined {
-  try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Record<string, unknown>;
-    return sanitizeDocument(all[key]);
-  } catch {
-    return undefined;
-  }
+export async function loadReaderAnnotations(key: string): Promise<ReaderAnnotationDocument | undefined> {
+  return sanitizeDocument(await readNotebook("annotations", key));
 }
-
-export function saveReaderAnnotations(key: string, value: ReaderAnnotationDocument): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Record<string, ReaderAnnotationDocument>;
-    all[key] = value;
-    const entries = Object.entries(all)
-      .sort((left, right) => (right[1]?.updatedAt ?? 0) - (left[1]?.updatedAt ?? 0))
-      .slice(0, 80);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
-  } catch {
-    // Disabled or full local storage must not interrupt reading.
-  }
-}
-
-export function deleteReaderAnnotations(key: string): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Record<string, ReaderAnnotationDocument>;
-    delete all[key];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-  } catch {
-    // Clearing annotations should remain best-effort.
-  }
-}
+export function saveReaderAnnotations(key: string, value: ReaderAnnotationDocument): void { writeNotebook("annotations", key, value); }
+export function deleteReaderAnnotations(key: string): void { deleteNotebook("annotations", key); }
 
 function sanitizeDocument(value: unknown): ReaderAnnotationDocument | undefined {
   if (!value || typeof value !== "object") return undefined;

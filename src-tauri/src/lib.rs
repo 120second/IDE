@@ -7,8 +7,10 @@ pub mod error;
 pub mod filesystem;
 pub mod generator;
 pub mod lsp;
+pub mod notebooks;
 pub mod paths;
 pub mod performance;
+mod process_tree;
 pub mod recovery;
 pub mod runner;
 pub mod server_api;
@@ -59,6 +61,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health::health_check,
+            commands::notebooks::read_notebook,
+            commands::notebooks::write_notebook,
+            commands::notebooks::delete_notebook,
+            commands::notebooks::import_notebooks,
+            commands::notebooks::remap_notebooks,
             commands::health::diagnose_toolchain,
             commands::auth::auth_restore,
             commands::auth::auth_register,
@@ -141,6 +148,7 @@ pub fn run() {
             commands::templates::delete_template_version,
             commands::templates::restore_template_version,
             commands::compiler::compile_current_file,
+            commands::compiler::stop_compilation,
             commands::runner::run_program,
             commands::runner::stop_program,
             commands::debugger::start_debug_session,

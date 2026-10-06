@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    compiler::{compile_current_file, CompileProfile, CompileRequest},
+    compiler::{compile_with_stop, CompileProfile, CompileRequest},
     error::{AppError, AppResult},
     generator::{generate_visual, next_seed, VisualGenerateRequest},
     runner::{RunRequest, RunResult, RunStatus, RunnerManager},
@@ -54,7 +54,11 @@ impl StressManager {
             brute_runner: Arc::new(RunnerManager::default()),
         });
         self.begin(session.clone())?;
-        let result = self.run_active(workspace_root, build_root, request, &session, &mut emit);
+        let result = match self.run_active(workspace_root, build_root, request, &session, &mut emit)
+        {
+            Err(AppError::ProcessCancelled) => Ok(stopped_summary(request, "编译已停止")),
+            result => result,
+        };
         if let Err(error) = &result {
             emit(StressEvent::State {
                 session_id: session.session_id.clone(),
@@ -127,7 +131,7 @@ impl StressManager {
             StressStatus::Compiling,
             "正在编译待测程序和暴力程序…",
         );
-        let solution_compile = compile_current_file(
+        let solution_compile = compile_with_stop(
             workspace_root,
             build_root,
             &CompileRequest {
@@ -135,6 +139,8 @@ impl StressManager {
                 profile: CompileProfile::Release,
                 config: request.compiler_config.clone(),
             },
+            &session.stop_requested,
+            std::time::Duration::from_secs(120),
         )?;
         if !solution_compile.success {
             return Err(stress_error(format!(
@@ -145,7 +151,7 @@ impl StressManager {
         if session.stop_requested.load(Ordering::Acquire) {
             return Ok(stopped_summary(request, "编译后已停止"));
         }
-        let brute_compile = compile_current_file(
+        let brute_compile = compile_with_stop(
             workspace_root,
             build_root,
             &CompileRequest {
@@ -153,6 +159,8 @@ impl StressManager {
                 profile: CompileProfile::Release,
                 config: request.compiler_config.clone(),
             },
+            &session.stop_requested,
+            std::time::Duration::from_secs(120),
         )?;
         if !brute_compile.success {
             return Err(stress_error(format!(

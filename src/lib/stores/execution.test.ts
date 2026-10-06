@@ -12,6 +12,7 @@ const executionApi = vi.hoisted(() => ({
   moveTestcase: vi.fn(),
   runProgram: vi.fn(),
   stopProgram: vi.fn(),
+  stopCompilation: vi.fn(),
   updateTestcase: vi.fn(),
 }));
 
@@ -156,4 +157,19 @@ describe("execution store coordination", () => {
     expect(store.results[0]).toMatchObject({ testcaseId: original.id, status: "AC", expectedOutput: "4\n" });
     store.dispose();
   });
+});
+
+
+it.each([true, false])("stops before compilation when a pending source save resolves to %s", async (saved) => {
+  executionApi.compileCurrentFile.mockClear();
+  let finishSave!: (saved: boolean) => void;
+  const { store } = fixture(vi.fn(() => new Promise<boolean>((resolve) => { finishSave = resolve; })));
+  const compile = store.compileCurrent();
+  await store.stop();
+  finishSave(saved);
+  expect(await compile).toBeUndefined();
+  expect(executionApi.compileCurrentFile).not.toHaveBeenCalled();
+  expect(store.compiling).toBe(false);
+  expect(store.stopping).toBe(false);
+  store.dispose();
 });

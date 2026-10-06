@@ -14,12 +14,12 @@ describe("sketch board storage", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("uses one drawing per source file", () => {
+  it("uses one drawing per source file", async () => {
     expect(sketchDocumentKey("D:/Code/A.cpp")).toBe(sketchDocumentKey("d:\\code\\a.cpp"));
     expect(sketchDocumentKey()).toBe("__scratch__");
   });
 
-  it("stores resizable vector strokes", () => {
+  it("stores resizable vector strokes", async () => {
     saveSketchDocument("problem", {
       version: 3,
       canvasWidth: 820,
@@ -28,7 +28,7 @@ describe("sketch board storage", () => {
       strokes: [{ tool: "pen", color: "#ffffff", width: 4, points: [{ x: 1, y: 2 }, { x: 3, y: 4 }] }],
       updatedAt: 42,
     });
-    expect(loadSketchDocument("problem")).toEqual({
+    expect((await loadSketchDocument("problem"))).toEqual({
       version: 3,
       canvasWidth: 820,
       canvasHeight: 560,
@@ -38,7 +38,7 @@ describe("sketch board storage", () => {
     });
   });
 
-  it("migrates legacy window-sized drawings to a canvas-sized document", () => {
+  it("migrates legacy window-sized drawings to a canvas-sized document", async () => {
     values.set("lightcp.sketch-board.v1", JSON.stringify({
       problem: {
         version: 1,
@@ -49,7 +49,7 @@ describe("sketch board storage", () => {
       },
     }));
 
-    expect(loadSketchDocument("problem")).toMatchObject({
+    expect((await loadSketchDocument("problem"))).toMatchObject({
       version: 3,
       canvasWidth: 720,
       canvasHeight: 444,
@@ -58,7 +58,7 @@ describe("sketch board storage", () => {
     });
   });
 
-  it("migrates version 2 drawings to a blank background", () => {
+  it("migrates version 2 drawings to a blank background", async () => {
     values.set("lightcp.sketch-board.v1", JSON.stringify({
       problem: {
         version: 2,
@@ -69,7 +69,7 @@ describe("sketch board storage", () => {
       },
     }));
 
-    expect(loadSketchDocument("problem")).toMatchObject({
+    expect((await loadSketchDocument("problem"))).toMatchObject({
       version: 3,
       background: "blank",
       updatedAt: 18,

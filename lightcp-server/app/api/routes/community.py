@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import and_, case, func, or_, select
+from fastapi import APIRouter, Depends, Query, Request, status
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db
@@ -90,7 +90,7 @@ def list_conversations(
             ),
         )
         .where(participant_filter)
-        .order_by(ChatMessage.created_at.desc())
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
     ).all()
     latest_by_user: dict[str, ChatMessage] = {}
     for message in messages:
@@ -124,30 +124,42 @@ def list_conversations(
 def list_messages(
     other_user_id: str,
     limit: int = Query(default=80, ge=1, le=200),
+    before_id: str | None = Query(default=None, max_length=36),
     user: User = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> list[ChatMessageResponse]:
     other = session.scalar(select(User).where(User.id == other_user_id, User.is_active.is_(True)))
     if not other:
         raise AppError(404, "USER_NOT_FOUND", "没有找到这个用户。")
+    participants = or_(
+        and_(ChatMessage.sender_id == user.id, ChatMessage.recipient_id == other_user_id),
+        and_(ChatMessage.sender_id == other_user_id, ChatMessage.recipient_id == user.id),
+    )
+    statement = select(ChatMessage).where(participants)
+    if before_id:
+        cursor = session.scalar(select(ChatMessage).where(participants, ChatMessage.id == before_id))
+        if not cursor:
+            raise AppError(404, "MESSAGE_NOT_FOUND", "找不到这条消息。")
+        statement = statement.where(or_(
+            ChatMessage.created_at < cursor.created_at,
+            and_(ChatMessage.created_at == cursor.created_at, ChatMessage.id < cursor.id),
+        ))
     messages = list(
         session.scalars(
-            select(ChatMessage)
-            .where(
-                or_(
-                    and_(ChatMessage.sender_id == user.id, ChatMessage.recipient_id == other_user_id),
-                    and_(ChatMessage.sender_id == other_user_id, ChatMessage.recipient_id == user.id),
-                )
-            )
-            .order_by(ChatMessage.created_at.desc())
+            statement.order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
             .limit(limit)
         ).all()
     )
-    unread = [item for item in messages if item.recipient_id == user.id and item.read_at is None]
-    if unread:
+    if messages:
+        newest = messages[0]
         read_at = utcnow()
-        for item in unread:
-            item.read_at = read_at
+        session.execute(update(ChatMessage).where(
+            ChatMessage.sender_id == other_user_id,
+            ChatMessage.recipient_id == user.id,
+            ChatMessage.read_at.is_(None),
+            or_(ChatMessage.created_at < newest.created_at,
+                and_(ChatMessage.created_at == newest.created_at, ChatMessage.id <= newest.id)),
+        ).values(read_at=read_at), execution_options={"synchronize_session": "fetch"})
         session.commit()
     messages.reverse()
     return [ChatMessageResponse.model_validate(item) for item in messages]
@@ -156,9 +168,11 @@ def list_messages(
 @router.post("/messages", response_model=ChatMessageResponse, status_code=status.HTTP_201_CREATED)
 def send_message(
     payload: MessageCreate,
+    request: Request,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> ChatMessageResponse:
+    request.app.state.rate_limiter.check("message-user", user.id, 20, 60)
     if payload.recipient_id == user.id:
         raise AppError(400, "SELF_MESSAGE", "不能给自己发送消息。")
     recipient = session.scalar(

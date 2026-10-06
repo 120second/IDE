@@ -102,6 +102,8 @@
   });
 
   onMount(() => {
+    const notebookError = (event: Event) => ux.error((event as CustomEvent<string>).detail);
+    window.addEventListener("notebook-storage-error", notebookError);
     let disposed = false;
     const systemTheme = window.matchMedia("(prefers-color-scheme: light)");
     const refreshSystemTheme = () => {
@@ -194,6 +196,7 @@
     })();
 
     return () => {
+      window.removeEventListener("notebook-storage-error", notebookError);
       disposed = true;
       systemTheme.removeEventListener("change", refreshSystemTheme);
       sessionStore?.dispose();

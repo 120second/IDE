@@ -1,3 +1,4 @@
+import { readNotebook, writeNotebook } from "./notebookStorage";
 export interface SketchPoint {
   x: number;
   y: number;
@@ -21,33 +22,15 @@ export interface SketchDocument {
   updatedAt: number;
 }
 
-const STORAGE_KEY = "lightcp.sketch-board.v1";
-
 export function sketchDocumentKey(sourcePath?: string): string {
   const path = sourcePath?.trim();
   return path ? path.replaceAll("/", "\\").toLocaleLowerCase() : "__scratch__";
 }
-
-export function loadSketchDocument(key: string): SketchDocument | undefined {
-  try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Record<string, unknown>;
-    return sanitizeDocument(all[key]);
-  } catch {
-    return undefined;
-  }
+export async function loadSketchDocument(key: string): Promise<SketchDocument | undefined> {
+  return sanitizeDocument(await readNotebook("sketch", key));
 }
-
 export function saveSketchDocument(key: string, value: SketchDocument): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as Record<string, SketchDocument>;
-    all[key] = value;
-    const entries = Object.entries(all)
-      .sort((left, right) => (right[1]?.updatedAt ?? 0) - (left[1]?.updatedAt ?? 0))
-      .slice(0, 80);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
-  } catch {
-    // A full or disabled localStorage must not interrupt drawing.
-  }
+  writeNotebook("sketch", key, value);
 }
 
 function sanitizeDocument(value: unknown): SketchDocument | undefined {

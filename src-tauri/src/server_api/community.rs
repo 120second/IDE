@@ -84,8 +84,15 @@ pub async fn list_conversations(api: &ServerApi) -> AppResult<Vec<Conversation>>
     api.get("/community/conversations", true).await
 }
 
-pub async fn list_messages(api: &ServerApi, user_id: &str) -> AppResult<Vec<ChatMessage>> {
-    api.get(&format!("/community/messages/{user_id}"), true)
+pub async fn list_messages(
+    api: &ServerApi,
+    user_id: &str,
+    before_id: Option<&str>,
+) -> AppResult<Vec<ChatMessage>> {
+    let query: Vec<(&str, &str)> = before_id
+        .map(|id| vec![("before_id", id)])
+        .unwrap_or_default();
+    api.get_query(&format!("/community/messages/{user_id}"), &query)
         .await
 }
 

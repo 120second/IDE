@@ -10,7 +10,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    process_tree::ProcessTree,
+};
 
 use super::{RunRequest, RunResult, RunStatus, RunnerOutputBatch};
 
@@ -162,6 +165,7 @@ impl RunnerManager {
                 executable.display()
             ))
         })?;
+        let process_tree = ProcessTree::attach(&mut child)?;
         let Some(stdin) = child.stdin.take() else {
             terminate_child(&mut child);
             return Err(AppError::Internal(
@@ -224,12 +228,12 @@ impl RunnerManager {
             }
 
             if stop_requested.load(Ordering::Acquire) || external_stop.load(Ordering::Acquire) {
-                let _ = child.kill();
+                process_tree.terminate(&mut child);
                 let exit = child.wait()?;
                 break (RunStatus::Stopped, exit.code());
             }
             if started.elapsed() >= timeout {
-                let _ = child.kill();
+                process_tree.terminate(&mut child);
                 let exit = child.wait()?;
                 break (RunStatus::TimedOut, exit.code());
             }
@@ -244,6 +248,21 @@ impl RunnerManager {
             thread::sleep(POLL_INTERVAL);
         };
 
+        drop(process_tree);
+        // Readers may be blocked on the bounded queue. Consume until they finish
+        // before joining, and close descendants that still hold inherited pipes.
+        while !stdout_reader.is_finished() || !stderr_reader.is_finished() {
+            drain_chunks(
+                &receiver,
+                output_limit,
+                &mut stdout_bytes,
+                &mut stderr_bytes,
+                &mut pending_stdout,
+                &mut pending_stderr,
+                &mut output_truncated,
+            );
+            thread::sleep(POLL_INTERVAL);
+        }
         let _ = input_writer.join();
         join_reader(stdout_reader)?;
         join_reader(stderr_reader)?;
@@ -321,7 +340,11 @@ fn drain_chunks(
     pending_stderr: &mut Vec<u8>,
     truncated: &mut bool,
 ) {
-    while let Ok(chunk) = receiver.try_recv() {
+    // Bound each drain so a producer cannot starve timeout and stop checks.
+    for _ in 0..64 {
+        let Ok(chunk) = receiver.try_recv() else {
+            break;
+        };
         let used = stdout.len() + stderr.len();
         let allowed = chunk.bytes.len().min(limit.saturating_sub(used));
         let bytes = &chunk.bytes[..allowed];
@@ -460,6 +483,7 @@ int main() {
     if (mode == "re") return 7;
     if (mode == "loop") while (true) {}
     if (mode == "large") { for (int i = 0; i < 200000; ++i) std::cout << 'x'; return 0; }
+    if (mode == "flood") { while (true) { std::cout << std::string(8192, 'x'); std::cout.flush(); } }
     std::cout << "echo:" << mode << '\n';
     std::cerr << "diagnostic\n";
 }
@@ -511,6 +535,22 @@ int main() {
             .unwrap();
         assert!(large.output_truncated);
         assert_eq!(large.stdout.len(), 64 * 1024);
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let callback_stop = stop.clone();
+        let mut delivered = false;
+        let flood = manager
+            .run_with_stop(&request(&root, &executable, "flood\n", 2_000), stop, |_| {
+                if !delivered {
+                    delivered = true;
+                    thread::sleep(Duration::from_millis(300));
+                    callback_stop.store(true, Ordering::Release);
+                }
+            })
+            .unwrap();
+        assert_eq!(flood.status, RunStatus::Stopped);
+        assert!(flood.duration_ms < 3_000);
+        assert!(manager.active_run_id().is_none());
 
         let externally_stopped = RunnerManager::default()
             .run_with_stop(

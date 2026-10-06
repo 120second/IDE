@@ -3,7 +3,7 @@
   import { Marked } from "marked";
   import markedKatex from "marked-katex-extension";
   import "katex/dist/katex.min.css";
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import {
     deleteReaderAnnotations,
     drawReaderAnnotationStroke,
@@ -50,6 +50,7 @@
   let pdfUrl = $state("");
   let pdfBlob = $state.raw<Blob>();
   let loading = $state(false);
+  let loadError = $state(false);
   let draggingFile = $state(false);
   let view = $state<"read" | "edit" | "pdf">("read");
   let document = $state<ProblemDocumentMeta>(emptyDocument());
@@ -81,9 +82,17 @@
   onDestroy(() => {
     flushSave();
     flushAnnotationSave();
+    loadSequence += 1;
+    annotationLoad += 1;
     revokePdfUrl();
     stopResize();
     annotationResizeObserver?.disconnect();
+  });
+
+  onMount(() => {
+    const flush = () => { flushSave(); flushAnnotationSave(); };
+    window.addEventListener("notebook-flush", flush);
+    return () => window.removeEventListener("notebook-flush", flush);
   });
 
   async function loadDocument(key: string): Promise<void> {
@@ -94,13 +103,15 @@
     annotationEnabled = false;
     revokePdfUrl();
     loading = true;
-    const stored = loadProblemDocument(key) ?? emptyDocument();
-    document = stored;
-    view = stored.kind === "pdf" ? "pdf" : stored.markdown ? "read" : "edit";
-    loadAnnotationSurface(view);
+    loadError = false;
     try {
+      const stored = await loadProblemDocument(key) ?? emptyDocument();
+      if (sequence !== loadSequence) return;
+      document = stored;
+      view = stored.kind === "pdf" ? "pdf" : stored.markdown ? "read" : "edit";
+      loadAnnotationSurface(view);
       if (stored.kind === "pdf" || stored.pdfName) {
-        const blob = await loadProblemPdf(key);
+        const blob = await loadProblemPdf(key, stored.pdfStorageKey);
         if (sequence !== loadSequence) return;
         if (blob) {
           pdfBlob = blob;
@@ -113,14 +124,14 @@
           loadAnnotationSurface(view);
           saveProblemDocument(key, document);
         } else if (stored.kind === "pdf") {
-          document = emptyDocument();
-          saveProblemDocument(key, document);
-          view = "edit";
-          loadAnnotationSurface(view);
+          ux.error("未找到本地 PDF 文件，题面信息与批注已保留。可以重新导入 PDF。");
         }
       }
     } catch (error) {
-      if (sequence === loadSequence) ux.error(`无法读取本地 PDF：${errorMessage(error)}`);
+      if (sequence === loadSequence) {
+        loadError = true;
+        ux.error(`无法读取题面：${errorMessage(error)}`);
+      }
     } finally {
       if (sequence === loadSequence) loading = false;
     }
@@ -131,6 +142,7 @@
   }
 
   function scheduleSave(): void {
+    if (loading || loadError) return;
     document.kind = "markdown";
     document.title = titleFromMarkdown(document.markdown, sourceLabel || "题面");
     document.updatedAt = Date.now();
@@ -149,6 +161,7 @@
   }
 
   async function newMarkdown(): Promise<void> {
+    if (loading || loadError) return;
     if (hasContent() && !await ux.confirm({
       title: "新建题面",
       message: "当前代码文件已经关联了题面。新建后将替换现有内容。",
@@ -189,6 +202,7 @@
   }
 
   async function importFile(file: File): Promise<void> {
+    if (loading || loadError) return;
     if (isPdf(file)) {
       await importPdf(file);
       return;
@@ -246,6 +260,7 @@
         kind: "pdf",
         title: file.name.replace(/\.pdf$/i, "") || sourceLabel || "PDF 题面",
         pdfName: file.name,
+        pdfStorageKey: documentKey,
         updatedAt: Date.now(),
       };
       saveProblemDocument(documentKey, document);
@@ -325,6 +340,7 @@
   }
 
   function selectMarkdownView(next: "read" | "edit"): void {
+    if (loading || loadError) return;
     const previousSurface = annotationSurface(view);
     view = next === "read" && !document.markdown.trim() ? "edit" : next;
     if (view !== "read") annotationEnabled = false;
@@ -339,6 +355,7 @@
   }
 
   function selectPdfView(): void {
+    if (loading || loadError) return;
     if (!pdfBlob) return;
     const previousSurface = annotationSurface(view);
     annotationEnabled = false;
@@ -392,6 +409,7 @@
   }
 
   function toggleAnnotations(): void {
+    if (annotationLoading || !annotationReady) return;
     annotationEnabled = !annotationEnabled;
     if (annotationEnabled) {
       annotationTool = "pen";
@@ -403,9 +421,20 @@
     return targetView === "pdf" ? "pdf" : "markdown";
   }
 
+  let annotationLoad = 0;
+  let annotationLoading = $state(false);
+  let annotationReady = false;
   function loadAnnotationSurface(targetView: typeof view): void {
     activeAnnotationKey = readerAnnotationStorageKey(activeKey, annotationSurface(targetView));
-    annotationStrokes = loadReaderAnnotations(activeAnnotationKey)?.strokes ?? [];
+    const sequence = ++annotationLoad;
+    annotationLoading = true;
+    annotationReady = false;
+    annotationStrokes = [];
+    void loadReaderAnnotations(activeAnnotationKey).then((stored) => {
+      if (sequence === annotationLoad) { annotationStrokes = stored?.strokes ?? []; annotationReady = true; }
+    }).catch((error) => ux.error(`无法读取批注：${errorMessage(error)}`)).finally(() => {
+      if (sequence === annotationLoad) annotationLoading = false;
+    });
     annotationRedo = [];
     activeAnnotation = undefined;
   }
@@ -555,7 +584,7 @@
   function flushAnnotationSave(): void {
     if (annotationSaveTimer) clearTimeout(annotationSaveTimer);
     annotationSaveTimer = undefined;
-    if (!activeAnnotationKey) return;
+    if (!activeAnnotationKey || annotationLoading || !annotationReady) return;
     if (annotationStrokes.length === 0) deleteReaderAnnotations(activeAnnotationKey);
     else saveReaderAnnotations(activeAnnotationKey, { version: 1, strokes: annotationStrokes, updatedAt: Date.now() });
   }
@@ -682,8 +711,8 @@
 
   <div class="problem-reader-toolbar">
     <div class="problem-reader-actions">
-      <button onclick={() => void newMarkdown()}><Icon name="plus" size={13} /><span>新建</span></button>
-      <button onclick={chooseFile}><Icon name="folder-open" size={13} /><span>导入</span></button>
+      <button disabled={loading || loadError} onclick={() => void newMarkdown()}><Icon name="plus" size={13} /><span>新建</span></button>
+      <button disabled={loading || loadError} onclick={chooseFile}><Icon name="folder-open" size={13} /><span>导入</span></button>
       {#if (view === "read" && renderedMarkdown) || (view === "pdf" && pdfBlob)}
         <button
           class:active={annotationEnabled}
@@ -749,6 +778,8 @@
   <div class="problem-reader-body">
     {#if loading}
       <div class="reader-loading" aria-live="polite"><span></span><p>正在载入题面…</p></div>
+    {:else if loadError}
+      <div class="reader-empty"><Icon name="warning" size={24} /><strong>题面读取失败</strong><p>原数据已保留，请检查存储后重试。</p><button onclick={() => void loadDocument(documentKey)}>重试读取</button></div>
     {:else if view === "pdf"}
       {#if pdfBlob}
         <PdfAnnotationViewer

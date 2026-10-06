@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db
 from app.db.models.user import User
+from app.core.security import normalize_identity
 from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginRequest,
@@ -32,6 +33,7 @@ def login(
     request: Request,
     session: Session = Depends(get_db),
 ) -> TokenResponse:
+    request.app.state.rate_limiter.check("login-account", normalize_identity(payload.identifier), 20, 300)
     return request.app.state.auth_service.login(session, payload.identifier, payload.password)
 
 

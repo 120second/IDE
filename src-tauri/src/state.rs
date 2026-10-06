@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::{
+    compiler::CompilerManager,
     debugger::DebugManager,
     error::{AppError, AppResult},
     filesystem::WorkspaceRuntime,
@@ -22,6 +23,7 @@ pub struct AppState {
     pub recovery_write_lock: Arc<Mutex<()>>,
     pub workspace: Mutex<WorkspaceRuntime>,
     pub runner: Arc<RunnerManager>,
+    pub compiler: Arc<CompilerManager>,
     pub debugger: Arc<DebugManager>,
     pub stress: Arc<StressManager>,
     pub lsp: Arc<ClangdManager>,
@@ -39,6 +41,7 @@ impl AppState {
             recovery_write_lock: Arc::new(Mutex::new(())),
             workspace: Mutex::new(WorkspaceRuntime::default()),
             runner: Arc::new(RunnerManager::default()),
+            compiler: Arc::new(CompilerManager::default()),
             debugger: Arc::new(DebugManager::new(debug_data_dir)),
             stress: Arc::new(StressManager::default()),
             lsp: Arc::new(ClangdManager::default()),

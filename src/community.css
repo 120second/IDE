@@ -354,7 +354,7 @@ button:disabled { cursor: not-allowed; opacity: .56; }
   outline: 2px solid var(--accent-strong);
   outline-offset: 2px;
 }
-.community-hub .people-search input:focus-visible { outline: 0; }
+.community-hub .people-search:focus-within { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 
 .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; overflow: hidden !important; clip: rect(0 0 0 0) !important; white-space: nowrap !important; }
 

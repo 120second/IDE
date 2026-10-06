@@ -1,3 +1,4 @@
+import { clearNotebookRedirect, flushNotebookWrites, remapNotebookPaths } from "../notebookStorage";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -220,7 +221,9 @@ export class WorkspaceStore {
   async rename(entry: FileEntry, newName: string): Promise<void> {
     this.error = "";
     try {
+      await flushNotebookWrites();
       const result = await renameEntry(entry.path, newName);
+      await remapNotebookPaths(entry.path, result.path);
       this.editor.handlePathRenamed(entry.path, result.path);
       this.dropDirectoryStates(entry.path);
       await this.refreshLoadedParent(entry.path);
@@ -249,7 +252,9 @@ export class WorkspaceStore {
     if (samePath(parentPath(entry.path), targetDirectory)) return;
     this.error = "";
     try {
+      await flushNotebookWrites();
       const result = await moveEntry(entry.path, targetDirectory);
+      await remapNotebookPaths(entry.path, result.path);
       this.editor.handlePathRenamed(entry.path, result.path);
       this.dropDirectoryStates(entry.path);
       await Promise.all([
@@ -336,6 +341,11 @@ export class WorkspaceStore {
     let structuralChange = false;
     for (const change of grouped) {
       structuralChange ||= change.kind !== "changed";
+      if (change.kind === "renamed" && change.paths.length >= 2) {
+        try { await remapNotebookPaths(change.paths[0], change.paths[1]); }
+        catch (error) { this.error = errorMessage(error); }
+      }
+      if (change.kind === "created") for (const path of change.paths) clearNotebookRedirect(path);
       await this.editor.handleExternalChange(change);
       for (const path of change.paths) {
         const parent = parentPath(path);

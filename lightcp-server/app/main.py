@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import install_error_handlers
+from app.core.errors import AppError
+from app.core.rate_limit import RateLimiter
 from app.db import models  # noqa: F401
 from app.db.base import Base
 from app.db.session import Database
@@ -49,7 +51,29 @@ def create_app(
     app.state.database = database
     app.state.email_sender = email_sender or SmtpEmailSender(settings)
     app.state.auth_service = AuthService(settings, app.state.email_sender)
+    app.state.rate_limiter = RateLimiter()
     install_error_handlers(app)
+
+    @app.middleware("http")
+    async def limit_requests(request, call_next):
+        path = request.url.path
+        rules = {
+            "/api/auth/login": (15, 60),
+            "/api/auth/register": (10, 600),
+            "/api/auth/forgot-password": (5, 300),
+            "/api/auth/reset-password": (15, 300),
+            "/api/community/messages": (30, 60),
+        }
+        rule = rules.get(path) if request.method == "POST" else None
+        limit, seconds = rule or (600, 60)
+        try:
+            identity = request.client.host if request.client else "unknown"
+            app.state.rate_limiter.check(path if rule else "api", identity, limit, seconds)
+        except AppError as error:
+            return JSONResponse(status_code=error.status_code,
+                content={"error": {"code": error.code, "message": error.message}},
+                headers={"Retry-After": str(seconds)})
+        return await call_next(request)
 
     @app.exception_handler(RequestValidationError)
     async def handle_request_validation(_request, error: RequestValidationError) -> JSONResponse:

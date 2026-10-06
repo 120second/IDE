@@ -406,6 +406,7 @@ pub fn sync_renamed_path(
     let next = normalized_path(next_path);
     let mut connection = connect(database_path)?;
     let transaction = connection.transaction()?;
+    crate::notebooks::remap_in_transaction(&transaction, previous_path, next_path)?;
     let rows = {
         let mut statement = transaction.prepare(
             "SELECT id, path, archived FROM workspace_files
