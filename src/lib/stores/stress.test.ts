@@ -85,5 +85,6 @@ it("uses the local compiler when replaying and retains matching outputs", async 
   expect(api.replayStressTest).toHaveBeenCalledWith("D:\\saved.json", expect.stringContaining("replay-"), "g++");
   expect(store.replayMode).toBe(true);
   expect(store.failure?.reason).toBe("本次重放输出一致");
+  expect(store.logs[0].status).toBe("AC");
   expect(editor.saveActive).not.toHaveBeenCalled();
 });

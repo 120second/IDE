@@ -135,7 +135,7 @@
     </section>
 
     {#if stress.failure}
-      <section class="stress-failure-panel">
+      <section class="stress-failure-panel" class:matched={stress.replayMode && stress.status === "completed"}>
         <header>
           <div><span>{stress.replayMode ? "重放结果" : `失败 #${stress.failure.index}`}</span><h2>{stress.failure.reason}</h2></div>
           <code>种子 {stress.failure.seed}</code>

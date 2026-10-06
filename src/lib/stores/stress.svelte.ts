@@ -361,6 +361,10 @@ export class StressStore {
     this.message = summary.message;
     this.stats = summary.stats;
     if (summary.failure || summary.replayResult) this.failure = summary.failure ?? summary.replayResult;
+    if (summary.replayResult) {
+      const result = summary.replayResult;
+      this.appendPassed([{ index: result.index, seed: result.seed, solutionTimeMs: result.solutionTimeMs, bruteTimeMs: result.bruteTimeMs, stats: result.stats }]);
+    }
     this.seed = summary.nextSeed;
   }
 

@@ -1100,6 +1100,10 @@
   font-weight: 800;
 }
 
+.stress-failure-panel.matched header > div > span {
+  color: var(--success);
+}
+
 .stress-failure-panel header > code {
   color: var(--text-muted);
   font-size: var(--ui-font-caption);
