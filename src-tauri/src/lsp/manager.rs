@@ -295,6 +295,9 @@ impl ClangdSession {
                 workspace_root.display()
             )));
         }
+        // Resolve TEMP aliases, junctions and relative segments on both sides
+        // before applying the workspace boundary check to document paths.
+        let workspace_root = dunce::canonicalize(workspace_root)?;
 
         let compiler_executable = resolve_compiler_executable(compiler_path)?;
         let compiler_standard = normalize_compiler_standard(compiler_standard);
@@ -1106,6 +1109,7 @@ mod tests {
                 .as_nanos()
         ));
         fs::create_dir_all(&root).expect("temporary workspace should be created");
+        fs::create_dir_all(root.join("nested")).expect("nested directory should be created");
         let source = root.join("main.cpp");
         let text = "#include <bits/stdc++.h>\nint helper(int value) { return value; }\nint main() { std::vector<int> values; return helper(missing_name); }\n";
         fs::write(&source, text).expect("source should be written");
@@ -1114,7 +1118,7 @@ mod tests {
         let (event_sender, event_receiver) = std::sync::mpsc::channel();
         let result = manager
             .start(
-                root.clone(),
+                root.join("nested").join(".."),
                 String::new(),
                 "g++".to_owned(),
                 "c++20".to_owned(),
