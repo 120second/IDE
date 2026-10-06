@@ -54,19 +54,62 @@ impl StressManager {
             brute_runner: Arc::new(RunnerManager::default()),
         });
         self.begin(session.clone())?;
-        let result = match self.run_active(workspace_root, build_root, request, &session, &mut emit)
-        {
-            Err(AppError::ProcessCancelled) => Ok(stopped_summary(request, "编译已停止")),
-            result => result,
-        };
-        if let Err(error) = &result {
-            emit(StressEvent::State {
-                session_id: session.session_id.clone(),
-                status: StressStatus::Error,
-                message: error.to_string(),
-            });
-        }
+        let result = self.run_session(
+            workspace_root,
+            build_root,
+            request,
+            &session,
+            None,
+            &mut emit,
+        );
         self.finish(&session.session_id);
+        result
+    }
+
+    pub fn reserve(self: &Arc<Self>, session_id: &str) -> AppResult<StressJob> {
+        let session = Arc::new(ActiveStress {
+            session_id: session_id.to_owned(),
+            stop_requested: Arc::new(AtomicBool::new(false)),
+            solution_runner: Arc::new(RunnerManager::default()),
+            brute_runner: Arc::new(RunnerManager::default()),
+        });
+        self.begin(session.clone())?;
+        Ok(StressJob {
+            manager: self.clone(),
+            session,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_session<F>(
+        &self,
+        workspace_root: &Path,
+        build_root: &Path,
+        request: &StressRunRequest,
+        session: &Arc<ActiveStress>,
+        input: Option<&str>,
+        emit: &mut F,
+    ) -> AppResult<StressSummary>
+    where
+        F: FnMut(StressEvent),
+    {
+        validate_request(request)?;
+        if session.stop_requested.load(Ordering::Acquire) {
+            return Ok(stopped_summary(request, "对拍已停止"));
+        }
+        let result =
+            match self.run_active(workspace_root, build_root, request, session, input, emit) {
+                Err(AppError::ProcessCancelled) => Ok(stopped_summary(request, "编译已停止")),
+                result => result,
+            };
+        if let Err(error) = &result {
+            emit_state(
+                emit,
+                &session.session_id,
+                StressStatus::Error,
+                &error.to_string(),
+            );
+        }
         result
     }
 
@@ -114,12 +157,14 @@ impl StressManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_active<F>(
         &self,
         workspace_root: &Path,
         build_root: &Path,
         request: &StressRunRequest,
         session: &Arc<ActiveStress>,
+        fixed_input: Option<&str>,
         emit: &mut F,
     ) -> AppResult<StressSummary>
     where
@@ -131,6 +176,7 @@ impl StressManager {
             StressStatus::Compiling,
             "正在编译待测程序和暴力程序…",
         );
+        let (replay_context, source_revisions) = super::replay::capture(workspace_root, request)?;
         let solution_compile = compile_with_stop(
             workspace_root,
             build_root,
@@ -168,6 +214,7 @@ impl StressManager {
                 brute_compile.stdout, brute_compile.stderr
             )));
         }
+        super::replay::ensure_sources_unchanged(workspace_root, request, &source_revisions)?;
         let solution_executable = solution_compile
             .executable_path
             .ok_or_else(|| stress_error("待测程序编译器未返回可执行文件"))?;
@@ -210,23 +257,28 @@ impl StressManager {
 
             let case_seed = current_seed;
             let next_case_seed = next_seed(case_seed);
-            let mut profile = request.generator_profile.clone();
-            profile.seed = case_seed.to_string();
-            let generated = generate_visual(&VisualGenerateRequest { profile, count: 1 });
-            if !generated.diagnostics.is_empty() {
-                let message = generated
-                    .diagnostics
-                    .iter()
-                    .map(|diagnostic| diagnostic.message.as_str())
-                    .collect::<Vec<_>>()
-                    .join("；");
-                return Err(stress_error(format!("随机数据生成失败：{message}")));
-            }
-            let generated_case = generated
-                .cases
-                .into_iter()
-                .next()
-                .ok_or_else(|| stress_error("random generator returned no case"))?;
+            let input = if let Some(input) = fixed_input {
+                input.to_owned()
+            } else {
+                let mut profile = request.generator_profile.clone();
+                profile.seed = case_seed.to_string();
+                let generated = generate_visual(&VisualGenerateRequest { profile, count: 1 });
+                if !generated.diagnostics.is_empty() {
+                    let message = generated
+                        .diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.message.as_str())
+                        .collect::<Vec<_>>()
+                        .join("；");
+                    return Err(stress_error(format!("随机数据生成失败：{message}")));
+                }
+                let generated_case = generated
+                    .cases
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| stress_error("random generator returned no case"))?;
+                generated_case.input
+            };
             if session.stop_requested.load(Ordering::Acquire) {
                 continue;
             }
@@ -238,7 +290,7 @@ impl StressManager {
                 case_number,
                 &solution_executable,
                 &brute_executable,
-                &generated_case.input,
+                &input,
             )?;
             if session.stop_requested.load(Ordering::Acquire)
                 || solution.status == RunStatus::Stopped
@@ -272,7 +324,7 @@ impl StressManager {
                     seed: case_seed.to_string(),
                     next_seed: next_case_seed.to_string(),
                     reason,
-                    input: generated_case.input,
+                    input,
                     solution_output: solution.stdout,
                     brute_output: brute.stdout,
                     solution_stderr: solution.stderr,
@@ -282,10 +334,11 @@ impl StressManager {
                     solution_time_ms: solution.duration_ms,
                     brute_time_ms: brute.duration_ms,
                     stats,
+                    replay: Some(replay_context.clone()),
                 };
                 emit(StressEvent::Failure {
                     session_id: session.session_id.clone(),
-                    failure: failure.clone(),
+                    failure: Box::new(failure.clone()),
                 });
                 emit_state(
                     emit,
@@ -305,6 +358,35 @@ impl StressManager {
 
             passed = passed.saturating_add(1);
             let stats = statistics(request, started, total, passed, failed);
+            if fixed_input.is_some() {
+                let replay_result = StressFailure {
+                    index: case_number,
+                    seed: case_seed.to_string(),
+                    next_seed: next_case_seed.to_string(),
+                    reason: "本次重放输出一致".to_owned(),
+                    input,
+                    solution_output: solution.stdout,
+                    brute_output: brute.stdout,
+                    solution_stderr: solution.stderr,
+                    brute_stderr: brute.stderr,
+                    solution_exit_code: solution.exit_code,
+                    brute_exit_code: brute.exit_code,
+                    solution_time_ms: solution.duration_ms,
+                    brute_time_ms: brute.duration_ms,
+                    stats: stats.clone(),
+                    replay: Some(replay_context.clone()),
+                };
+                let mut result = summary(
+                    request,
+                    StressStatus::Completed,
+                    "本次重放输出一致",
+                    current_seed,
+                    stats,
+                    None,
+                );
+                result.replay_result = Some(replay_result);
+                return Ok(result);
+            }
             pending_passed.push(StressCasePassed {
                 index: case_number,
                 seed: case_seed.to_string(),
@@ -334,6 +416,32 @@ impl StressManager {
             stats,
             None,
         ))
+    }
+}
+
+pub struct StressJob {
+    manager: Arc<StressManager>,
+    session: Arc<ActiveStress>,
+}
+impl StressJob {
+    pub fn run<F>(
+        self,
+        workspace: &Path,
+        build: &Path,
+        request: &StressRunRequest,
+        input: Option<&str>,
+        mut emit: F,
+    ) -> AppResult<StressSummary>
+    where
+        F: FnMut(StressEvent),
+    {
+        self.manager
+            .run_session(workspace, build, request, &self.session, input, &mut emit)
+    }
+}
+impl Drop for StressJob {
+    fn drop(&mut self) {
+        self.manager.finish(&self.session.session_id);
     }
 }
 
@@ -490,6 +598,7 @@ fn summary(
         next_seed: next_seed.to_string(),
         stats,
         failure,
+        replay_result: None,
     }
 }
 
@@ -507,6 +616,7 @@ fn stopped_summary(request: &StressRunRequest, message: &str) -> StressSummary {
             cases_per_second: 0.0,
         },
         failure: None,
+        replay_result: None,
     }
 }
 
@@ -656,6 +766,77 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| matches!(event, StressEvent::Failure { .. })));
+        let path = root.join("中文 反例.lightcp-replay.json");
+        super::super::replay::save(&path, failure.clone()).unwrap();
+        fs::write(&solution, "int main() { return 99; }").unwrap();
+        fs::write(&brute, "int main() { return 88; }").unwrap();
+        let manager = Arc::new(StressManager::default());
+        let mut bundle = super::super::replay::load(&path).unwrap();
+        // Replaying uses the saved input even when generation rules change.
+        bundle
+            .failure
+            .replay
+            .as_mut()
+            .unwrap()
+            .generator_profile
+            .nodes
+            .clear();
+        let replayed = super::super::replay::run(
+            bundle,
+            manager.reserve("replay-test").unwrap(),
+            "replay-test".into(),
+            &build,
+            "g++".into(),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(replayed.status, StressStatus::Failed);
+        let replayed = replayed.failure.unwrap();
+        assert_eq!(replayed.input, failure.input);
+        assert_eq!(replayed.solution_output, failure.solution_output);
+        assert_eq!(replayed.brute_output, failure.brute_output);
+        assert_eq!(
+            fs::read_to_string(&solution).unwrap(),
+            "int main() { return 99; }"
+        );
+        assert_eq!(fs::read_dir(build.join("replays")).unwrap().count(), 0);
+        let mut invalid = failure.clone();
+        invalid.replay = None;
+        assert!(super::super::replay::save(&path, invalid).is_err());
+        let mut bundle = super::super::replay::load(&path).unwrap();
+        let context = bundle.failure.replay.as_mut().unwrap();
+        context.solution_source.clone_from(&context.brute_source);
+        let matched = super::super::replay::run(
+            bundle,
+            manager.reserve("matched").unwrap(),
+            "matched".into(),
+            &build,
+            "g++".into(),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(matched.status, StressStatus::Completed);
+        assert!(matched.failure.is_none());
+        assert_eq!(matched.replay_result.unwrap().stats.failed, 0);
+        let bundle = super::super::replay::load(&path).unwrap();
+        let job = manager.reserve("cancelled").unwrap();
+        assert!(manager.stop());
+        let stopped = super::super::replay::run(
+            bundle,
+            job,
+            "cancelled".into(),
+            &build,
+            "g++".into(),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(stopped.status, StressStatus::Stopped);
+        assert!(manager.active_session_id().is_none());
+        assert_eq!(fs::read_dir(build.join("replays")).unwrap().count(), 0);
+        let mut future = super::super::replay::load(&path).unwrap();
+        future.version = 2;
+        fs::write(&path, serde_json::to_vec(&future).unwrap()).unwrap();
+        assert!(super::super::replay::load(&path).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 

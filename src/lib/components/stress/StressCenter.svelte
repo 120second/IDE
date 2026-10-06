@@ -93,6 +93,7 @@
     </details>
 
     <div class="stress-actions">
+      <button class="secondary-button" disabled={stress.running} title="读取重放包，在临时目录编译双方源码并运行保存的输入" onclick={() => void stress.importReplay()}>导入并重放</button>
       {#if startHint && !stress.running}<span class="stress-start-hint">{startHint}</span>{/if}
       {#if stress.running}
         <button class="stress-stop" disabled={stress.stopping} onclick={() => void stress.stop()}>{stress.stopping ? "正在停止…" : "停止"}</button>
@@ -136,15 +137,17 @@
     {#if stress.failure}
       <section class="stress-failure-panel">
         <header>
-          <div><span>失败 #{stress.failure.index}</span><h2>{stress.failure.reason}</h2></div>
+          <div><span>{stress.replayMode ? "重放结果" : `失败 #${stress.failure.index}`}</span><h2>{stress.failure.reason}</h2></div>
           <code>种子 {stress.failure.seed}</code>
         </header>
         <div class="stress-failure-actions">
-          <button class="primary-button" onclick={() => void stress.saveFailureAsTestcase()}>保存为测试点</button>
-          <button class="secondary-button" disabled={stress.running} onclick={() => void stress.debugFailure()}>调试此用例</button>
+          <button class="primary-button" disabled={stress.replayMode || stress.running} onclick={() => void stress.saveFailureAsTestcase()}>保存为测试点</button>
+          <button class="secondary-button" disabled={stress.running || stress.replayMode} onclick={() => void stress.debugFailure()}>调试此用例</button>
+          <button class="secondary-button" disabled={stress.running || stress.exporting || !stress.failure.replay} title="保存编译时源码、种子、规则、输入输出与编译参数；自定义头文件需另行携带" aria-busy={stress.exporting} onclick={() => void stress.exportReplay()}>{stress.exporting ? "正在导出…" : "导出重放包"}</button>
           <button class="secondary-button" onclick={() => void stress.copyFailureInput()}>复制输入</button>
-          <button class="secondary-button" disabled={stress.running || (!stress.infinite && stress.failure.index >= stress.iterations)} onclick={() => void stress.continueAfterFailure()}>继续对拍</button>
+          <button class="secondary-button" disabled={stress.running || stress.replayMode || (!stress.infinite && stress.failure.index >= stress.iterations)} onclick={() => void stress.continueAfterFailure()}>继续对拍</button>
         </div>
+        {#if stress.replayMode}<p class="stress-start-hint">已从重放包在临时目录运行双方源码，工作区文件保持原样。{stress.failure.replay?.solutionName} · {stress.failure.replay?.bruteName}</p>{/if}
         <div class="stress-failure-meta">
           <span>待测程序：{stress.failure.solutionTimeMs}ms{stress.failure.solutionExitCode === undefined ? "" : ` · 退出码 ${stress.failure.solutionExitCode}`}</span>
           <span>暴力程序：{stress.failure.bruteTimeMs}ms{stress.failure.bruteExitCode === undefined ? "" : ` · 退出码 ${stress.failure.bruteExitCode}`}</span>

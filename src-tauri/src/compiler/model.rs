@@ -7,7 +7,7 @@ pub enum CompileProfile {
     Debug,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompilerConfig {
     pub compiler_path: String,

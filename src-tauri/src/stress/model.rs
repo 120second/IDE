@@ -36,7 +36,7 @@ pub struct StressRunRequest {
     pub initial_elapsed_ms: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StressStats {
     pub total_cases: u64,
@@ -56,7 +56,7 @@ pub struct StressCasePassed {
     pub stats: StressStats,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StressFailure {
     pub index: u64,
@@ -73,6 +73,22 @@ pub struct StressFailure {
     pub solution_time_ms: u64,
     pub brute_time_ms: u64,
     pub stats: StressStats,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<StressReplayContext>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StressReplayContext {
+    pub app_version: String,
+    pub solution_name: String,
+    pub brute_name: String,
+    pub solution_source: String,
+    pub brute_source: String,
+    pub generator_profile: VisualGeneratorProfile,
+    pub compiler_config: CompilerConfig,
+    pub timeout_ms: u64,
+    pub max_output_bytes: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,10 +100,16 @@ pub struct StressSummary {
     pub next_seed: String,
     pub stats: StressStats,
     pub failure: Option<StressFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replay_result: Option<StressFailure>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum StressEvent {
     State {
         session_id: String,
@@ -104,6 +126,29 @@ pub enum StressEvent {
     },
     Failure {
         session_id: String,
-        failure: StressFailure,
+        failure: Box<StressFailure>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn events_include_camel_case_session_ids() {
+        for event in [
+            StressEvent::State {
+                session_id: "s".into(),
+                status: StressStatus::Running,
+                message: "running".into(),
+            },
+            StressEvent::CasesPassed {
+                session_id: "s".into(),
+                results: Vec::new(),
+            },
+        ] {
+            let json = serde_json::to_value(event).unwrap();
+            assert_eq!(json["sessionId"], "s");
+            assert!(json.get("session_id").is_none());
+        }
+    }
 }

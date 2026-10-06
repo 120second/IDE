@@ -687,7 +687,8 @@ impl ClangdSession {
         let Ok(path) = path_from_uri(uri) else {
             return;
         };
-        if !crate::paths::is_within(&self.workspace_root, &path) {
+        let comparable = dunce::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if !crate::paths::is_within(&self.workspace_root, &comparable) {
             return;
         }
         let version = params.get("version").and_then(Value::as_i64);

@@ -164,6 +164,8 @@ pub fn run() {
             commands::debugger::set_debug_breakpoint,
             commands::debugger::remove_debug_breakpoint,
             commands::stress::start_stress_test,
+            commands::stress::export_stress_replay,
+            commands::stress::replay_stress_test,
             commands::stress::stop_stress_test,
             commands::testcase::list_testcases,
             commands::testcase::create_testcase,

@@ -1,6 +1,6 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { chooseCppSource, startStressTest, stopStressTest } from "../api/stress";
+import { chooseCppSource, chooseReplayFile, exportStressReplay, replayStressTest, startStressTest, stopStressTest } from "../api/stress";
 import type { EditorWorkspace } from "../editor/workspace.svelte";
 import type {
   StressEvent,
@@ -45,10 +45,14 @@ export class StressStore {
   stats = $state.raw<StressStats>({ ...EMPTY_STATS });
   failure = $state<StressFailure>();
   notice = $state("");
+  exporting = $state(false);
+  replayMode = $state(false);
 
   private unlisten: UnlistenFn | undefined;
   private sequence = 0;
   private disposed = false;
+  private cancelRequested = false;
+  private lastBrutePath = "";
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -80,7 +84,8 @@ export class StressStore {
     this.disposed = true;
     this.unlisten?.();
     this.unlisten = undefined;
-    if (this.running) void stopStressTest();
+    this.cancelRequested = true;
+    if (this.running) void stopStressTest().catch(() => undefined);
   }
 
   async chooseBrute(): Promise<void> {
@@ -107,6 +112,7 @@ export class StressStore {
   async stop(): Promise<void> {
     if (!this.running || this.stopping) return;
     this.stopping = true;
+    this.cancelRequested = true;
     try {
       await stopStressTest();
     } catch (error) {
@@ -116,13 +122,17 @@ export class StressStore {
   }
 
   async continueAfterFailure(): Promise<void> {
-    if (!this.failure || this.running) return;
+    if (!this.failure || this.running || this.replayMode) return;
+    if (!samePath(this.editor.activeTab?.path ?? "", this.solutionPath) || !samePath(this.brutePath, this.lastBrutePath)) {
+      this.error = "待测程序或暴力程序已切换，请开始新的对拍。";
+      return;
+    }
     await this.launch(true);
   }
 
   async saveFailureAsTestcase(): Promise<void> {
     const failure = this.failure;
-    if (!failure || !this.solutionPath) return;
+    if (!failure || !this.solutionPath || this.replayMode) return;
     await this.execution.syncActiveSource(this.solutionPath, true);
     const saved = await this.execution.saveTestcase({
       sourcePath: this.solutionPath,
@@ -137,7 +147,7 @@ export class StressStore {
 
   async debugFailure(): Promise<void> {
     const failure = this.failure;
-    if (!failure || this.running || this.debuggerStore.active) return;
+    if (!failure || this.running || this.debuggerStore.active || this.replayMode) return;
     if (!samePath(this.editor.activeTab?.path ?? "", this.solutionPath)) {
       await this.editor.openFile(this.solutionPath);
     }
@@ -165,10 +175,53 @@ export class StressStore {
     this.message = "";
     this.error = "";
     this.notice = "";
+    this.replayMode = false;
+  }
+
+  async exportReplay(): Promise<void> {
+    const failure = this.failure;
+    if (!failure?.replay || this.exporting || this.running) return;
+    this.exporting = true;
+    this.error = "";
+    try {
+      if (await exportStressReplay(failure)) this.notice = "重放包已导出，包含双方源码和完整输入输出。";
+    } catch (error) { this.error = errorMessage(error); }
+    finally { this.exporting = false; }
+  }
+
+  async importReplay(): Promise<void> {
+    if (this.running || this.execution.running || this.execution.compiling || this.debuggerStore.active || this.disposed) return;
+    this.running = true;
+    this.cancelRequested = false;
+    const previousStatus = this.status;
+    let launched = false;
+    try {
+      const path = await chooseReplayFile();
+      if (!path || this.cancelRequested || this.disposed) return;
+      const sessionId = `replay-${Date.now()}-${++this.sequence}`;
+      this.sessionId = sessionId;
+      this.replayMode = true;
+      this.failure = undefined;
+      this.logs = [];
+      this.stats = { ...EMPTY_STATS };
+      this.error = this.notice = "";
+      this.status = "compiling";
+      this.message = "正在编译并重放保存的输入…";
+      launched = true;
+      const result = await replayStressTest(path, sessionId, this.settings.value.compilerPath);
+      if (!this.disposed) this.applySummary(result);
+    } catch (error) {
+      this.status = "error";
+      this.message = this.error = errorMessage(error);
+      launched = true;
+    } finally {
+      if (!launched) this.status = previousStatus;
+      this.running = this.stopping = false;
+    }
   }
 
   private async launch(continuing: boolean): Promise<void> {
-    if (this.running || this.execution.running || this.execution.compiling || this.debuggerStore.active) return;
+    if (this.running || this.execution.running || this.execution.compiling || this.debuggerStore.active || this.disposed) return;
     const active = this.editor.activeTab;
     if (!active?.path?.toLowerCase().endsWith(".cpp")) {
       this.error = "请先打开作为待测程序的工作区 .cpp 文件。";
@@ -198,9 +251,25 @@ export class StressStore {
       this.error = "种子必须是 uint64 十进制整数。";
       return;
     }
-    if (active.dirty && !(await this.editor.saveActive())) {
-      this.error = this.editor.notice;
+    this.running = true;
+    this.cancelRequested = false;
+    this.stopping = false;
+    try {
+      if (active.dirty && !(await this.editor.saveActive())) {
+        this.error = this.editor.notice;
+        this.running = false;
+        return;
+      }
+      if (this.cancelRequested || this.disposed || !samePath(this.editor.activeTab?.path ?? "", active.path)) {
+        this.running = false;
+        return;
+      }
+    } catch (error) {
+      this.running = false;
+      this.error = errorMessage(error);
       return;
+    } finally {
+      if (!this.running) this.stopping = false;
     }
 
     const previousFailure = continuing ? this.failure : undefined;
@@ -209,6 +278,8 @@ export class StressStore {
     const sessionId = `stress-${Date.now()}-${++this.sequence}`;
     this.sessionId = sessionId;
     this.solutionPath = active.path;
+    this.lastBrutePath = this.brutePath;
+    this.replayMode = false;
     this.running = true;
     this.stopping = false;
     this.status = "compiling";
@@ -245,7 +316,8 @@ export class StressStore {
       initialElapsedMs: initialStats.elapsedMs,
     };
     try {
-      this.applySummary(await startStressTest(request));
+      const result = await startStressTest(request);
+      if (!this.disposed) this.applySummary(result);
     } catch (error) {
       this.status = "error";
       this.error = errorMessage(error);
@@ -259,7 +331,7 @@ export class StressStore {
   }
 
   private handleEvent(event: StressEvent): void {
-    if (event.sessionId !== this.sessionId) return;
+    if (this.disposed || event.sessionId !== this.sessionId) return;
     if (event.kind === "state") {
       this.status = event.status;
       this.message = event.message;
@@ -288,7 +360,7 @@ export class StressStore {
     this.status = summary.status;
     this.message = summary.message;
     this.stats = summary.stats;
-    if (summary.failure) this.failure = summary.failure;
+    if (summary.failure || summary.replayResult) this.failure = summary.failure ?? summary.replayResult;
     this.seed = summary.nextSeed;
   }
 

@@ -175,7 +175,7 @@ fn validate(snapshot: &EditorRecoverySnapshot) -> AppResult<()> {
     Ok(())
 }
 
-fn atomic_write(target: &Path, bytes: &[u8]) -> AppResult<()> {
+pub(crate) fn atomic_write(target: &Path, bytes: &[u8]) -> AppResult<()> {
     let parent = target.parent().ok_or_else(|| {
         recovery_error(format!("recovery file has no parent: {}", target.display()))
     })?;

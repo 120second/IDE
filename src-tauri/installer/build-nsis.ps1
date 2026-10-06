@@ -1,9 +1,11 @@
+param([string]$ExecutablePath)
+
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\tauri.conf.json') -Raw | ConvertFrom-Json
 $version = $config.version
-$appExe = Join-Path $PSScriptRoot '..\target\release\lightcp.exe'
+$appExe = if ($ExecutablePath) { (Resolve-Path -LiteralPath $ExecutablePath).Path } else { Join-Path $PSScriptRoot '..\target\release\lightcp.exe' }
 $outputDirectory = Join-Path $projectRoot 'release'
 $outputExe = Join-Path $outputDirectory "LightCP_$($version)_x64-setup.exe"
 $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'

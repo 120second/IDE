@@ -51,6 +51,19 @@ export interface StressFailure {
   solutionTimeMs: number;
   bruteTimeMs: number;
   stats: StressStats;
+  replay?: StressReplayContext;
+}
+
+export interface StressReplayContext {
+  appVersion: string;
+  solutionName: string;
+  bruteName: string;
+  solutionSource: string;
+  bruteSource: string;
+  generatorProfile: VisualGeneratorProfile;
+  compilerConfig: CompilerConfig;
+  timeoutMs: number;
+  maxOutputBytes: number;
 }
 
 export interface StressSummary {
@@ -60,6 +73,7 @@ export interface StressSummary {
   nextSeed: string;
   stats: StressStats;
   failure?: StressFailure;
+  replayResult?: StressFailure;
 }
 
 export type StressEvent =
