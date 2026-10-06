@@ -4,6 +4,13 @@
     | "testcases"
     | "search"
     | "templates"
+    | "community"
+    | "user"
+    | "message"
+    | "send"
+    | "camera"
+    | "map-pin"
+    | "chevron-left"
     | "debug"
     | "judge"
     | "settings"
@@ -72,6 +79,20 @@
     <circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4.5 4.5" />
   {:else if name === "templates"}
     <path d="M5 3.5h10l4 4v13H5z" /><path d="M14.5 3.5V8H19M8 12h8M8 16h5" />
+  {:else if name === "community"}
+    <circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.2" /><path d="M3.5 19c.5-3.5 2.3-5.5 5.5-5.5s5 2 5.5 5.5M14 14c3.2-.5 5.4 1.1 6 4" />
+  {:else if name === "user"}
+    <circle cx="12" cy="8" r="3.5" /><path d="M5 20c.5-4.5 2.8-7 7-7s6.5 2.5 7 7" />
+  {:else if name === "message"}
+    <path d="M4 5.5h16v11H9l-5 4z" /><path d="M8 9.5h8M8 13h5" />
+  {:else if name === "send"}
+    <path d="m3 11 17-8-7 18-2.5-7.5zM10.5 13.5 20 3" />
+  {:else if name === "camera"}
+    <path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z" /><circle cx="12" cy="13.5" r="3.2" />
+  {:else if name === "map-pin"}
+    <path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0z" /><circle cx="12" cy="10" r="2.2" />
+  {:else if name === "chevron-left"}
+    <path d="m15 5-7 7 7 7" />
   {:else if name === "debug"}
     <path d="M8 9h8M9 5l1.5 2M15 5l-1.5 2M7 13H4M20 13h-3M8 17l-2 2M16 17l2 2" />
     <rect x="7" y="7" width="10" height="12" rx="5" />

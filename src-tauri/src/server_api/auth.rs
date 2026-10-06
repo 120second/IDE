@@ -10,6 +10,14 @@ pub struct AuthUser {
     pub id: String,
     pub username: String,
     pub email: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub bio: String,
+    #[serde(default)]
+    pub location: String,
+    #[serde(default)]
+    pub avatar_data_url: String,
     pub created_at: String,
 }
 

@@ -34,6 +34,7 @@
     explorer: "资源管理器",
     testcases: "测试点",
     templates: "模板",
+    community: "社区",
     debug: "运行与调试",
     judge: "对拍",
   };
@@ -86,6 +87,8 @@
       <TestcasePanel {workspace} {execution} {shell} {settings} {ux} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "templates"}
       <TemplateSidebar {templateStore} />
+    {:else if shell.activeActivity === "community"}
+      <div></div>
     {:else if shell.activeActivity === "debug"}
       <DebugPanel {debug} {execution} {workspace} />
     {:else if shell.activeActivity === "judge"}

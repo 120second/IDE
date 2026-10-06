@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod community;
 pub mod templates;
 
 use std::time::Duration;
@@ -167,11 +168,13 @@ fn validate_base_url(base_url: &str) -> AppResult<()> {
 
 async fn response_error(response: reqwest::Response) -> AppError {
     let status = response.status();
-    let message = response
-        .json::<ErrorEnvelope>()
-        .await
-        .map(|value| value.error.message)
-        .unwrap_or_else(|_| format!("server returned HTTP {status}"));
+    let message = match response.json::<ErrorEnvelope>().await {
+        Ok(value) => value.error.message,
+        Err(_) if status == StatusCode::NOT_FOUND => {
+            "云端服务版本过旧，暂不支持此功能。请更新服务器后重试。".to_owned()
+        }
+        Err(_) => format!("云端服务返回 HTTP {status}。"),
+    };
     if status == StatusCode::UNAUTHORIZED {
         AppError::Authentication(message)
     } else {

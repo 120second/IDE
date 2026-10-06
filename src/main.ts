@@ -4,6 +4,7 @@ import "./app.css";
 import "./workbench.css";
 import "./appearance.css";
 import "./auth.css";
+import "./community.css";
 
 const target = document.getElementById("app");
 

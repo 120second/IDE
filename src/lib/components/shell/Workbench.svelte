@@ -38,6 +38,7 @@
   import EditorBreadcrumbs from "../editor/EditorBreadcrumbs.svelte";
   import SettingsMenu from "./SettingsMenu.svelte";
   import RandomGenerator from "../testcases/random/RandomGenerator.svelte";
+  import CommunityHub from "../community/CommunityHub.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -104,6 +105,7 @@
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
+    command("view.community", "打开 LightCP 社区", "视图", undefined, () => showActivity("community")),
     command("view.generator", "打开随机数据生成器", "竞赛", undefined, () => shell.openGenerator()),
     command("view.settings", "打开设置", "视图", undefined, () => openSettingsPage("theme")),
     command("view.problems", "显示问题面板", "视图", undefined, () => shell.showBottomPanel("problems")),
@@ -501,7 +503,7 @@
       />
     {/if}
     <div class="workbench">
-      {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge"}
+      {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge" && shell.activeActivity !== "community"}
         <Sidebar
           {shell}
           {workspace}
@@ -524,6 +526,8 @@
             close={() => shell.closeThemeStudio()}
             setDirty={(dirty) => shell.setThemeStudioDirty(dirty)}
           />
+        {:else if shell.activeActivity === "community" && !shell.zenMode}
+          <CommunityHub {auth} {shell} {ux} />
         {:else if shell.activeActivity === "templates" && !shell.zenMode}
           <TemplateCenter {templateStore} {auth} {shell} />
         {:else if shell.activeActivity === "judge" && !shell.zenMode}
@@ -636,6 +640,7 @@
     openSettings={openSettingsPage}
     {openSnippets}
     openTasks={() => showActivity("testcases")}
+    openCommunity={() => showActivity("community")}
     username={auth.user?.username ?? ""}
     logout={() => void auth.signOut()}
   />

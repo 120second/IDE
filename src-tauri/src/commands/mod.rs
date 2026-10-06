@@ -2,6 +2,7 @@ pub mod appearance;
 pub mod archive;
 pub mod auth;
 pub mod cloud_templates;
+pub mod community;
 pub mod compiler;
 pub mod debugger;
 pub mod filesystem;

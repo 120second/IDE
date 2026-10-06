@@ -11,6 +11,7 @@
     openSettings: (page: SettingsPage) => void;
     openSnippets: () => void;
     openTasks: () => void;
+    openCommunity: () => void;
     username: string;
     logout: () => void;
   }
@@ -23,6 +24,7 @@
     openSettings,
     openSnippets,
     openTasks,
+    openCommunity,
     username,
     logout,
   }: Props = $props();
@@ -134,6 +136,7 @@
 
   <button data-main-item role="menuitem" onclick={() => choose(openSnippets)}><span>代码片段</span></button>
   <button data-main-item role="menuitem" onclick={() => choose(openTasks)}><span>测试与任务</span></button>
+  <button data-main-item role="menuitem" onclick={() => choose(openCommunity)}><span>LightCP 社区</span></button>
 
   <span class="settings-menu-separator" role="separator"></span>
   {#if username}

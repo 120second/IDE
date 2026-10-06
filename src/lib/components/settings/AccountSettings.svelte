@@ -3,6 +3,7 @@
   import type { AuthStore } from "../../stores/auth.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import type { UxStore } from "../../stores/ux.svelte";
+  import CommunityAvatar from "../community/CommunityAvatar.svelte";
 
   interface Props {
     auth: AuthStore;
@@ -91,7 +92,7 @@
   {#if auth.user}
     <div class="account-card">
       <div class="account-identity">
-        <span class="account-avatar" aria-hidden="true">{auth.user.username.slice(0, 1).toUpperCase()}</span>
+        <CommunityAvatar username={auth.user.username} displayName={auth.user.displayName} avatarDataUrl={auth.user.avatarDataUrl} size="small" />
         <div><strong>{auth.user.username}</strong><small>{auth.user.email}</small></div>
       </div>
       <button class="secondary-button compact-button" onclick={() => void auth.signOut()}>退出登录</button>

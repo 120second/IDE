@@ -38,6 +38,16 @@
   </div>
   <div class="activity-footer">
     <button
+      class:active={shell.activeActivity === "community"}
+      aria-label="社区"
+      aria-pressed={shell.activeActivity === "community"}
+      title="社区"
+      onclick={() => shell.selectActivity("community")}
+    >
+      <Icon name="community" size={21} />
+      <span>社区</span>
+    </button>
+    <button
       class:active={settingsMenuOpen || shell.settingsWindowOpen}
       aria-label="设置"
       aria-haspopup="menu"

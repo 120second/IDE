@@ -19,6 +19,10 @@ const user = {
   id: "user-1",
   username: "alice",
   email: "alice@example.com",
+  displayName: "",
+  bio: "",
+  location: "",
+  avatarDataUrl: "",
   createdAt: "2026-09-23T00:00:00Z",
 };
 

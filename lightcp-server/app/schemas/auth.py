@@ -56,6 +56,10 @@ class UserResponse(ApiModel):
     id: str
     username: str
     email: str
+    display_name: str = ""
+    bio: str = ""
+    location: str = ""
+    avatar_data_url: str = ""
     created_at: datetime
 
 

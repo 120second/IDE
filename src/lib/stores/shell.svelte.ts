@@ -2,6 +2,7 @@ export type ActivityId =
   | "explorer"
   | "testcases"
   | "templates"
+  | "community"
   | "debug"
   | "judge";
 
@@ -42,7 +43,7 @@ export class ShellStore {
       this.themeStudioOpen = false;
       this.themeStudioDirty = false;
     }
-    if (activity === "judge") {
+    if (activity === "judge" || activity === "community") {
       this.activeActivity = activity;
       this.sidebarVisible = true;
       return;
