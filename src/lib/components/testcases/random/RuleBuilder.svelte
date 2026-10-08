@@ -12,6 +12,8 @@
     scopeBefore,
     suggestIntegerName,
     treeNode,
+    testCaseWrapper,
+    toggleTestCases,
     variable,
     wrapNodesInRepeat,
     type GeneratorTemplateId,
@@ -22,6 +24,7 @@
   import RuleNode from "./RuleNode.svelte";
   import TemplateMenu from "./TemplateMenu.svelte";
   import type { UxStore } from "../../../stores/ux.svelte";
+  import { detectPreset, FORMAT_PRESETS } from "../../../generator/formatPresets";
 
   interface Props {
     nodes: VisualNode[];
@@ -32,11 +35,13 @@
   }
 
   let { nodes, diagnostics, change, ux, busy = false }: Props = $props();
-  let newestNodeId = $state("");
+  let replacedNodes = $state.raw<VisualNode[]>();
+  let selectedPreset = $derived(detectPreset(nodes));
+  let multiTest = $derived(Boolean(testCaseWrapper(nodes)));
 
   function clearAll(): void {
     if (busy || nodes.length === 0) return;
-    newestNodeId = "";
+    replacedNodes = nodes;
     change([]);
   }
 
@@ -52,7 +57,6 @@
       : kind === "tree" ? treeNode(size ? variable(size) : constant(10))
       : kind === "graph" ? graphNode(size ? variable(size) : constant(10), edges ? variable(edges) : constant(10))
       : { type: "matrix", id: newRuleId("matrix"), name: "mat", rows: size ? variable(size) : constant(10), columns: size ? variable(size) : constant(10), minimum: constant(1), maximum: constant(1000) };
-    newestNodeId = node.id;
     change([...nodes, node]);
   }
 
@@ -76,32 +80,43 @@
 
   function wrapFrom(index: number): void {
     const next = wrapNodesInRepeat(nodes, index);
-    newestNodeId = next[index]?.id ?? "";
     change(next);
   }
 
-  async function applyTemplate(template: GeneratorTemplateId): Promise<void> {
-    if (!await ux.confirm({
-      title: "替换输入格式",
-      message: "应用模板会替换当前生成规则。已保存的固定测试点不会受到影响。",
-      confirmLabel: "应用模板",
-      danger: true,
-    })) return;
-    newestNodeId = "";
-    change(createTemplate(template));
+  function applyTemplate(template: GeneratorTemplateId): void {
+    if (busy) return;
+    if (selectedPreset === template) return;
+    replacedNodes = nodes;
+    const next = createTemplate(template);
+    change(multiTest && template !== "multiTest" ? toggleTestCases(next) : next);
+  }
+
+  function restore(): void {
+    if (!replacedNodes || busy) return;
+    change(replacedNodes);
+    replacedNodes = undefined;
   }
 </script>
 
 <section class="rule-builder">
   <header class="input-format-header">
-    <div><strong>输入格式</strong><span>{nodes.length} 项</span></div>
+    <div><strong>输入格式</strong><span>先选结构，再改范围</span></div>
     <div class="input-format-actions">
-      <button type="button" class="secondary-button" onclick={clearAll} disabled={busy || nodes.length === 0} title="清空所有输入规则和循环内容"><Icon name="trash" size={13} />一键清空</button>
-      <TemplateMenu apply={applyTemplate} label="套用常用格式…" />
+      {#if replacedNodes}<button type="button" class="format-restore" disabled={busy} onclick={restore} title="恢复替换或清空之前的输入格式"><Icon name="undo" size={13} />恢复之前的格式</button>{/if}
     </div>
   </header>
-  <p class="input-format-hint">从上到下生成数据，循环内的内容会重复。点击任意一项可编辑。</p>
+  <div class="format-preset-grid" role="group" aria-label="常用输入格式">
+    {#each FORMAT_PRESETS as preset}
+      <button type="button" class:active={selectedPreset === preset.id} aria-pressed={selectedPreset === preset.id} disabled={busy} onclick={() => applyTemplate(preset.id)}><strong>{preset.title}</strong><span>{preset.example}</span></button>
+    {/each}
+  </div>
+  <div class="format-options">
+    <label class="format-multi-test"><input type="checkbox" checked={multiTest} disabled={busy || !nodes.length} onchange={() => { replacedNodes = nodes; change(toggleTestCases(nodes)); }} />多组测试 T</label>
+    <TemplateMenu apply={applyTemplate} label="其他格式…" disabled={busy} />
+  </div>
+  <div class="format-edit-heading"><strong>编辑参数</strong><span title="支持加减乘除、取余和括号，除法取整">支持 <code>3n</code>、<code>n*m</code>、<code>(n+1)/2</code></span></div>
 
+  <fieldset class="format-rule-controls" disabled={busy} aria-label="编辑输入参数">
   <div class="rule-list">
     {#each nodes as node, index (node.id)}
       <RuleNode
@@ -111,7 +126,7 @@
         scope={scopeBefore(nodes, index)}
         depth={0}
         position={String(index + 1)}
-        startExpanded={node.id === newestNodeId}
+        startExpanded={true}
         {diagnostics}
         {ux}
         change={(updated) => update(index, updated)}
@@ -127,8 +142,11 @@
     <div class="rule-composer-actions">
       <span>添加</span>
       <button type="button" class="secondary-button" onclick={() => add("integer")}><Icon name="plus" size={13} />输入行</button>
+      <button type="button" class="secondary-button" onclick={() => add("array")}>数组</button>
       <button type="button" class="secondary-button repeat-action" onclick={() => add("repeat")}><Icon name="repeat" size={13} />循环</button>
       <AddRuleMenu {add} compact label="更多类型" />
     </div>
   </div>
+  <button type="button" class="format-clear" onclick={clearAll} disabled={busy || !nodes.length}><Icon name="trash" size={13} />清空格式</button>
+  </fieldset>
 </section>

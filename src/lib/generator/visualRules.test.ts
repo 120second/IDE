@@ -4,6 +4,7 @@ import {
   createTemplate,
   defaultVisualProfile,
   integerField,
+  arrayField,
   line,
   repeatNode,
   scopeAfterLineField,
@@ -12,7 +13,11 @@ import {
   validateVisualProfile,
   variable,
   wrapNodesInRepeat,
+  toggleTestCases,
+  testCaseWrapper,
 } from "./visualRules";
+import { detectPreset, FORMAT_PRESETS, formatOutline } from "./formatPresets";
+import { parseValueExpression } from "./valueExpression";
 import type { VisualGeneratorProfile, VisualNode } from "../types/generator";
 
 function profile(nodes: VisualNode[]): VisualGeneratorProfile {
@@ -20,6 +25,19 @@ function profile(nodes: VisualNode[]): VisualGeneratorProfile {
 }
 
 describe("visual generator rules", () => {
+  it("accepts arithmetic in lengths, bounds and loops and preserves it on reload", () => {
+    const nodes: VisualNode[] = [
+      line([integerField("n"), integerField("m", constant(1), parseValueExpression("3n+1")!)]),
+      line([{ type: "string", id: "s", name: "s", alphabet: "lowercase", length: parseValueExpression("3n")! }]),
+      line([arrayField("a", parseValueExpression("n*m")!)]),
+      { type: "repeat", id: "loop", count: parseValueExpression("(n+1)/2")!, children: [line([integerField("x")])] },
+    ];
+    const original = profile(nodes);
+    expect(validateVisualProfile(original)).toEqual([]);
+    expect(validateVisualProfile(JSON.parse(JSON.stringify(original)))).toEqual([]);
+    const invalid = profile([line([integerField("n")]), line([arrayField("a", parseValueExpression("3*m")!)])]);
+    expect(validateVisualProfile(invalid)[0].message).toContain("m");
+  });
   it("serializes and deserializes a versioned rule tree", () => {
     const original = profile(createTemplate("nqQueries"));
     expect(JSON.parse(JSON.stringify(original))).toEqual(original);
@@ -111,5 +129,37 @@ describe("visual generator rules", () => {
     expect(suggestIntegerName(["n"])).toBe("m");
     expect(suggestIntegerName(["t", "n", "m"])).toBe("q");
     expect(suggestIntegerName(["n", "m", "t", "q", "k", "x1"])).toBe("x2");
+  });
+
+  it("wraps any common format in T test cases while preserving its IDs and ranges", () => {
+    for (const preset of FORMAT_PRESETS) {
+      const original = createTemplate(preset.id);
+      const wrapped = toggleTestCases(original);
+      expect(testCaseWrapper(wrapped)?.children).toEqual(original);
+      expect(validateVisualProfile(profile(wrapped))).toEqual([]);
+      expect(toggleTestCases(wrapped)).toEqual(original);
+      expect(detectPreset(wrapped)).toBe(preset.id);
+    }
+  });
+
+  it("builds the matrix format and outlines actual dependent rows", () => {
+    const nodes = createTemplate("matrix");
+    expect(validateVisualProfile(profile(nodes))).toEqual([]);
+    expect(formatOutline(nodes)).toEqual(["n m", "a[1][1] … a[1][m]", "… 共 n 行"]);
+    expect(formatOutline(createTemplate("nqQueries"))).toContain("  l r");
+  });
+
+  it("marks reversed constant or same-variable bounds before generation", () => {
+    const invalid = line([integerField("n", constant(10), constant(1))]);
+    expect(validateVisualProfile(profile([invalid]))[0].message).toContain("下界不能大于上界");
+    const dependent = line([integerField("n"), integerField("m", variable("n", 1), variable("n", -1))]);
+    expect(validateVisualProfile(profile([dependent]))[0].fieldId).toBe(dependent.fields[1].id);
+    const matrix = createTemplate("matrix");
+    if (matrix[1].type === "matrix") matrix[1].rows = constant(-1);
+    expect(validateVisualProfile(profile(matrix)).some((item) => item.message.includes("行数不能为负"))).toBe(true);
+  });
+
+  it("allows a length and its dependent array on the same output line", () => {
+    expect(validateVisualProfile(profile([line([integerField("n"), arrayField("a", variable("n"))])]))).toEqual([]);
   });
 });

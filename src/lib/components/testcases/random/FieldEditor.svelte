@@ -20,8 +20,8 @@
 </script>
 
 <div class:invalid={diagnostics.length > 0} class:scalar-field={field.type === "integer"} class="field-editor">
-  <header><strong>{field.type === "integer" ? "整数" : field.type === "array" ? "数组" : field.type === "string" ? "字符串" : "排列"}</strong><button type="button" title="删除字段" aria-label={`删除字段 ${field.name || "未命名"}`} onclick={remove}><Icon name="trash" size={13} /></button></header>
-  <label><span>变量名</span><input spellcheck="false" autocomplete="off" value={field.name} oninput={(event) => setName(event.currentTarget.value)} /></label>
+  {#if field.type !== "integer"}<header><strong>{field.type === "array" ? "数组" : field.type === "string" ? "字符串" : "排列"}</strong></header>{/if}
+  <label class="field-name"><span>{field.type === "integer" ? "整数变量" : "名称"}</span><input aria-label={`${field.name || "未命名"}的变量名`} spellcheck="false" autocomplete="off" value={field.name} oninput={(event) => setName(event.currentTarget.value)} /></label>
 
   {#if field.type === "integer"}
     <div class="range-editor">
@@ -36,13 +36,15 @@
       <span>～</span>
       <ValueExpressionInput label="元素上界" value={field.maximum} {variables} change={(maximum) => change({ ...field, maximum })} />
     </div>
-    <label><span>数据策略</span><select value={field.strategy ?? ""} onchange={(event) => change({ ...field, strategy: event.currentTarget.value ? event.currentTarget.value as GeneratorStrategy : undefined })}><option value="">继承全局</option>{#each STRATEGIES as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
+    <label><span>数组分布</span><select value={field.strategy ?? ""} onchange={(event) => change({ ...field, strategy: event.currentTarget.value ? event.currentTarget.value as GeneratorStrategy : undefined })}><option value="">跟随生成设置</option>{#each STRATEGIES as option}<option value={option.value}>{option.label}</option>{/each}</select></label>
   {:else if field.type === "string"}
     <ValueExpressionInput label="字符串长度" value={field.length} {variables} change={(length) => change({ ...field, length })} />
     <label><span>字符集</span><select value={field.alphabet} onchange={(event) => change({ ...field, alphabet: event.currentTarget.value as "binary" | "lowercase" })}><option value="lowercase">小写字母</option><option value="binary">二进制</option></select></label>
   {:else}
     <ValueExpressionInput label="排列长度" value={field.length} {variables} change={(length) => change({ ...field, length })} />
   {/if}
+
+  <button type="button" class="field-remove" title="删除字段" aria-label={`删除字段 ${field.name || "未命名"}`} onclick={remove}><Icon name="close" size={13} /></button>
 
   {#each diagnostics as diagnostic}<p class="rule-error">{diagnostic.message}</p>{/each}
 </div>

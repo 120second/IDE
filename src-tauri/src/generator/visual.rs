@@ -62,13 +62,6 @@ fn validate_nodes(
                     diagnostics.push(VisualDiagnostic::node(id, "一行中至少需要一个字段。"));
                     continue;
                 }
-                if fields.len() > 1
-                    && fields
-                        .iter()
-                        .any(|field| matches!(field, VisualField::Array { .. }))
-                {
-                    diagnostics.push(VisualDiagnostic::node(id, "数组当前必须单独占一行。"));
-                }
                 for field in fields {
                     *count = count.saturating_add(1);
                     validate_field(id, field, scope, diagnostics);
@@ -107,6 +100,7 @@ fn validate_nodes(
                 if let Some(weight) = weight {
                     validate_expression(id, None, "权值下界", &weight.minimum, scope, diagnostics);
                     validate_expression(id, None, "权值上界", &weight.maximum, scope, diagnostics);
+                    validate_static_range(id, None, &weight.minimum, &weight.maximum, diagnostics);
                 }
             }
             VisualNode::Graph {
@@ -136,6 +130,7 @@ fn validate_nodes(
                 validate_expression(id, None, "矩阵列数", columns, scope, diagnostics);
                 validate_expression(id, None, "元素下界", minimum, scope, diagnostics);
                 validate_expression(id, None, "元素上界", maximum, scope, diagnostics);
+                validate_static_range(id, None, minimum, maximum, diagnostics);
                 validate_static_nonnegative(id, None, "矩阵行数", rows, diagnostics);
                 validate_static_nonnegative(id, None, "矩阵列数", columns, diagnostics);
             }
@@ -159,6 +154,7 @@ fn validate_field(
             validate_name(node_id, Some(id), name, diagnostics);
             validate_expression(node_id, Some(id), "下界", minimum, scope, diagnostics);
             validate_expression(node_id, Some(id), "上界", maximum, scope, diagnostics);
+            validate_static_range(node_id, Some(id), minimum, maximum, diagnostics);
             if valid_name(name) && !scope.insert(name.clone()) {
                 diagnostics.push(VisualDiagnostic::field(
                     node_id,
@@ -179,6 +175,7 @@ fn validate_field(
             validate_expression(node_id, Some(id), "数组长度", length, scope, diagnostics);
             validate_expression(node_id, Some(id), "元素下界", minimum, scope, diagnostics);
             validate_expression(node_id, Some(id), "元素上界", maximum, scope, diagnostics);
+            validate_static_range(node_id, Some(id), minimum, maximum, diagnostics);
             validate_static_nonnegative(node_id, Some(id), "数组长度", length, diagnostics);
         }
         VisualField::String {
@@ -192,6 +189,38 @@ fn validate_field(
     }
 }
 
+fn validate_static_range(
+    node_id: &str,
+    field_id: Option<&String>,
+    minimum: &ValueExpression,
+    maximum: &ValueExpression,
+    diagnostics: &mut Vec<VisualDiagnostic>,
+) {
+    let reversed = match (minimum, maximum) {
+        (
+            ValueExpression::Variable {
+                name: left,
+                offset: left_offset,
+            },
+            ValueExpression::Variable {
+                name: right,
+                offset: right_offset,
+            },
+        ) => left == right && left_offset > right_offset,
+        _ => super::expression::constant_value(minimum)
+            .zip(super::expression::constant_value(maximum))
+            .is_some_and(|(left, right)| left > right),
+    };
+    if reversed {
+        push_diagnostic(
+            node_id,
+            field_id,
+            "范围下界不能大于上界，请调整这两个值。",
+            diagnostics,
+        );
+    }
+}
+
 fn validate_expression(
     node_id: &str,
     field_id: Option<&String>,
@@ -200,19 +229,14 @@ fn validate_expression(
     scope: &HashSet<String>,
     diagnostics: &mut Vec<VisualDiagnostic>,
 ) {
-    let message = match expression {
-        ValueExpression::Constant { value } => value
-            .trim()
-            .parse::<i64>()
-            .err()
-            .map(|_| format!("{label}必须是 int64 整数。")),
-        ValueExpression::Variable { name, .. } if !scope.contains(name) => {
-            Some(format!("{label}引用的变量“{name}”在当前作用域中不存在。"))
+    if let Err(message) = super::expression::evaluate(expression, &|name| {
+        if scope.contains(name) {
+            Ok(None)
+        } else {
+            Err(format!("引用的变量“{name}”在当前作用域中不存在。"))
         }
-        _ => None,
-    };
-    if let Some(message) = message {
-        push_diagnostic(node_id, field_id, message, diagnostics);
+    }) {
+        push_diagnostic(node_id, field_id, format!("{label}{message}"), diagnostics);
     }
 }
 
@@ -223,8 +247,8 @@ fn validate_static_nonnegative(
     expression: &ValueExpression,
     diagnostics: &mut Vec<VisualDiagnostic>,
 ) {
-    if let ValueExpression::Constant { value } = expression {
-        if value.trim().parse::<i64>().is_ok_and(|value| value < 0) {
+    if let Some(value) = super::expression::constant_value(expression) {
+        if value < 0 {
             push_diagnostic(
                 node_id,
                 field_id,
@@ -242,8 +266,8 @@ fn validate_static_positive(
     expression: &ValueExpression,
     diagnostics: &mut Vec<VisualDiagnostic>,
 ) {
-    if let ValueExpression::Constant { value } = expression {
-        if value.trim().parse::<i64>().is_ok_and(|value| value <= 0) {
+    if let Some(value) = super::expression::constant_value(expression) {
+        if value <= 0 {
             push_diagnostic(
                 node_id,
                 field_id,
@@ -316,6 +340,7 @@ mod tests {
     fn profile_round_trips_through_json() {
         let profile = VisualGeneratorProfile {
             version: 1,
+            seed_locked: false,
             strategy: GeneratorStrategy::Mixed,
             tree_shape: TreeShape::Balanced,
             seed: u64::MAX.to_string(),
@@ -341,6 +366,7 @@ mod tests {
     fn repeat_variables_do_not_escape_their_scope() {
         let profile = VisualGeneratorProfile {
             version: 1,
+            seed_locked: false,
             strategy: GeneratorStrategy::Random,
             tree_shape: TreeShape::Random,
             seed: "1".into(),
@@ -370,5 +396,57 @@ mod tests {
         let result = validate_visual(&profile);
         assert!(!result.valid);
         assert!(result.diagnostics.iter().any(|item| item.node_id == "tree"));
+    }
+
+    #[test]
+    fn reversed_bounds_are_reported_before_generation_for_fields_trees_and_matrices() {
+        let profile = VisualGeneratorProfile {
+            version: 1,
+            seed_locked: false,
+            strategy: GeneratorStrategy::Random,
+            tree_shape: TreeShape::Random,
+            seed: "1".into(),
+            nodes: vec![
+                VisualNode::Line {
+                    id: "line".into(),
+                    fields: vec![VisualField::Integer {
+                        id: "n".into(),
+                        name: "n".into(),
+                        minimum: constant(10),
+                        maximum: constant(1),
+                    }],
+                },
+                VisualNode::Tree {
+                    id: "tree".into(),
+                    nodes: constant(3),
+                    index_base: 1,
+                    shape: None,
+                    weight: Some(VisualRange {
+                        minimum: constant(2),
+                        maximum: constant(1),
+                    }),
+                },
+                VisualNode::Matrix {
+                    id: "matrix".into(),
+                    name: "a".into(),
+                    rows: constant(2),
+                    columns: constant(2),
+                    minimum: ValueExpression::Variable {
+                        name: "n".into(),
+                        offset: 1,
+                    },
+                    maximum: variable("n"),
+                    strategy: None,
+                },
+            ],
+        };
+        let result = validate_visual(&profile);
+        assert!(!result.valid);
+        assert_eq!(result.diagnostics.len(), 3);
+        assert!(result
+            .diagnostics
+            .iter()
+            .all(|item| item.message.contains("下界不能大于上界")));
+        assert_eq!(result.diagnostics[0].field_id.as_deref(), Some("n"));
     }
 }

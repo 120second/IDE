@@ -1,6 +1,8 @@
 <script lang="ts">
   import {
     fieldDiagnostics,
+    arrayField,
+    constant,
     integerField,
     newRuleId,
     scopeAfterLineField,
@@ -19,6 +21,21 @@
   }
 
   let { node, scope, diagnostics, change }: Props = $props();
+  let fieldNames = $state("");
+  let nameError = $state("");
+
+  function addNamedFields(): void {
+    const names = fieldNames.trim().split(/[\s,，]+/).filter(Boolean);
+    if (!names.length) return;
+    const available = scopeAfterLineField(node.fields, node.fields.length, scope);
+    if (names.some((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) || new Set([...available, ...names]).size !== available.length + names.length) {
+      nameError = "请使用未定义的变量名，多个名称用空格分隔。";
+      return;
+    }
+    change({ ...node, fields: [...node.fields, ...names.map((name) => integerField(name))] });
+    fieldNames = "";
+    nameError = "";
+  }
 
   function updateField(index: number, field: VisualField): void {
     change({ ...node, fields: node.fields.map((candidate, candidateIndex) => candidateIndex === index ? field : candidate) });
@@ -28,14 +45,16 @@
     change({ ...node, fields: node.fields.filter((_, candidateIndex) => candidateIndex !== index) });
   }
 
-  function addField(type: "integer" | "string" | "permutation"): void {
+  function addField(type: "integer" | "array" | "string" | "permutation"): void {
     const available = scopeAfterLineField(node.fields, node.fields.length, scope);
-    const fallback = available.at(-1) ?? "n";
+    const fallback = available.includes("n") ? "n" : available.at(-1);
+    const length = fallback ? variable(fallback) : constant(10);
     const field: VisualField = type === "integer"
       ? integerField(suggestIntegerName(available))
+      : type === "array" ? arrayField("a", length)
       : type === "string"
-        ? { type: "string", id: newRuleId("field"), name: "s", length: variable(fallback), alphabet: "lowercase" }
-        : { type: "permutation", id: newRuleId("field"), name: "p", length: variable(fallback) };
+        ? { type: "string", id: newRuleId("field"), name: "s", length, alphabet: "lowercase" }
+        : { type: "permutation", id: newRuleId("field"), name: "p", length };
     change({ ...node, fields: [...node.fields, field] });
   }
 </script>
@@ -50,10 +69,14 @@
       remove={() => removeField(index)}
     />
   {/each}
+  <details class="line-extra-fields line-field-tools">
+  <summary><Icon name="plus" size={12} />同行添加更多字段</summary>
   <div class="add-field-row">
-    <span>同一行添加</span>
-    <button type="button" onclick={() => addField("integer")}><Icon name="plus" size={12} />整数</button>
-    <button type="button" onclick={() => addField("string")}>字符串</button>
-    <button type="button" onclick={() => addField("permutation")}>排列</button>
+    <button type="button" onclick={() => addField("integer")}><Icon name="plus" size={12} />同行整数</button>
+    <label class="named-fields"><input aria-label="同行批量添加整数变量" placeholder="如 x y z，按 Enter 添加" spellcheck="false" autocomplete="off" bind:value={fieldNames} onkeydown={(event) => { if (event.key === "Enter") { event.preventDefault(); addNamedFields(); } }} /></label>
+    {#if fieldNames.trim()}<button type="button" onclick={addNamedFields}>添加</button>{/if}
   </div>
+  {#if nameError}<p class="rule-error" role="alert">{nameError}</p>{/if}
+  <div class="line-container-fields"><button type="button" onclick={() => addField("array")}>数组</button><button type="button" onclick={() => addField("string")}>字符串</button><button type="button" onclick={() => addField("permutation")}>排列</button></div>
+  </details>
 </div>

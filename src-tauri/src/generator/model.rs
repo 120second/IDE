@@ -87,6 +87,8 @@ pub struct VisualGeneratorProfile {
     pub strategy: GeneratorStrategy,
     pub tree_shape: TreeShape,
     pub seed: String,
+    #[serde(default)]
+    pub seed_locked: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,8 +180,32 @@ pub enum VisualField {
     rename_all_fields = "camelCase"
 )]
 pub enum ValueExpression {
-    Constant { value: String },
-    Variable { name: String, offset: i64 },
+    Constant {
+        value: String,
+    },
+    Variable {
+        name: String,
+        offset: i64,
+    },
+    Arithmetic {
+        operator: ArithmeticOperator,
+        left: Box<ValueExpression>,
+        right: Box<ValueExpression>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub enum ArithmeticOperator {
+    #[serde(rename = "+")]
+    Add,
+    #[serde(rename = "-")]
+    Subtract,
+    #[serde(rename = "*")]
+    Multiply,
+    #[serde(rename = "/")]
+    Divide,
+    #[serde(rename = "%")]
+    Remainder,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

@@ -48,9 +48,8 @@
   }
 
   let { node, index, total, scope, depth, position, startExpanded = false, diagnostics, change, duplicate, move, wrapFollowing, remove, ux }: Props = $props();
-  let expanded = $state(false);
+  let expanded = $state(true);
   let actionMenu = $state<{ x: number; y: number }>();
-  let newestChildId = $state("");
   let ownDiagnostics = $derived(nodeDiagnostics(diagnostics, node.id));
   let invalid = $derived(ownDiagnostics.length > 0);
   let orderLabel = $derived(position ?? String(index + 1));
@@ -92,7 +91,6 @@
     if (node.type !== "repeat") return;
     const available = scopeBefore(node.children, node.children.length, scope);
     const child = createNode(kind, available);
-    newestChildId = child.id;
     change({ ...node, children: [...node.children, child] });
   }
 
@@ -125,7 +123,6 @@
   function wrapChildrenFrom(childIndex: number): void {
     if (node.type !== "repeat" || depth >= 4) return;
     const children = wrapNodesInRepeat(node.children, childIndex, scope);
-    newestChildId = children[childIndex]?.id ?? "";
     change({ ...node, children });
   }
 </script>
@@ -137,7 +134,7 @@
       <span class="rule-kind">{presentation.kind}</span>
       <span class="rule-description">
         <strong class="rule-signature">{presentation.signature}</strong>
-        {#if presentation.details.length}
+        {#if presentation.details.length && !expanded}
           <span class="rule-facts">{#each presentation.details as detail}<span>{detail}</span>{/each}</span>
         {/if}
         {#if invalid}<span class="rule-summary-error">{ownDiagnostics[0]?.message}</span>{/if}
@@ -155,7 +152,7 @@
         <LineRule {node} {scope} {diagnostics} {change} />
       {:else if node.type === "repeat"}
         <ValueExpressionInput label="循环次数" value={node.count} variables={scope} change={(count) => change({ ...node, count })} />
-        <p class="rule-editor-hint">循环次数可以选择前面读入的 t、T、q 等整数，也可以填写常量。</p>
+        <p class="rule-editor-hint">下面的内容按顺序重复生成；每次循环会重新生成变量。</p>
       {:else if node.type === "tree"}
         <ValueExpressionInput label="节点数" value={node.nodes} variables={scope} change={(nodes) => change({ ...node, nodes })} />
         <div class="rule-inline-fields">
@@ -170,6 +167,7 @@
           <label><span>图类型</span><select value={node.kind} onchange={(event) => change({ ...node, kind: event.currentTarget.value as typeof node.kind })}><option value="simpleUndirected">简单无向图</option><option value="connectedUndirected">连通无向图</option><option value="dag">有向无环图</option></select></label>
           <label><span>编号方式</span><select value={node.indexBase} onchange={(event) => change({ ...node, indexBase: Number(event.currentTarget.value) as 0 | 1 })}><option value={1}>1 ～ n</option><option value={0}>0 ～ n-1</option></select></label>
         </div>
+        {#if node.kind === "connectedUndirected"}<p class="rule-editor-hint">连通图至少需要 n−1 条边，前面 m 的下界可填写 n-1。</p>{/if}
       {:else}
         <label><span>名称</span><input value={node.name} oninput={(event) => change({ ...node, name: event.currentTarget.value })} /></label>
         <div class="rule-inline-fields"><ValueExpressionInput label="行数" value={node.rows} variables={scope} change={(rows) => change({ ...node, rows })} /><ValueExpressionInput label="列数" value={node.columns} variables={scope} change={(columns) => change({ ...node, columns })} /></div>
@@ -194,7 +192,7 @@
             scope={scopeBefore(node.children, childIndex, scope)}
             depth={depth + 1}
             position={`${orderLabel}.${childIndex + 1}`}
-            startExpanded={child.id === newestChildId}
+            startExpanded={true}
             {diagnostics}
             {ux}
             change={(updated) => updateChild(childIndex, updated)}

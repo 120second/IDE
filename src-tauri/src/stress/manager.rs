@@ -717,6 +717,7 @@ mod tests {
         .unwrap();
         let profile = VisualGeneratorProfile {
             version: 1,
+            seed_locked: false,
             nodes: vec![VisualNode::Line {
                 id: "line".to_owned(),
                 fields: vec![VisualField::Integer {
@@ -855,6 +856,7 @@ mod tests {
             brute_path: "c:/WORK/a.cpp".to_owned(),
             generator_profile: VisualGeneratorProfile {
                 version: 1,
+                seed_locked: false,
                 nodes: Vec::new(),
                 strategy: GeneratorStrategy::Random,
                 tree_shape: TreeShape::Random,

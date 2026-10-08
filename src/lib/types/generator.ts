@@ -46,7 +46,8 @@ export interface GenerateResult {
 
 export type ValueExpression =
   | { type: "constant"; value: string }
-  | { type: "variable"; name: string; offset: number };
+  | { type: "variable"; name: string; offset: number }
+  | { type: "arithmetic"; operator: "+" | "-" | "*" | "/" | "%"; left: ValueExpression; right: ValueExpression };
 
 export interface VisualRange {
   minimum: ValueExpression;
@@ -123,6 +124,7 @@ export interface VisualGeneratorProfile {
   strategy: GeneratorStrategy;
   treeShape: TreeShape;
   seed: string;
+  seedLocked?: boolean;
 }
 
 export interface VisualDiagnostic {

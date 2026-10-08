@@ -98,6 +98,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn older_profiles_default_to_fresh_seeds() {
+        let profile: VisualGeneratorProfile = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "strategy": "random",
+            "treeShape": "random",
+            "seed": "42",
+            "nodes": []
+        }))
+        .unwrap();
+        assert!(!profile.seed_locked);
+        assert_eq!(profile.seed, "42");
+    }
+
+    #[test]
     fn profile_survives_database_round_trip() {
         let nonce = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -114,20 +128,37 @@ mod tests {
         database::initialize(&database_path).unwrap();
         let profile = VisualGeneratorProfile {
             version: 1,
+            seed_locked: true,
             strategy: GeneratorStrategy::Mixed,
             tree_shape: TreeShape::Star,
             seed: "42".into(),
-            nodes: vec![VisualNode::Line {
-                id: "line".into(),
-                fields: vec![VisualField::Integer {
-                    id: "n-field".into(),
-                    name: "n".into(),
-                    minimum: ValueExpression::Constant { value: "1".into() },
-                    maximum: ValueExpression::Constant {
-                        value: "100".into(),
-                    },
-                }],
-            }],
+            nodes: vec![
+                VisualNode::Line {
+                    id: "line".into(),
+                    fields: vec![VisualField::Integer {
+                        id: "n-field".into(),
+                        name: "n".into(),
+                        minimum: ValueExpression::Constant { value: "1".into() },
+                        maximum: ValueExpression::Constant {
+                            value: "100".into(),
+                        },
+                    }],
+                },
+                VisualNode::Line {
+                    id: "string-line".into(),
+                    fields: vec![VisualField::String {
+                        id: "s-field".into(),
+                        name: "s".into(),
+                        alphabet: crate::generator::VisualAlphabet::Lowercase,
+                        length: serde_json::from_value(serde_json::json!({
+                            "type": "arithmetic", "operator": "*",
+                            "left": {"type": "constant", "value": "3"},
+                            "right": {"type": "variable", "name": "n", "offset": 0}
+                        }))
+                        .unwrap(),
+                    }],
+                },
+            ],
         };
         save_profile(&database_path, &root, source.to_str().unwrap(), &profile).unwrap();
         assert_eq!(

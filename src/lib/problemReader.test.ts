@@ -59,6 +59,14 @@ describe("problem reader metadata", () => {
     });
   });
 
+  it("retains the imported source URL when loading and saving a statement", async () => {
+    saveProblemDocument("imported", { kind: "markdown", title: "A. Example", markdown: "# A. Example", sourceUrl: "https://codeforces.com/contest/1234/problem/A", updatedAt: 1 });
+    const loaded = await loadProblemDocument("imported");
+    expect(loaded?.sourceUrl).toBe("https://codeforces.com/contest/1234/problem/A");
+    saveProblemDocument("imported", { ...loaded!, markdown: "# Edited", updatedAt: 2 });
+    expect((await loadProblemDocument("imported"))?.sourceUrl).toBe(loaded?.sourceUrl);
+  });
+
   it("keeps Markdown and PDF references together so formats remain switchable", async () => {
     saveProblemDocument("problem", {
       kind: "pdf",

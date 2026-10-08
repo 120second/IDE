@@ -11,6 +11,7 @@ pub mod health;
 pub mod lsp;
 pub mod notebooks;
 pub mod performance;
+pub mod problem_import;
 pub mod recovery;
 pub mod runner;
 pub mod settings;

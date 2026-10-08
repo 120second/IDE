@@ -7,6 +7,7 @@ import type {
   VisualGeneratorProfile,
   VisualNode,
 } from "../types/generator";
+import { constantExpressionValue, expressionIssue, expressionText } from "./valueExpression";
 
 export type GeneratorTemplateId =
   | "n"
@@ -19,7 +20,8 @@ export type GeneratorTemplateId =
   | "weightedTree"
   | "graph"
   | "permutation"
-  | "string";
+  | "string"
+  | "matrix";
 
 export const GENERATOR_TEMPLATES: Array<{ id: GeneratorTemplateId; label: string }> = [
   { id: "n", label: "n" },
@@ -33,6 +35,7 @@ export const GENERATOR_TEMPLATES: Array<{ id: GeneratorTemplateId; label: string
   { id: "graph", label: "图" },
   { id: "permutation", label: "排列" },
   { id: "string", label: "字符串" },
+  { id: "matrix", label: "n m + 矩阵" },
 ];
 
 let idSequence = 0;
@@ -65,7 +68,7 @@ export function arrayField(name = "a", length: ValueExpression = variable("n")):
   };
 }
 
-export function line(fields: VisualField[] = [integerField()]): VisualNode {
+export function line(fields: VisualField[] = [integerField()]): Extract<VisualNode, { type: "line" }> {
   return { type: "line", id: newRuleId("line"), fields };
 }
 
@@ -107,10 +110,11 @@ export function wrapNodesInRepeat(
 export function defaultVisualProfile(): VisualGeneratorProfile {
   return {
     version: 1,
-    nodes: createTemplate("nqQueries"),
-    strategy: "mixed",
+    nodes: createTemplate("nArray"),
+    strategy: "random",
     treeShape: "mixed",
     seed: "16574989564519419765",
+    seedLocked: false,
   };
 }
 
@@ -184,7 +188,25 @@ export function createTemplate(template: GeneratorTemplateId): VisualNode[] {
         line([integerField("n")]),
         line([{ type: "string", id: newRuleId("field"), name: "s", length: variable("n"), alphabet: "lowercase" }]),
       ];
+    case "matrix":
+      return [
+        line([integerField("n", constant(1), constant(10)), integerField("m", constant(1), constant(10))]),
+        { type: "matrix", id: newRuleId("matrix"), name: "a", rows: variable("n"), columns: variable("m"), minimum: constant(1), maximum: constant(100) },
+      ];
   }
+}
+
+export function testCaseWrapper(nodes: VisualNode[]): Extract<VisualNode, { type: "repeat" }> | undefined {
+  if (nodes.length !== 2 || nodes[0].type !== "line" || nodes[0].fields.length !== 1 || nodes[1].type !== "repeat") return undefined;
+  const field = nodes[0].fields[0];
+  const count = nodes[1].count;
+  return field.type === "integer" && /^t$/i.test(field.name) && count.type === "variable" && count.name === field.name && count.offset === 0 ? nodes[1] : undefined;
+}
+
+export function toggleTestCases(nodes: VisualNode[]): VisualNode[] {
+  const wrapped = testCaseWrapper(nodes);
+  if (wrapped) return wrapped.children;
+  return [line([integerField("T", constant(1), constant(5))]), { type: "repeat", id: newRuleId("repeat"), count: variable("T"), children: nodes }];
 }
 
 export function treeNode(nodes: ValueExpression): Extract<VisualNode, { type: "tree" }> {
@@ -268,9 +290,6 @@ function validateNodes(
   for (const node of nodes) {
     if (node.type === "line") {
       if (!node.fields.length) diagnostics.push({ nodeId: node.id, message: "一行中至少需要一个字段。" });
-      if (node.fields.length > 1 && node.fields.some((field) => field.type === "array")) {
-        diagnostics.push({ nodeId: node.id, message: "数组当前必须单独占一行。" });
-      }
       for (const field of node.fields) validateField(node.id, field, scope, diagnostics);
       continue;
     }
@@ -288,6 +307,7 @@ function validateNodes(
       if (node.weight) {
         validateExpression(node.id, undefined, "权值下界", node.weight.minimum, scope, diagnostics);
         validateExpression(node.id, undefined, "权值上界", node.weight.maximum, scope, diagnostics);
+        validateRange(node.id, undefined, node.weight.minimum, node.weight.maximum, diagnostics);
       }
       continue;
     }
@@ -303,6 +323,9 @@ function validateNodes(
     validateExpression(node.id, undefined, "矩阵列数", node.columns, scope, diagnostics);
     validateExpression(node.id, undefined, "元素下界", node.minimum, scope, diagnostics);
     validateExpression(node.id, undefined, "元素上界", node.maximum, scope, diagnostics);
+    validateNonnegative(node.id, undefined, "矩阵行数", node.rows, diagnostics);
+    validateNonnegative(node.id, undefined, "矩阵列数", node.columns, diagnostics);
+    validateRange(node.id, undefined, node.minimum, node.maximum, diagnostics);
   }
 }
 
@@ -316,6 +339,7 @@ function validateField(
   if (field.type === "integer") {
     validateExpression(nodeId, field.id, "下界", field.minimum, scope, diagnostics);
     validateExpression(nodeId, field.id, "上界", field.maximum, scope, diagnostics);
+    validateRange(nodeId, field.id, field.minimum, field.maximum, diagnostics);
     if (scope.includes(field.name)) {
       diagnostics.push({ nodeId, fieldId: field.id, message: `整数变量“${field.name}”已经定义。` });
     } else if (validName(field.name)) {
@@ -328,7 +352,17 @@ function validateField(
   if (field.type === "array") {
     validateExpression(nodeId, field.id, "元素下界", field.minimum, scope, diagnostics);
     validateExpression(nodeId, field.id, "元素上界", field.maximum, scope, diagnostics);
+    validateRange(nodeId, field.id, field.minimum, field.maximum, diagnostics);
   }
+}
+
+function validateRange(nodeId: string, fieldId: string | undefined, minimum: ValueExpression, maximum: ValueExpression, diagnostics: VisualDiagnostic[]): void {
+  const left = constantExpressionValue(minimum);
+  const right = constantExpressionValue(maximum);
+  const reversed = left !== undefined && right !== undefined
+    ? left > right
+    : minimum.type === "variable" && maximum.type === "variable" && minimum.name === maximum.name && minimum.offset > maximum.offset;
+  if (reversed) diagnostics.push({ nodeId, fieldId, message: "范围下界不能大于上界，请调整这两个值。" });
 }
 
 function validateExpression(
@@ -339,16 +373,8 @@ function validateExpression(
   scope: string[],
   diagnostics: VisualDiagnostic[],
 ): void {
-  if (expression.type === "constant") {
-    if (!validInt64(expression.value)) diagnostics.push({ nodeId, fieldId, message: `${label}必须是 int64 整数。` });
-  } else {
-    if (!scope.includes(expression.name)) {
-      diagnostics.push({ nodeId, fieldId, message: `${label}引用的变量“${expression.name}”在当前作用域中不存在。` });
-    }
-    if (!Number.isSafeInteger(expression.offset)) {
-      diagnostics.push({ nodeId, fieldId, message: `${label}的偏移量必须是安全整数。` });
-    }
-  }
+  const issue = expressionIssue(expression, scope);
+  if (issue) diagnostics.push({ nodeId, fieldId, message: `${label}${issue}` });
 }
 
 function validateName(nodeId: string, fieldId: string | undefined, name: string, diagnostics: VisualDiagnostic[]): void {
@@ -362,19 +388,22 @@ function validateNonnegative(
   expression: ValueExpression,
   diagnostics: VisualDiagnostic[],
 ): void {
-  if (expression.type === "constant" && validInt64(expression.value) && BigInt(expression.value) < 0n) {
+  const value = constantExpressionValue(expression);
+  if (value !== undefined && value < 0n) {
     diagnostics.push({ nodeId, fieldId, message: `${label}不能为负数。` });
   }
 }
 
 function validatePositive(nodeId: string, label: string, expression: ValueExpression, diagnostics: VisualDiagnostic[]): void {
-  if (expression.type === "constant" && validInt64(expression.value) && BigInt(expression.value) <= 0n) {
+  const value = constantExpressionValue(expression);
+  if (value !== undefined && value <= 0n) {
     diagnostics.push({ nodeId, message: `${label}必须大于 0。` });
   }
 }
 
 export function expressionLabel(expression: ValueExpression): string {
   if (expression.type === "constant") return expression.value || "?";
+  if (expression.type === "arithmetic") return expressionText(expression);
   if (!expression.offset) return expression.name || "?";
   return `${expression.name || "?"} ${expression.offset > 0 ? "+" : "-"} ${Math.abs(expression.offset)}`;
 }
@@ -419,12 +448,6 @@ export const TREE_SHAPES: Array<{ value: TreeShape; label: string }> = [
 
 function validName(value: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
-}
-
-function validInt64(value: string): boolean {
-  if (!/^-?\d+$/.test(value.trim())) return false;
-  const parsed = BigInt(value.trim());
-  return parsed >= -(1n << 63n) && parsed <= (1n << 63n) - 1n;
 }
 
 function validSeed(value: string): boolean {

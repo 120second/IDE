@@ -1,6 +1,6 @@
 [package]
 name = "lightcp"
-version = "0.1.1-dev.2"
+version = "0.1.1-dev.3"
 description = "A lightweight competitive programming IDE"
 authors = ["LightCP contributors"]
 edition = "2021"
@@ -27,6 +27,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 thiserror = "2"
 url = "2"
+tiny_http = "0.12"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects"] }

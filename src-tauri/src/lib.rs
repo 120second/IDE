@@ -10,6 +10,7 @@ pub mod lsp;
 pub mod notebooks;
 pub mod paths;
 pub mod performance;
+pub mod problem_import;
 mod process_tree;
 pub mod recovery;
 pub mod runner;
@@ -61,6 +62,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health::health_check,
+            commands::problem_import::start_problem_listener,
+            commands::problem_import::stop_problem_listener,
+            commands::problem_import::problem_listener_status,
             commands::notebooks::read_notebook,
             commands::notebooks::write_notebook,
             commands::notebooks::delete_notebook,

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
   import type { ShellStore } from "../../stores/shell.svelte";
@@ -25,6 +25,7 @@
   let { workspace, execution, shell, settings, keybindings, ux }: Props = $props();
   let editingId = $state<number>();
   let formOpen = $state(false);
+  let editorElement = $state<HTMLFormElement>();
   let saving = $state(false);
   let draft = $state<TestcaseInput>(emptyDraft(""));
   let observedSource = "";
@@ -52,12 +53,16 @@
     });
   });
 
-  function beginCreate(kind: TestcaseKind = "sample"): void {
+  async function beginCreate(kind: TestcaseKind = "sample"): Promise<void> {
     const sourcePath = workspace.activeTab?.path;
     if (!sourcePath) return;
     editingId = undefined;
     draft = { ...emptyDraft(sourcePath), kind, name: nextName(kind) };
     formOpen = true;
+    await tick();
+    if (formOpen && editingId === undefined) {
+      editorElement?.scrollIntoView({ behavior: "instant", block: "start" });
+    }
   }
 
   function beginEdit(testcase: Testcase): void {
@@ -271,7 +276,7 @@
 </script>
 
 {#snippet testcaseEditor()}
-  <form class="case-editor" aria-label={editingId ? "编辑测试点" : "新建测试点"} onsubmit={(event) => { event.preventDefault(); void save(); }}>
+  <form bind:this={editorElement} class="case-editor" aria-label={editingId ? "编辑测试点" : "新建测试点"} onsubmit={(event) => { event.preventDefault(); void save(); }}>
     {#if editingId === undefined}
       <header class="case-editor-header">
         <strong>新建测试点</strong>
@@ -365,9 +370,6 @@
     </section>
 
     <div class="fixed-testcase-list" role="list" aria-label="固定测试点">
-      {#if formOpen && editingId === undefined}
-        {@render testcaseEditor()}
-      {/if}
       {#if execution.loadingTestcases}
         <div class="case-loading" aria-label="正在加载测试点"><span></span><span></span><span></span></div>
       {/if}
@@ -408,6 +410,9 @@
           {/if}
         </article>
       {/each}
+      {#if formOpen && editingId === undefined}
+        {@render testcaseEditor()}
+      {/if}
       {#if shouldShowTestcaseEmptyState(formOpen, execution.loadingTestcases, execution.testcases.length)}
         <div class="case-empty">
           <span class="case-empty-icon"><Icon name="testcases" size={22} /></span>

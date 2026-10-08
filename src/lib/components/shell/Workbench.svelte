@@ -39,6 +39,7 @@
   import SettingsMenu from "./SettingsMenu.svelte";
   import RandomGenerator from "../testcases/random/RandomGenerator.svelte";
   import CommunityHub from "../community/CommunityHub.svelte";
+  import { ProblemImportStore } from "../../stores/problemImport.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -60,6 +61,9 @@
 
   let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, ux, auth, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
+  let problemImportOpen = $state(false);
+  let ProblemImportDialog = $state.raw<(typeof import("../reader/ProblemImportDialog.svelte"))["default"]>();
+  const problemImport = untrack(() => new ProblemImportStore(workspace, fileWorkspace, shell, execution, ux));
   let quickFileOpen = $state(false);
   let commandPaletteOpen = $state(false);
   let fileDialogParent = $state<string>();
@@ -103,6 +107,7 @@
     { id: "debug.restart", label: "重新启动调试", category: "调试", shortcut: "Ctrl+Shift+F5", enabled: debugStore.active && !debugStore.busy, disabledReason: "调试会话尚未启动", run: () => void debugStore.restart() },
     { id: "debug.stop", label: "停止调试", category: "调试", shortcut: "Shift+F5", enabled: debugStore.active && !debugStore.busy, disabledReason: "调试会话尚未启动", run: () => void debugStore.stop() },
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
+    command("problem.listen", "CF / 洛谷题目监听", "竞赛", undefined, () => (problemImportOpen = true)),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
     command("view.community", "打开 LightCP 社区", "视图", undefined, () => showActivity("community")),
@@ -162,6 +167,21 @@
     void import("../reader/ProblemReader.svelte").then((module) => {
       ProblemReader = module.default;
     });
+  });
+
+  $effect(() => {
+    if (!problemImportOpen || ProblemImportDialog) return;
+    void import("../reader/ProblemImportDialog.svelte").then((module) => { ProblemImportDialog = module.default; });
+  });
+
+  $effect(() => {
+    const root = fileWorkspace.info?.path;
+    untrack(() => problemImport.workspaceChanged(root));
+  });
+
+  onMount(() => {
+    void problemImport.initialize();
+    return () => problemImport.dispose();
   });
 
   onMount(() => {
@@ -551,6 +571,8 @@
             keybindings={settings.value.keybindings}
             togglePanel={() => shell.toggleBottomPanel()}
             toggleReader={() => shell.toggleProblemReader()}
+            openProblemImport={() => (problemImportOpen = true)}
+            problemListening={problemImport.listening}
             toggleSketch={() => shell.toggleSketchBoard()}
             toggleZen={() => shell.toggleZenMode()}
             compile={() => void execution.compileCurrent()}
@@ -647,6 +669,10 @@
 {/if}
 
 <UxOverlay {ux} />
+
+{#if problemImportOpen && ProblemImportDialog}
+  <ProblemImportDialog listener={problemImport} {templateStore} {fileWorkspace} {ux} close={() => (problemImportOpen = false)} />
+{/if}
 
 {#if fileDialogParent}
   <FileTemplateDialog

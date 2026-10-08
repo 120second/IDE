@@ -11,6 +11,7 @@ use crate::{
     lsp::ClangdManager,
     paths::AppPaths,
     performance::PerformanceMetrics,
+    problem_import::ProblemListener,
     runner::RunnerManager,
     server_api::ServerApi,
     stress::StressManager,
@@ -28,6 +29,7 @@ pub struct AppState {
     pub stress: Arc<StressManager>,
     pub lsp: Arc<ClangdManager>,
     pub performance: Arc<PerformanceMetrics>,
+    pub problem_listener: ProblemListener,
     pub server_api: ServerApi,
 }
 
@@ -46,6 +48,7 @@ impl AppState {
             stress: Arc::new(StressManager::default()),
             lsp: Arc::new(ClangdManager::default()),
             performance: Arc::new(PerformanceMetrics::default()),
+            problem_listener: ProblemListener::default(),
             server_api,
         }
     }

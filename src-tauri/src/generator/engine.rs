@@ -391,20 +391,15 @@ impl Engine {
             Some(field_id) => VisualDiagnostic::field(node_id, field_id, message),
             None => VisualDiagnostic::node(node_id, message),
         };
-        match expression {
-            ValueExpression::Constant { value } => value
-                .trim()
-                .parse::<i64>()
-                .map_err(|_| error(format!("{label}必须是 int64 整数。"))),
-            ValueExpression::Variable { name, offset } => {
-                let value = self.variables.get(name).copied().ok_or_else(|| {
-                    error(format!("{label}引用的变量“{name}”在当前作用域中不存在。"))
-                })?;
-                value
-                    .checked_add(*offset)
-                    .ok_or_else(|| error(format!("{label}计算结果超出了 int64 范围。")))
-            }
-        }
+        super::expression::evaluate(expression, &|name| {
+            self.variables
+                .get(name)
+                .copied()
+                .map(Some)
+                .ok_or_else(|| format!("引用的变量“{name}”在当前作用域中不存在。"))
+        })
+        .map_err(|message| error(format!("{label}{message}")))?
+        .ok_or_else(|| error(format!("{label}无法计算。")))
     }
 
     fn visual_bounds(
@@ -1153,6 +1148,7 @@ mod tests {
         let result = generate_visual(&VisualGenerateRequest {
             profile: super::super::VisualGeneratorProfile {
                 version: 1,
+                seed_locked: false,
                 nodes,
                 strategy: GeneratorStrategy::Random,
                 tree_shape: TreeShape::Mixed,
@@ -1174,6 +1170,32 @@ mod tests {
         ValueExpression::Variable {
             name: name.to_owned(),
             offset: 0,
+        }
+    }
+
+    #[test]
+    fn visual_arithmetic_lengths_follow_each_generated_n() {
+        let nodes: Vec<VisualNode> = serde_json::from_value(serde_json::json!([
+            {"type":"line","id":"n-line","fields":[{"type":"integer","id":"n","name":"n",
+                "minimum":{"type":"constant","value":"1"},"maximum":{"type":"constant","value":"100"}}]},
+            {"type":"line","id":"string-line","fields":[{"type":"string","id":"s","name":"s","alphabet":"lowercase",
+                "length":{"type":"arithmetic","operator":"*","left":{"type":"constant","value":"3"},"right":{"type":"variable","name":"n","offset":0}}}]},
+            {"type":"line","id":"array-line","fields":[{"type":"array","id":"a","name":"a",
+                "length":{"type":"arithmetic","operator":"/","left":{"type":"variable","name":"n","offset":1},"right":{"type":"constant","value":"2"}},
+                "minimum":{"type":"constant","value":"7"},"maximum":{"type":"constant","value":"7"}}]},
+            {"type":"repeat","id":"loop","count":{"type":"arithmetic","operator":"*","left":{"type":"constant","value":"3"},"right":{"type":"variable","name":"n","offset":0}},
+                "children":[{"type":"line","id":"row","fields":[{"type":"integer","id":"x","name":"x",
+                    "minimum":{"type":"constant","value":"1"},"maximum":{"type":"constant","value":"1"}}]}]}
+        ])).unwrap();
+        for seed in 0..100 {
+            let output = visual_generated(nodes.clone(), seed);
+            let lines: Vec<_> = output.lines().collect();
+            let n: usize = lines[0].parse().unwrap();
+            assert_eq!(lines[1].len(), 3 * n);
+            assert!(lines[1].bytes().all(|byte| byte.is_ascii_lowercase()));
+            assert_eq!(lines[2].split_whitespace().count(), n.div_ceil(2));
+            assert_eq!(lines.len() - 3, 3 * n);
+            assert!(lines[3..].iter().all(|line| *line == "1"));
         }
     }
 
@@ -1324,6 +1346,33 @@ mod tests {
             1,
         );
         assert_eq!(output, "5 7");
+    }
+
+    #[test]
+    fn visual_line_allows_a_length_and_array_together() {
+        let output = visual_generated(
+            vec![VisualNode::Line {
+                id: "line".into(),
+                fields: vec![
+                    VisualField::Integer {
+                        id: "n".into(),
+                        name: "n".into(),
+                        minimum: visual_constant(3),
+                        maximum: visual_constant(3),
+                    },
+                    VisualField::Array {
+                        id: "a".into(),
+                        name: "a".into(),
+                        length: visual_variable("n"),
+                        minimum: visual_constant(7),
+                        maximum: visual_constant(7),
+                        strategy: None,
+                    },
+                ],
+            }],
+            42,
+        );
+        assert_eq!(output, "3 7 7 7");
     }
 
     #[test]

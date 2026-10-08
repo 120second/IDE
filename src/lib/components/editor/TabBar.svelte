@@ -12,6 +12,8 @@
     workspace: EditorWorkspace;
     togglePanel: () => void;
     toggleReader: () => void;
+    openProblemImport: () => void;
+    problemListening: boolean;
     toggleSketch: () => void;
     toggleZen: () => void;
     compile: () => void;
@@ -27,7 +29,7 @@
     sketchOpen: boolean;
   }
 
-  let { workspace, togglePanel, toggleReader, toggleSketch, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile, lsp, readerOpen, sketchOpen }: Props = $props();
+  let { workspace, togglePanel, toggleReader, openProblemImport, problemListening, toggleSketch, toggleZen, compile, run, stop, busy, running, ux, keybindings, newFile, lsp, readerOpen, sketchOpen }: Props = $props();
   let tabStrip: HTMLDivElement;
   let menu = $state<{ x: number; y: number; tabId: string }>();
   let canRun = $derived(Boolean(workspace.activeTab?.path && !workspace.activeTab.deleted && !workspace.activeTab.loading));
@@ -158,6 +160,9 @@
     {/if}
     <button class:active={readerOpen} class="tab-reader-action" aria-pressed={readerOpen} title="打开读题面板" onclick={toggleReader}>
       <Icon name="book" size={15} /><span>读题</span>
+    </button>
+    <button class:active={problemListening} class="tab-reader-action" title={problemListening ? "正在监听 CF / 洛谷题目 · 点击管理" : "通过油猴导入 CF / 洛谷题目"} onclick={openProblemImport}>
+      <Icon name={problemListening ? "check" : "download"} size={15} /><span>{problemListening ? "监听中" : "监听"}</span>
     </button>
     <button class:active={sketchOpen} class="tab-reader-action" aria-pressed={sketchOpen} title="打开思路画板" onclick={toggleSketch}>
       <Icon name="sketch" size={15} /><span>画板</span>

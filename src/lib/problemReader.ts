@@ -6,6 +6,7 @@ export interface ProblemDocumentMeta {
   kind: ProblemDocumentKind;
   title: string;
   markdown: string;
+  sourceUrl?: string;
   pdfName?: string;
   pdfStorageKey?: string;
   updatedAt: number;
@@ -50,6 +51,7 @@ export async function loadProblemDocument(key: string): Promise<ProblemDocumentM
       kind: value.kind,
       title: typeof value.title === "string" ? value.title : "题面",
       markdown: typeof value.markdown === "string" ? value.markdown : "",
+      ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
       pdfName: typeof value.pdfName === "string" ? value.pdfName : undefined,
       ...(typeof value.pdfStorageKey === "string" ? { pdfStorageKey: value.pdfStorageKey } : {}),
       updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : 0,

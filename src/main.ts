@@ -5,6 +5,7 @@ import "./workbench.css";
 import "./appearance.css";
 import "./auth.css";
 import "./community.css";
+import "./generator.css";
 
 const target = document.getElementById("app");
 

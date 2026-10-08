@@ -29,6 +29,7 @@ pub fn open_workspace(
             "workspace state lock was poisoned".to_owned(),
         ))
     })?;
+    state.problem_listener.stop().map_err(CommandError::from)?;
     runtime.root = Some(root);
     runtime.watcher = Some(watcher);
     Ok(info)

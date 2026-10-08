@@ -286,6 +286,7 @@ fn stress_iterations_batch_progress() {
 
 fn fixed_integer_profile() -> VisualGeneratorProfile {
     VisualGeneratorProfile {
+        seed_locked: false,
         version: 1,
         nodes: vec![VisualNode::Line {
             id: "line".to_owned(),

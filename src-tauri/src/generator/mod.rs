@@ -1,4 +1,5 @@
 mod engine;
+mod expression;
 mod model;
 mod parser;
 mod profile;
