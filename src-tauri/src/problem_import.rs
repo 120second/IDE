@@ -95,13 +95,14 @@ impl ProblemListener {
     ) -> AppResult<ListenerStatus> {
         let mut running = self.running.lock().map_err(lock_error)?;
         if running.is_some() {
-            return Err(import_error("题目接收服务已启动，请在题目导入设置中保存模板或重试连接。"));
+            return Err(import_error(
+                "题目接收服务已启动，请在题目导入设置中保存模板或重试连接。",
+            ));
         }
         let root = dunce::canonicalize(root)?;
-        let server =
-            Arc::new(Server::http(("127.0.0.1", PORT)).map_err(|error| {
-                import_error(format!("无法启动题目接收服务（端口 {PORT}）：{error}"))
-            })?);
+        let server = Arc::new(Server::http(("127.0.0.1", PORT)).map_err(|error| {
+            import_error(format!("无法启动题目接收服务（端口 {PORT}）：{error}"))
+        })?);
         let stopped = Arc::new(AtomicBool::new(false));
         let thread_server = server.clone();
         let thread_stopped = stopped.clone();
@@ -543,7 +544,9 @@ fn import_problem(
         return Err(import_error("题目名称、题面或样例数据无效。"));
     }
     if dunce::canonicalize(root)? != root {
-        return Err(import_error("工作区目录已经更换，请等待当前工作区就绪后重新发送。"));
+        return Err(import_error(
+            "工作区目录已经更换，请等待当前工作区就绪后重新发送。",
+        ));
     }
     if let Some(existing) = existing_import(root, db, &url, &payload.title)? {
         return Ok(existing);
@@ -958,14 +961,46 @@ mod tests {
         // Reject both, even when an old sender somehow has a current token.
         for _ in 0..3 {
             let (status, message) = http(
-                "GET", "/session", "X-LightCP-Client: lightcp-userscript-v1\r\n", "",
+                "GET",
+                "/session",
+                "X-LightCP-Client: lightcp-userscript-v1\r\n",
+                "",
             );
             assert_eq!(status, 426);
             assert!(message.contains("1.2.1"));
-            assert_eq!(http("POST", "/problem", &format!("X-LightCP-Client: lightcp-userscript-v1\r\nX-LightCP-Token: {token}\r\n"), &body).0, 426);
+            assert_eq!(
+                http(
+                    "POST",
+                    "/problem",
+                    &format!(
+                        "X-LightCP-Client: lightcp-userscript-v1\r\nX-LightCP-Token: {token}\r\n"
+                    ),
+                    &body
+                )
+                .0,
+                426
+            );
         }
-        assert_eq!(http("GET", "/session", "X-LightCP-Client: lightcp-userscript-v2\r\n", "").0, 400);
-        assert_eq!(http("POST", "/problem", &format!("X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Token: {token}\r\n"), &body).0, 400);
+        assert_eq!(
+            http(
+                "GET",
+                "/session",
+                "X-LightCP-Client: lightcp-userscript-v2\r\n",
+                ""
+            )
+            .0,
+            400
+        );
+        assert_eq!(
+            http(
+                "POST",
+                "/problem",
+                &format!("X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Token: {token}\r\n"),
+                &body
+            )
+            .0,
+            400
+        );
         assert_eq!(fs::read_dir(&f.root).unwrap().count(), 0);
         assert!(receiver.try_recv().is_err());
         assert_eq!(
