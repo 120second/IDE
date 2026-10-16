@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LightCP Codeforces 题目导入
 // @namespace    lightcp
-// @version      1.1.0
-// @description  将 Codeforces 或洛谷题面和样例发送到 LightCP，洛谷 CF 题优先使用中文翻译。
+// @version      1.2.1
+// @description  在 Codeforces 或洛谷题目页按 F10，将题面和样例导入 LightCP，洛谷 CF 题优先使用中文翻译。
 // @match        https://codeforces.com/problemset/problem/*
 // @match        https://codeforces.com/contest/*/problem/*
 // @match        https://codeforces.com/gym/*/problem/*
@@ -13,8 +13,6 @@
 // @match        https://luogu.com.cn/problem/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_registerMenuCommand
-// @grant        GM_getValue
-// @grant        GM_setValue
 // @connect      127.0.0.1
 // @run-at       document-idle
 // @noframes
@@ -237,7 +235,7 @@
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: options.body ? 'POST' : 'GET', url: ENDPOINT + path, timeout: 15000,
-        headers: { 'X-LightCP-Client': 'lightcp-userscript-v1', ...options.headers },
+        headers: { 'X-LightCP-Client': 'lightcp-userscript-v2', 'X-LightCP-Trigger': 'f10', ...options.headers },
         ...(options.body ? { data: JSON.stringify(options.body) } : {}),
         onload(response) {
           try {
@@ -246,73 +244,82 @@
             resolve(result);
           } catch (error) { reject(error); }
         },
-        onerror() { reject(new Error('无法连接 LightCP，请在 IDE 中先打开工作区并开启“题目监听”。')); },
+        onerror() { reject(new Error('无法连接 LightCP，请先启动桌面版并打开用于保存题目的工作区；若仍无法连接，请在“题目导入”中查看错误并重试连接。')); },
         ontimeout() { reject(new Error('导入超时，请检查 IDE。题目可能已经保存，再次发送会打开已有文件。')); },
       });
     });
   }
 
   let sending = false;
-  let button;
-  let sentKey;
-  let autoFollow = GM_getValue('lightcp-auto-follow', true);
-  async function sendProblem(session, automatic = false) {
+  let indicator;
+  let indicatorKey;
+  async function sendProblem() {
     if (sending) return;
     sending = true;
-    if (button) { button.disabled = true; button.textContent = '正在发送…'; }
+    if (indicator) indicator.textContent = '正在发送…';
     try {
       const href = location.href;
       const problem = await loadProblem(document, href);
-      if (pageKey(location.href) !== pageKey(href) || (automatic && (!autoFollow || document.visibilityState !== 'visible'))) return;
-      session ||= await request('/session');
+      if (pageKey(location.href) !== pageKey(href)) {
+        if (indicator) indicator.textContent = '题目已切换 · 按 F10 重新发送';
+        return;
+      }
+      const session = await request('/session');
+      if (pageKey(location.href) !== pageKey(href)) {
+        if (indicator) indicator.textContent = '题目已切换 · 按 F10 重新发送';
+        return;
+      }
       const imported = await request('/problem', {
         body: problem,
         headers: { 'Content-Type': 'application/json', 'X-LightCP-Token': session.token },
       });
-      sentKey = `${session.token}:${pageKey(href)}`;
-      if (button) button.textContent = imported.alreadyImported ? '已在 LightCP 打开' : '已导入 LightCP';
+      if (indicator) indicator.textContent = imported.alreadyImported ? '已在 LightCP 打开' : '已导入 LightCP';
     } catch (error) {
-      if (button) button.textContent = '发送失败 · 点击重试';
-      if (!automatic) alert(`LightCP：${error.message}`);
+      if (indicator) indicator.textContent = '发送失败 · 按 F10 重试';
+      alert(`LightCP：${error.message}`);
     } finally {
       sending = false;
-      if (button) button.disabled = false;
     }
   }
 
-  GM_registerMenuCommand('发送当前题目到 LightCP', () => void sendProblem());
-  GM_registerMenuCommand('开启自动题目监听', () => { autoFollow = true; GM_setValue('lightcp-auto-follow', true); void follow(); });
-  GM_registerMenuCommand('关闭自动题目监听', () => { autoFollow = false; GM_setValue('lightcp-auto-follow', false); });
-  function mountButton() {
-    if (button?.isConnected) return;
+  GM_registerMenuCommand('F10 题目导入说明', () => alert('LightCP：在题目页面按 F10 导入当前题面和样例。打开、刷新或切换题目都不会自动导入。请使用支持 F10 导入的新版 LightCP。'));
+  function isProblemPage() {
+    const path = new URL(location.href).pathname;
+    return isLuogu(location.href)
+      ? /^\/problem\/[A-Za-z][A-Za-z0-9_]{0,79}\/?$/.test(path)
+      : /^\/(?:problemset\/problem\/\d+\/[A-Za-z0-9]+|(?:contest|gym)\/\d+\/problem\/[A-Za-z0-9]+)\/?$/.test(path);
+  }
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'F10' || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || !isProblemPage()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!event.repeat) void sendProblem();
+  }, true);
+  function mountStatus() {
+    if (!isProblemPage()) { indicator?.remove(); indicatorKey = undefined; return; }
+    const key = pageKey(location.href);
+    if (indicator?.isConnected) {
+      if (indicatorKey !== key) {
+        indicatorKey = key;
+        indicator.textContent = '按 F10 导入 LightCP';
+      }
+      return;
+    }
     const luogu = isLuogu(location.href);
-    if (luogu && !/^\/problem\/[A-Za-z][A-Za-z0-9_]{0,79}\/?$/.test(new URL(location.href).pathname)) return;
     const header = luogu ? document.body : document.querySelector('.problem-statement .header');
     if (!header) return;
-    button = document.createElement('button');
-    button.type = 'button'; button.textContent = '发送到 LightCP';
-    button.style.cssText = 'margin:12px auto;padding:8px 16px;border:1px solid #278977;border-radius:5px;background:#e8f6f1;color:#14594d;cursor:pointer;font:600 14px sans-serif;';
-    if (luogu) button.style.cssText += 'position:fixed;right:20px;bottom:20px;z-index:10000;box-shadow:0 2px 10px #0002;';
-    button.addEventListener('click', () => void sendProblem());
-    header.appendChild(button);
+    indicatorKey = key;
+    indicator = document.createElement('div');
+    indicator.textContent = '按 F10 导入 LightCP';
+    indicator.setAttribute('role', 'status');
+    indicator.title = '按 F10 导入当前题面和样例';
+    indicator.style.cssText = 'display:table;margin:12px auto;padding:8px 16px;border:1px solid #278977;border-radius:5px;background:#e8f6f1;color:#14594d;font:600 14px sans-serif;';
+    if (luogu) indicator.style.cssText += 'position:fixed;right:20px;bottom:20px;z-index:10000;box-shadow:0 2px 10px #0002;';
+    header.appendChild(indicator);
   }
-  mountButton();
+  mountStatus();
 
-  let checking = false;
-  async function follow() {
-    mountButton();
-    if (isLuogu(location.href) && !/^\/problem\/[A-Za-z][A-Za-z0-9_]{0,79}\/?$/.test(new URL(location.href).pathname)) return;
-    if (!autoFollow || sending || checking || document.visibilityState !== 'visible') return;
-    checking = true;
-    try {
-      const session = await request('/session');
-      if (`${session.token}:${pageKey(location.href)}` !== sentKey && autoFollow && document.visibilityState === 'visible') {
-        await sendProblem(session, true);
-      }
-    } catch { /* IDE is not listening: stay quiet until the user enables it. */ }
-    finally { checking = false; }
-  }
-  setInterval(() => void follow(), 3000);
-  document.addEventListener('visibilitychange', () => void follow());
-  void follow();
+  // Keep the indicator available after Luogu client-side navigation. No network
+  // request or import happens until F10 is pressed.
+  setInterval(mountStatus, 1000);
 })();

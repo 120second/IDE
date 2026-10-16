@@ -1,4 +1,4 @@
-//! Opt-in, loopback-only bridge for the bundled Codeforces / Luogu userscript.
+//! Loopback-only bridge for the bundled Codeforces / Luogu F10 import userscript.
 use crate::{
     database,
     error::{AppError, AppResult},
@@ -22,7 +22,7 @@ use url::Url;
 
 pub const PORT: u16 = 27121;
 const MAX_BODY: usize = 2 * 1024 * 1024;
-const CLIENT: &str = "lightcp-userscript-v1";
+const CLIENT: &str = "lightcp-userscript-v2";
 const USERSCRIPT: &str = include_str!("../../scripts/lightcp-codeforces.user.js");
 
 #[derive(Clone, Debug, Serialize)]
@@ -95,12 +95,12 @@ impl ProblemListener {
     ) -> AppResult<ListenerStatus> {
         let mut running = self.running.lock().map_err(lock_error)?;
         if running.is_some() {
-            return Err(import_error("题目监听已经开启，请先停止监听再更换模板。"));
+            return Err(import_error("题目接收服务已启动，请在题目导入设置中保存模板或重试连接。"));
         }
         let root = dunce::canonicalize(root)?;
         let server =
             Arc::new(Server::http(("127.0.0.1", PORT)).map_err(|error| {
-                import_error(format!("无法开启题目监听（端口 {PORT}）：{error}"))
+                import_error(format!("无法启动题目接收服务（端口 {PORT}）：{error}"))
             })?);
         let stopped = Arc::new(AtomicBool::new(false));
         let thread_server = server.clone();
@@ -196,7 +196,7 @@ impl Drop for ProblemListener {
 }
 
 fn lock_error<T>(_: std::sync::PoisonError<T>) -> AppError {
-    import_error("题目监听状态不可用，请重启 LightCP。")
+    import_error("题目接收状态不可用，请重启 LightCP。")
 }
 fn import_error(message: impl Into<String>) -> AppError {
     AppError::Server(message.into())
@@ -283,10 +283,20 @@ fn handle_request(mut request: Request, context: ImportRequestContext<'_>) {
     // No CORS headers are exposed. Only extension requests carrying this header
     // can obtain the per-listening-session token; regular pages fail preflight.
     if header(&request, "X-LightCP-Client") != Some(CLIENT) {
+        let legacy = header(&request, "X-LightCP-Client") == Some("lightcp-userscript-v1");
         reply(
             request,
-            403,
-            json!({"error":"请使用 LightCP 油猴脚本发送题目。"}).to_string(),
+            if legacy { 426 } else { 403 },
+            json!({"error":"请将 LightCP 油猴脚本更新到 1.2.1 或更高版本，刷新题目页后按 F10 导入。旧版自动导入已停用。"}).to_string(),
+            "application/json",
+        );
+        return;
+    }
+    if header(&request, "X-LightCP-Trigger") != Some("f10") {
+        reply(
+            request,
+            400,
+            json!({"error":"请在浏览器题目页按 F10 导入，自动发送请求已停用。"}).to_string(),
             "application/json",
         );
         return;
@@ -347,7 +357,7 @@ fn handle_request(mut request: Request, context: ImportRequestContext<'_>) {
         reply(
             request,
             503,
-            json!({"error":"监听状态不可用，请重新开启监听。"}).to_string(),
+            json!({"error":"题目接收状态不可用，请在题目导入设置中重试连接。"}).to_string(),
             "application/json",
         );
         return;
@@ -356,7 +366,7 @@ fn handle_request(mut request: Request, context: ImportRequestContext<'_>) {
         reply(
             request,
             409,
-            json!({"error":"监听已停止，请重新开启监听再发送。"}).to_string(),
+            json!({"error":"题目接收会话已结束，请等待工作区就绪后重新发送。"}).to_string(),
             "application/json",
         );
         return;
@@ -533,7 +543,7 @@ fn import_problem(
         return Err(import_error("题目名称、题面或样例数据无效。"));
     }
     if dunce::canonicalize(root)? != root {
-        return Err(import_error("工作区目录已经更换，请重新开启监听。"));
+        return Err(import_error("工作区目录已经更换，请等待当前工作区就绪后重新发送。"));
     }
     if let Some(existing) = existing_import(root, db, &url, &payload.title)? {
         return Ok(existing);
@@ -917,18 +927,18 @@ mod tests {
             http(
                 "GET",
                 "/session",
-                "X-LightCP-Client: lightcp-userscript-v1\r\nOrigin: https://www.luogu.com.cn\r\n",
+                "X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\nOrigin: https://www.luogu.com.cn\r\n",
                 ""
             )
             .0,
             200
         );
-        assert_eq!(http("GET", "/session", "X-LightCP-Client: lightcp-userscript-v1\r\nOrigin: https://www.luogu.com.cn.evil.test\r\n", "").0, 403);
+        assert_eq!(http("GET", "/session", "X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\nOrigin: https://www.luogu.com.cn.evil.test\r\n", "").0, 403);
         assert_eq!(
             http(
                 "GET",
                 "/session",
-                "X-LightCP-Client: lightcp-userscript-v1\r\nOrigin: https://evil.example\r\n",
+                "X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\nOrigin: https://evil.example\r\n",
                 ""
             )
             .0,
@@ -937,24 +947,38 @@ mod tests {
         let (status, session) = http(
             "GET",
             "/session",
-            "X-LightCP-Client: lightcp-userscript-v1\r\n",
+            "X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\n",
             "",
         );
         assert_eq!(status, 200);
         let session: serde_json::Value = serde_json::from_str(&session).unwrap();
         let token = session["token"].as_str().unwrap();
         let body = json!({"title":"A. Example", "url":payload().url, "markdown":payload().markdown, "samples":[{"input":"1\n", "expectedOutput":"YES\n"}]}).to_string();
+        // Old installed scripts automatically poll /session and POST /problem.
+        // Reject both, even when an old sender somehow has a current token.
+        for _ in 0..3 {
+            let (status, message) = http(
+                "GET", "/session", "X-LightCP-Client: lightcp-userscript-v1\r\n", "",
+            );
+            assert_eq!(status, 426);
+            assert!(message.contains("1.2.1"));
+            assert_eq!(http("POST", "/problem", &format!("X-LightCP-Client: lightcp-userscript-v1\r\nX-LightCP-Token: {token}\r\n"), &body).0, 426);
+        }
+        assert_eq!(http("GET", "/session", "X-LightCP-Client: lightcp-userscript-v2\r\n", "").0, 400);
+        assert_eq!(http("POST", "/problem", &format!("X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Token: {token}\r\n"), &body).0, 400);
+        assert_eq!(fs::read_dir(&f.root).unwrap().count(), 0);
+        assert!(receiver.try_recv().is_err());
         assert_eq!(
             http(
                 "POST",
                 "/problem",
-                "X-LightCP-Client: lightcp-userscript-v1\r\nX-LightCP-Token: invalid\r\n",
+                "X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\nX-LightCP-Token: invalid\r\n",
                 &body
             )
             .0,
             403
         );
-        let headers = format!("X-LightCP-Client: lightcp-userscript-v1\r\nX-LightCP-Token: {token}\r\nContent-Type: application/json\r\n");
+        let headers = format!("X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\nX-LightCP-Token: {token}\r\nContent-Type: application/json\r\n");
         assert_eq!(http("POST", "/problem", &headers, &body).0, 200);
         let imported = receiver.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(
@@ -989,7 +1013,7 @@ mod tests {
         let (_, response) = http(
             "GET",
             "/session",
-            "X-LightCP-Client: lightcp-userscript-v1\r\n",
+            "X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\n",
             "",
         );
         let session: serde_json::Value = serde_json::from_str(&response).unwrap();
@@ -999,12 +1023,12 @@ mod tests {
         pending
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        write!(pending, "POST /problem HTTP/1.1\r\nHost: 127.0.0.1:{PORT}\r\nConnection: close\r\nContent-Length: {}\r\nX-LightCP-Client: lightcp-userscript-v1\r\nX-LightCP-Token: {}\r\n\r\n{}", body.len(), session["token"].as_str().unwrap(), &body[..500]).unwrap();
+        write!(pending, "POST /problem HTTP/1.1\r\nHost: 127.0.0.1:{PORT}\r\nConnection: close\r\nContent-Length: {}\r\nX-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\nX-LightCP-Token: {}\r\n\r\n{}", body.len(), session["token"].as_str().unwrap(), &body[..500]).unwrap();
         assert_eq!(
             http(
                 "GET",
                 "/session",
-                "X-LightCP-Client: lightcp-userscript-v1\r\n",
+                "X-LightCP-Client: lightcp-userscript-v2\r\nX-LightCP-Trigger: f10\r\n",
                 ""
             )
             .0,

@@ -5,6 +5,7 @@ import type { WorkspaceStore } from "./workspace.svelte";
 import type { ShellStore } from "./shell.svelte";
 import type { ExecutionStore } from "./execution.svelte";
 import type { UxStore } from "./ux.svelte";
+import type { TemplateStore } from "./templates.svelte";
 
 const mocks = vi.hoisted(() => ({
   status: vi.fn(), start: vi.fn(), stop: vi.fn(), listen: vi.fn(), flush: vi.fn(), unlisten: vi.fn(),
@@ -20,12 +21,18 @@ const problem: ImportedProblem = { title: "A. Example", sourcePath: `${root}\\A.
 let onImport: (event: { payload: ImportedProblem }) => void;
 function fixture() {
   const editor = { tabs: [] as { path: string; loading: boolean }[], notice: "", openFile: vi.fn(async (path: string) => { editor.tabs.push({ path, loading: false }); }) };
-  const files = { info: { path: root }, refresh: vi.fn().mockResolvedValue(undefined) };
+  const files = { info: { path: root } as { path: string } | undefined, refresh: vi.fn().mockResolvedValue(undefined) };
   const shell = { activeActivity: "templates", generatorOpen: true, problemReaderVisible: false };
   const execution = { syncActiveSource: vi.fn().mockResolvedValue(undefined) };
   const ux = { success: vi.fn(), error: vi.fn() };
-  const store = new ProblemImportStore(editor as unknown as EditorWorkspace, files as unknown as WorkspaceStore, shell as ShellStore, execution as unknown as ExecutionStore, ux as unknown as UxStore);
-  return { store, editor, files, shell, execution, ux };
+  const templates = {
+    fileTemplates: [{ id: 1, name: "Empty C++" }, { id: 2, name: "Contest C++" }],
+    ensureFileTemplates: vi.fn().mockResolvedValue(undefined),
+    loadTemplateCode: vi.fn(async (id: number): Promise<{ code: string } | undefined> => ({ code: `// template ${id}` })),
+    error: "",
+  };
+  const store = new ProblemImportStore(editor as unknown as EditorWorkspace, files as unknown as WorkspaceStore, shell as ShellStore, execution as unknown as ExecutionStore, ux as unknown as UxStore, templates as unknown as TemplateStore);
+  return { store, editor, files, shell, execution, ux, templates };
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -72,15 +79,117 @@ describe("problem import editor integration", () => {
     expect(editor.openFile).not.toHaveBeenCalled();
   });
 
-  it("stops listening when the workspace changes and when the workbench is disposed", async () => {
-    const { store } = fixture();
+  it("stops the old session and automatically prepares the new workspace, then stops on disposal", async () => {
+    const { store, files } = fixture();
     await store.start("template");
-    store.workspaceChanged("D:\\Other");
-    await vi.waitFor(() => expect(store.listening).toBe(false));
+    files.info = { path: "D:\\Other" };
+    mocks.start.mockResolvedValue({ listening: true, port: 27121, workspacePath: files.info.path });
+    await store.workspaceChanged(files.info.path);
+    expect(store.workspacePath).toBe(files.info.path);
+    expect(store.listening).toBe(true);
+    expect(mocks.start).toHaveBeenCalledTimes(2);
     expect(mocks.stop).toHaveBeenCalledTimes(1);
     store.dispose();
     expect(mocks.unlisten).toHaveBeenCalledTimes(1);
     expect(mocks.stop).toHaveBeenCalledTimes(2);
+  });
+
+  it("automatically prepares imports with the contest template when a workspace opens", async () => {
+    const { store, templates } = fixture();
+    await store.workspaceChanged(root);
+    expect(templates.loadTemplateCode).toHaveBeenCalledWith(2);
+    expect(mocks.start).toHaveBeenCalledWith("// template 2");
+    expect(mocks.listen.mock.invocationCallOrder[0]).toBeLessThan(mocks.start.mock.invocationCallOrder[0]);
+    expect(store.templateId).toBe(2);
+    expect(store.listening).toBe(true);
+    await store.workspaceChanged(root);
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start before a workspace opens", async () => {
+    const { store, files } = fixture();
+    files.info = undefined;
+    await store.workspaceChanged();
+    expect(store.ready).toBe(true);
+    expect(mocks.start).not.toHaveBeenCalled();
+    files.info = { path: root };
+    await store.workspaceChanged(root);
+    expect(store.listening).toBe(true);
+  });
+
+  it("applies a new template and retains it when changing workspaces", async () => {
+    const { store, files } = fixture();
+    await store.workspaceChanged(root);
+    await store.configure(1);
+    expect(mocks.start).toHaveBeenLastCalledWith("// template 1");
+    expect(store.templateId).toBe(1);
+    files.info = { path: "D:\\Other" };
+    mocks.start.mockResolvedValue({ listening: true, port: 27121, workspacePath: files.info.path });
+    await store.workspaceChanged(files.info.path);
+    expect(mocks.start).toHaveBeenLastCalledWith("// template 1");
+  });
+
+  it("recovers after automatic startup fails through retrying the connection", async () => {
+    const { store } = fixture();
+    mocks.start.mockRejectedValueOnce({ userMessage: "端口已被占用" });
+    await store.workspaceChanged(root);
+    expect(store.error).toBe("端口已被占用");
+    expect(store.listening).toBe(false);
+    await store.configure();
+    expect(store.listening).toBe(true);
+    expect(store.error).toBe("");
+  });
+
+  it("does not replace a running session when the chosen template cannot be read", async () => {
+    const { store, templates } = fixture();
+    await store.workspaceChanged(root);
+    templates.loadTemplateCode.mockResolvedValueOnce(undefined);
+    await store.configure(1);
+    expect(store.listening).toBe(true);
+    expect(store.templateId).toBe(2);
+    expect(store.error).toContain("无法读取");
+    expect(mocks.stop).not.toHaveBeenCalled();
+  });
+
+  it("does not appear ready for the previous workspace if preparing the new one fails", async () => {
+    const { store, files, templates } = fixture();
+    await store.workspaceChanged(root);
+    files.info = { path: "D:\\Other" };
+    templates.loadTemplateCode.mockResolvedValueOnce(undefined);
+    await store.workspaceChanged(files.info.path);
+    expect(store.listening).toBe(false);
+    expect(store.workspacePath).toBeUndefined();
+    expect(store.error).toContain("无法读取");
+    expect(mocks.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores stale template loading and prepares the latest workspace", async () => {
+    const { store, files, templates } = fixture();
+    let finishLoad!: (value: { code: string }) => void;
+    templates.loadTemplateCode.mockImplementationOnce(() => new Promise((resolve) => { finishLoad = resolve; }));
+    const first = store.workspaceChanged(root);
+    await vi.waitFor(() => expect(templates.loadTemplateCode).toHaveBeenCalled());
+    files.info = { path: "D:\\Other" };
+    mocks.start.mockResolvedValue({ listening: true, port: 27121, workspacePath: files.info.path });
+    const second = store.workspaceChanged(files.info.path);
+    finishLoad({ code: "// stale template" });
+    await Promise.all([first, second]);
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(mocks.start).toHaveBeenCalledWith("// template 2");
+    expect(store.workspacePath).toBe(files.info.path);
+    expect(store.busy).toBe(false);
+  });
+
+  it("does not start a session if disposed while reading the template", async () => {
+    const { store, templates } = fixture();
+    let finishLoad!: (value: { code: string }) => void;
+    templates.loadTemplateCode.mockImplementationOnce(() => new Promise((resolve) => { finishLoad = resolve; }));
+    const starting = store.workspaceChanged(root);
+    await vi.waitFor(() => expect(templates.loadTemplateCode).toHaveBeenCalled());
+    store.dispose();
+    finishLoad({ code: "// template" });
+    await starting;
+    expect(mocks.start).not.toHaveBeenCalled();
   });
 
   it("reports port/start errors and allows retry without appearing to listen", async () => {

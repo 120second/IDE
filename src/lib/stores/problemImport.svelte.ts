@@ -7,6 +7,7 @@ import type { WorkspaceStore } from "./workspace.svelte";
 import type { ShellStore } from "./shell.svelte";
 import type { ExecutionStore } from "./execution.svelte";
 import type { UxStore } from "./ux.svelte";
+import type { TemplateStore } from "./templates.svelte";
 import { flushNotebookWrites } from "../notebookStorage";
 
 const samePath = (a?: string, b?: string) => Boolean(a && b
@@ -26,6 +27,7 @@ export class ProblemImportStore {
   private unlisten?: UnlistenFn;
   private disposed = false;
   private imports = Promise.resolve();
+  private operations = Promise.resolve();
 
   constructor(
     private readonly editor: EditorWorkspace,
@@ -33,6 +35,7 @@ export class ProblemImportStore {
     private readonly shell: ShellStore,
     private readonly execution: ExecutionStore,
     private readonly ux: UxStore,
+    private readonly templates: TemplateStore,
   ) {}
 
   initialize(): Promise<void> {
@@ -59,40 +62,89 @@ export class ProblemImportStore {
     }
   }
 
-  async start(templateCode: string): Promise<void> {
-    if (this.busy || this.listening || this.disposed) return;
-    this.busy = true;
-    this.error = "";
-    try {
+  private enqueue(operation: () => Promise<void>): Promise<void> {
+    this.operations = this.operations.then(async () => {
+      if (this.disposed) return;
+      this.busy = true;
+      this.error = "";
+      try { await operation(); }
+      catch (error) { this.error = errorMessage(error); }
+      finally { this.busy = false; }
+    });
+    return this.operations;
+  }
+
+  start(templateCode: string): Promise<void> {
+    return this.enqueue(async () => {
       await this.initialize();
-      if (!this.ready) throw new Error("题目监听需要在 LightCP 桌面版中使用。");
-      if (!this.files.info) throw new Error("请先打开用于保存题目的工作区。");
-      const status = await api.startProblemListener(templateCode);
-      if (this.disposed) { await api.stopProblemListener(); return; }
-      if (!samePath(status.workspacePath, this.files.info?.path)) {
-        await api.stopProblemListener();
-        throw new Error("工作区已更换，请重新开启题目监听。");
-      }
-      this.applyStatus(status);
-    } catch (error) {
-      this.error = errorMessage(error);
-    } finally { this.busy = false; }
+      if (this.listening || this.disposed) return;
+      if (!this.ready) throw new Error("题目导入需要在 LightCP 桌面版中使用。");
+      await this.startNow(templateCode);
+    });
   }
 
-  async stop(): Promise<void> {
-    if (this.busy || !this.listening) return;
-    this.busy = true;
-    this.error = "";
-    try {
+  private async startNow(templateCode: string): Promise<void> {
+    if (!this.files.info) throw new Error("请先打开用于保存题目的工作区。");
+    const status = await api.startProblemListener(templateCode);
+    if (this.disposed) { await api.stopProblemListener(); return; }
+    if (!samePath(status.workspacePath, this.files.info?.path)) {
       await api.stopProblemListener();
-      this.listening = false;
-      this.workspacePath = undefined;
-    } catch (error) { this.error = errorMessage(error); }
-    finally { this.busy = false; }
+      throw new Error("工作区已更换，正在为当前工作区准备题目导入。");
+    }
+    this.applyStatus(status);
   }
 
-  workspaceChanged(path?: string): void {
-    if (this.listening && !samePath(path, this.workspacePath)) void this.stop();
+  stop(): Promise<void> {
+    return this.enqueue(() => this.stopNow());
+  }
+
+  private async stopNow(): Promise<void> {
+    if (!this.listening) return;
+    await api.stopProblemListener();
+    this.listening = false;
+    this.workspacePath = undefined;
+  }
+
+  workspaceChanged(path?: string): Promise<void> {
+    return this.enqueue(async () => {
+      await this.initialize();
+      if (!this.ready || this.disposed) return;
+      if (path !== this.files.info?.path) return;
+      if (!path) { await this.stopNow(); return; }
+      if (this.listening && samePath(path, this.workspacePath)) return;
+      await this.stopNow();
+      if (this.disposed || path !== this.files.info?.path) return;
+      await this.prepare(this.templateId);
+    });
+  }
+
+  configure(templateId?: number): Promise<void> {
+    return this.enqueue(async () => {
+      await this.initialize();
+      if (this.disposed) return;
+      if (!this.ready) throw new Error("题目导入需要在 LightCP 桌面版中使用。");
+      await this.prepare(templateId);
+    });
+  }
+
+  private async prepare(templateId?: number): Promise<void> {
+    const root = this.files.info?.path;
+    if (!root) throw new Error("请先打开用于保存题目的工作区。");
+    await this.templates.ensureFileTemplates();
+    const template = this.templates.fileTemplates.find((item) => item.id === templateId)
+      ?? this.templates.fileTemplates.find((item) => item.name === "Contest C++")
+      ?? this.templates.fileTemplates[0];
+    if (!template) throw new Error(this.templates.error || "没有可用的 C++ 文件模板。");
+    const detail = await this.templates.loadTemplateCode(template.id);
+    if (!detail) throw new Error(this.templates.error || "无法读取所选模板。");
+    if (this.disposed || !samePath(root, this.files.info?.path)) return;
+    await this.stopNow();
+    if (this.disposed || !samePath(root, this.files.info?.path)) return;
+    await this.startNow(detail.code);
+    if (this.listening) {
+      this.templateId = template.id;
+      this.templateName = template.name;
+    }
   }
 
   private applyStatus(status: api.ProblemListenerStatus): void {

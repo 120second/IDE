@@ -63,7 +63,7 @@
   let quickSearchOpen = $state(false);
   let problemImportOpen = $state(false);
   let ProblemImportDialog = $state.raw<(typeof import("../reader/ProblemImportDialog.svelte"))["default"]>();
-  const problemImport = untrack(() => new ProblemImportStore(workspace, fileWorkspace, shell, execution, ux));
+  const problemImport = untrack(() => new ProblemImportStore(workspace, fileWorkspace, shell, execution, ux, templateStore));
   let quickFileOpen = $state(false);
   let commandPaletteOpen = $state(false);
   let fileDialogParent = $state<string>();
@@ -107,7 +107,7 @@
     { id: "debug.restart", label: "重新启动调试", category: "调试", shortcut: "Ctrl+Shift+F5", enabled: debugStore.active && !debugStore.busy, disabledReason: "调试会话尚未启动", run: () => void debugStore.restart() },
     { id: "debug.stop", label: "停止调试", category: "调试", shortcut: "Shift+F5", enabled: debugStore.active && !debugStore.busy, disabledReason: "调试会话尚未启动", run: () => void debugStore.stop() },
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
-    command("problem.listen", "CF / 洛谷题目监听", "竞赛", undefined, () => (problemImportOpen = true)),
+    command("problem.listen", "CF / 洛谷题目导入设置", "竞赛", undefined, () => (problemImportOpen = true)),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
     command("view.community", "打开 LightCP 社区", "视图", undefined, () => showActivity("community")),
@@ -176,7 +176,7 @@
 
   $effect(() => {
     const root = fileWorkspace.info?.path;
-    untrack(() => problemImport.workspaceChanged(root));
+    untrack(() => void problemImport.workspaceChanged(root));
   });
 
   onMount(() => {

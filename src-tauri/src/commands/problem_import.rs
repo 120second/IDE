@@ -19,7 +19,7 @@ pub fn start_problem_listener(
         .lock()
         .map_err(|_| CommandError::from(AppError::Internal("workspace lock poisoned".into())))?;
     let root = runtime.root.clone().ok_or_else(|| {
-        CommandError::from(AppError::Server("请先打开工作区，再开启题目监听。".into()))
+        CommandError::from(AppError::Server("请先打开用于保存题目的工作区。".into()))
     })?;
     if template_code.len() > 1024 * 1024 {
         return Err(AppError::Server("所选模板超过 1 MB，请选择其他模板。".into()).into());

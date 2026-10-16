@@ -144,77 +144,125 @@ describe("bundled Codeforces userscript", () => {
   });
 });
 
-describe("userscript automatic listening", () => {
-  function runtime({ visible = true, enabled = true, online = true, luogu = false } = {}) {
+describe("userscript F10 import", () => {
+  function runtime({ online = true, luogu = false, holdSession = false } = {}) {
     const doc = luogu ? luoguDocument() : documentFor('<p>A test statement.</p>');
     const location = { href: luogu ? "https://www.luogu.com.cn/problem/CF1234A" : href };
-    Object.defineProperty(doc, "visibilityState", { configurable: true, get: () => visible ? "visible" : "hidden" });
     let tick = () => {};
-    let token = "session-one";
-    const requests: { url: string; data?: string }[] = [];
+    let finishSession = () => {};
+    const requests: { url: string; data?: string; headers: Record<string, string> }[] = [];
     const menus = new Map<string, () => void>();
     const alert = vi.fn();
     runInNewContext(source, {
       document: doc, location, URL, alert,
-      GM_getValue: () => enabled, GM_setValue: vi.fn(),
       GM_registerMenuCommand: (name: string, callback: () => void) => menus.set(name, callback),
       setInterval: (callback: () => void) => { tick = callback; return 1; },
-      GM_xmlhttpRequest: (request: { url: string; data?: string; onload: (response: { status: number; responseText: string }) => void; onerror: () => void }) => {
+      GM_xmlhttpRequest: (request: { url: string; data?: string; headers: Record<string, string>; onload: (response: { status: number; responseText: string }) => void; onerror: () => void }) => {
         requests.push(request);
         if (!online) { request.onerror(); return; }
-        request.onload({ status: 200, responseText: JSON.stringify(request.url.endsWith("/session") ? { token } : { alreadyImported: false }) });
+        const complete = () => request.onload({ status: 200, responseText: JSON.stringify(request.url.endsWith("/session") ? { token: "session-one" } : { alreadyImported: false }) });
+        if (holdSession && request.url.endsWith("/session")) finishSession = complete;
+        else complete();
       },
     });
-    return { doc, location, requests, menus, alert, tick: () => tick(), changeSession: () => { token = "session-two"; }, show: () => { visible = true; } };
+    const press = (options: KeyboardEventInit = {}) => {
+      const event = new doc.defaultView!.KeyboardEvent("keydown", { key: "F10", bubbles: true, cancelable: true, ...options });
+      doc.dispatchEvent(event);
+      return event;
+    };
+    const imports = () => requests.filter((request) => request.url.endsWith("/problem"));
+    return { doc, location, requests, imports, menus, alert, press, tick: () => tick(), finishSession: () => finishSession() };
   }
 
-  it("automatically sends a visible problem once per listening session", async () => {
-    const running = runtime();
-    const imports = () => running.requests.filter((request) => request.url.endsWith("/problem"));
-    await vi.waitFor(() => expect(imports()).toHaveLength(1));
-    expect(JSON.parse(imports()[0].data!).title).toBe("A. Example");
+  it.each([false, true])("does not contact the IDE on page load, polling or tab activation (Luogu: %s)", async (luogu) => {
+    const running = runtime({ luogu });
     running.tick();
+    running.doc.dispatchEvent(new running.doc.defaultView!.Event("visibilitychange"));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(imports()).toHaveLength(1);
-    running.changeSession();
-    running.tick();
-    await vi.waitFor(() => expect(imports()).toHaveLength(2));
+    expect(running.requests).toHaveLength(0);
+    expect(running.doc.querySelector('[role="status"]')?.textContent).toContain("F10");
   });
 
-  it("does not send background tabs or when automatic listening is disabled", async () => {
-    const hidden = runtime({ visible: false });
-    hidden.tick();
-    expect(hidden.requests).toHaveLength(0);
-    hidden.show();
-    hidden.tick();
-    await vi.waitFor(() => expect(hidden.requests.some((request) => request.url.endsWith("/problem"))).toBe(true));
-    const disabled = runtime({ enabled: false });
-    disabled.tick();
-    expect(disabled.requests).toHaveLength(0);
-    disabled.menus.get("发送当前题目到 LightCP")!();
-    await vi.waitFor(() => expect(disabled.requests.some((request) => request.url.endsWith("/problem"))).toBe(true));
+  it("sends the current CF problem with F10 and allows reopening it", async () => {
+    const running = runtime();
+    expect(running.press().defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(running.imports()).toHaveLength(1));
+    expect(JSON.parse(running.imports()[0].data!).title).toBe("A. Example");
+    expect(running.requests.map((request) => request.headers)).toEqual([
+      expect.objectContaining({ "X-LightCP-Client": "lightcp-userscript-v2", "X-LightCP-Trigger": "f10" }),
+      expect.objectContaining({ "X-LightCP-Client": "lightcp-userscript-v2", "X-LightCP-Trigger": "f10", "X-LightCP-Token": "session-one" }),
+    ]);
+    running.press();
+    await vi.waitFor(() => expect(running.imports()).toHaveLength(2));
   });
 
-  it("stays quiet when the IDE is offline and reports manual send failures", async () => {
+  it("ignores modified shortcuts, other keys and held-key repeats", async () => {
+    const running = runtime();
+    for (const options of [{ ctrlKey: true }, { altKey: true }, { shiftKey: true }, { metaKey: true }, { key: "F9" }]) {
+      expect(running.press(options).defaultPrevented).toBe(false);
+    }
+    running.press({ repeat: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(running.requests).toHaveLength(0);
+  });
+
+  it("coalesces repeated presses while an import is in progress", async () => {
+    const running = runtime({ holdSession: true });
+    running.press();
+    running.press();
+    await vi.waitFor(() => expect(running.requests).toHaveLength(1));
+    running.press();
+    running.finishSession();
+    await vi.waitFor(() => expect(running.imports()).toHaveLength(1));
+    expect(running.requests).toHaveLength(2);
+  });
+
+  it("does not import when clicking the hint or opening the userscript menu", async () => {
+    const running = runtime();
+    running.menus.get("F10 题目导入说明")!();
+    (running.doc.querySelector('[role="status"]') as HTMLElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(running.requests).toHaveLength(0);
+    expect(running.alert).toHaveBeenCalledWith(expect.stringContaining("按 F10"));
+  });
+
+  it("reports connection failures on F10 without requiring manual listening", async () => {
     const running = runtime({ online: false });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(running.alert).not.toHaveBeenCalled();
-    running.menus.get("发送当前题目到 LightCP")!();
-    await vi.waitFor(() => expect(running.alert).toHaveBeenCalledWith(expect.stringContaining("开启“题目监听”")));
+    running.press();
+    await vi.waitFor(() => expect(running.alert).toHaveBeenCalledWith(expect.stringContaining("打开用于保存题目的工作区")));
+    expect(running.doc.querySelector('[role="status"]')?.textContent).toContain("按 F10 重试");
   });
 
-  it("automatically imports a new Luogu problem in the same listening session after navigation", async () => {
+  it("imports the current Luogu problem on F10 after client-side navigation", async () => {
     const running = runtime({ luogu: true });
-    const imports = () => running.requests.filter((request) => request.url.endsWith("/problem"));
-    await vi.waitFor(() => expect(imports()).toHaveLength(1));
-    expect(JSON.parse(imports()[0].data!).title).toBe("CF1234A 示例题");
+    running.press();
+    await vi.waitFor(() => expect(running.imports()).toHaveLength(1));
+    expect(JSON.parse(running.imports()[0].data!).title).toBe("CF1234A 示例题");
     running.doc.querySelector("#lentille-context")!.textContent = luoguDocument("P1001").querySelector("#lentille-context")!.textContent;
     running.location.href = "https://www.luogu.com.cn/problem/P1001";
     running.tick();
-    await vi.waitFor(() => expect(imports()).toHaveLength(2));
-    expect(JSON.parse(imports()[1].data!).url).toBe(running.location.href);
-    running.tick();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(imports()).toHaveLength(2);
+    expect(running.imports()).toHaveLength(1);
+    expect(running.doc.querySelector('[role="status"]')?.textContent).toBe("按 F10 导入 LightCP");
+    running.press();
+    await vi.waitFor(() => expect(running.imports()).toHaveLength(2));
+    expect(JSON.parse(running.imports()[1].data!).url).toBe(running.location.href);
+    running.location.href += "/solution";
+    expect(running.press().defaultPrevented).toBe(false);
+    running.tick();
+    expect(running.doc.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("does not send a stale problem when navigation happens during the session request", async () => {
+    const running = runtime({ luogu: true, holdSession: true });
+    running.press();
+    await vi.waitFor(() => expect(running.requests).toHaveLength(1));
+    running.location.href = "https://www.luogu.com.cn/problem/P1001";
+    running.finishSession();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(running.imports()).toHaveLength(0);
+    expect(running.doc.querySelector('[role="status"]')?.textContent).toContain("题目已切换");
   });
 });
