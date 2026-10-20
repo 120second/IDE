@@ -8,7 +8,7 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { cpp } from "@codemirror/lang-cpp";
-import { setDiagnostics } from "@codemirror/lint";
+import { setDiagnostics, forEachDiagnostic } from "@codemirror/lint";
 import {
   bracketMatching,
   foldGutter,
@@ -74,6 +74,7 @@ import { usesLanguageServices } from "./languageServicePolicy";
 import { normalizeSnippetTemplate } from "./snippets";
 import {
   completionType,
+  closeSignatureTooltip,
   createLspExtensions,
   createTextTooltip,
   incrementalChanges,
@@ -218,6 +219,7 @@ export class EditorWorkspace {
   private templateCompletionProvider: TemplateCompletionProvider | undefined;
   private templateCompletionPickedHandler: ((id: number) => void) | undefined;
   private signatureTimer: ReturnType<typeof setTimeout> | undefined;
+  private signatureRequest = 0;
   private openSequence = 0;
   private openGeneration = 0;
   private readonly latestOpenRequestByPath = new Map<string, number>();
@@ -326,11 +328,18 @@ export class EditorWorkspace {
     );
   }
 
+  sourceSnapshot(path: string): { text: string; revision: number; dirty: boolean } | undefined {
+    const tab = this.tabs.find((tab) => tab.path && samePath(tab.path, path) && !tab.deleted && !tab.deferred);
+    if (!tab) return undefined;
+    const state = tab.id === this.activeId && this.view ? this.view.state : tab.state;
+    return { text: state.sliceDoc(), revision: documentRevision(state), dirty: documentRevision(state) !== tab.savedRevision };
+  }
+
   setLspDiagnostics(path: string, diagnostics: readonly LspDiagnostic[]): void {
     const tab = this.tabs.find((candidate) => candidate.path && samePath(candidate.path, path));
     if (!tab) return;
     const state = tab.id === this.activeId && this.view ? this.view.state : tab.state;
-    const mapped = diagnostics.map((diagnostic) => toCodeMirrorDiagnostic(state, diagnostic));
+    const mapped = diagnostics.filter((diagnostic) => !diagnostic.fileLevel).map((diagnostic) => toCodeMirrorDiagnostic(state, diagnostic));
     if (tab.id === this.activeId && this.view) {
       this.view.dispatch(setDiagnostics(this.view.state, mapped));
       return;
@@ -344,6 +353,18 @@ export class EditorWorkspace {
       return { ...tab, state: tab.state.update(setDiagnostics(tab.state, [])).state };
     });
     if (this.view) this.view.dispatch(setDiagnostics(this.view.state, []));
+  }
+
+  clearCompileDiagnostics(path: string): void {
+    const tab = this.tabs.find((tab) => tab.path && samePath(tab.path, path));
+    if (!tab) return;
+    const state = tab.id === this.activeId && this.view ? this.view.state : tab.state;
+    const remaining: import("@codemirror/lint").Diagnostic[] = [];
+    forEachDiagnostic(state, (diagnostic, from, to) => {
+      if (!/^(编译器|链接器|工具链)(?: ·|$)/.test(diagnostic.source ?? "")) remaining.push({ ...diagnostic, from, to });
+    });
+    if (tab.id === this.activeId && this.view) this.view.dispatch(setDiagnostics(state, remaining));
+    else this.replaceTab(tab.id, { ...tab, state: state.update(setDiagnostics(state, remaining)).state });
   }
 
   setBreakpointHandlers(
@@ -918,12 +939,18 @@ export class EditorWorkspace {
   async requestSignatureHelp(): Promise<void> {
     const context = this.lspPosition();
     if (!context || !this.view) return;
-    const initialState = this.view.state;
+    const view = this.view;
+    const document = view.state.doc;
+    const selection = view.state.selection;
+    const request = ++this.signatureRequest;
     const signature = await this.lspClient?.signatureHelp(context.path, context.position);
-    if (!signature || !this.view || this.view.state !== initialState || !samePath(this.activeTab?.path ?? "", context.path)) {
-      if (this.view) showSignatureTooltip(this.view, null);
-      return;
-    }
+    // Diagnostic/style transactions do not invalidate parameter help; actual edits,
+    // cursor movement, focus loss and newer requests do. A late response must not
+    // reopen a dismissed popup or clear the result of a newer request.
+    if (request !== this.signatureRequest || this.view !== view || view.state.doc !== document
+      || !view.state.selection.eq(selection) || !view.hasFocus
+      || !samePath(this.activeTab?.path ?? "", context.path)) return;
+    if (!signature) { closeSignatureTooltip(view); return; }
     const parameter = signature.activeParameter + 1;
     const text = signature.documentation
       ? `${signature.label}\n参数 ${parameter}\n${signature.documentation}`
@@ -1299,6 +1326,11 @@ export class EditorWorkspace {
           definition: () => void this.goToDefinition(),
           references: () => void this.findReferences(),
           signatureHelp: () => void this.requestSignatureHelp(),
+          dismissSignatureHelp: () => {
+            this.signatureRequest += 1;
+            if (this.signatureTimer) clearTimeout(this.signatureTimer);
+            this.signatureTimer = undefined;
+          },
         }, !largeFile),
         ...editingExtensions,
         EditorState.allowMultipleSelections.of(true),
@@ -1313,6 +1345,11 @@ export class EditorWorkspace {
   }
 
   private handleViewUpdate(update: ViewUpdate): void {
+    if (update.docChanged || update.selectionSet || update.focusChanged && !update.view.hasFocus) {
+      this.signatureRequest += 1;
+      if (this.signatureTimer) clearTimeout(this.signatureTimer);
+      this.signatureTimer = undefined;
+    }
     const id = this.activeId;
     const tab = this.activeTab;
     const reference = this.templateReference;
@@ -1329,7 +1366,7 @@ export class EditorWorkspace {
     }
     this.updateCursor(update.state);
     const path = this.activeTab?.path;
-    if (update.docChanged && path && this.lspClient?.ready) {
+    if (update.docChanged && path && this.lspClient) {
       const wasEnabled = usesLanguageServices(update.startState.doc);
       const isEnabled = usesLanguageServices(update.state.doc);
       const changes = isEnabled ? incrementalChanges(update) : [];
@@ -1369,6 +1406,10 @@ export class EditorWorkspace {
 
   private captureActiveView(): void {
     if (!this.view) return;
+    this.signatureRequest += 1;
+    if (this.signatureTimer) clearTimeout(this.signatureTimer);
+    this.signatureTimer = undefined;
+    closeSignatureTooltip(this.view);
     const id = this.activeId;
     const state = this.view.state;
     const scrollTop = this.view.scrollDOM.scrollTop;
@@ -1463,7 +1504,7 @@ export class EditorWorkspace {
           }
         : candidate,
     );
-    if (tab.path && this.lspClient?.ready) {
+    if (tab.path && this.lspClient) {
       const wasEnabled = usesLanguageServices(previousState.doc);
       const isEnabled = usesLanguageServices(state.doc);
       if (wasEnabled && !isEnabled) {

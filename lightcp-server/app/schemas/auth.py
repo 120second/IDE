@@ -17,6 +17,7 @@ class RegisterRequest(ApiModel):
     username: str = Field(min_length=3, max_length=32)
     email: EmailStr
     password: str
+    remember_me: bool = True
 
     @field_validator("username")
     @classmethod
@@ -35,6 +36,7 @@ class RegisterRequest(ApiModel):
 class LoginRequest(ApiModel):
     identifier: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=128)
+    remember_me: bool = True
 
 
 class ForgotPasswordRequest(ApiModel):

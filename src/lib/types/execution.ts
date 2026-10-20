@@ -9,12 +9,19 @@ export interface CompilerConfig {
 }
 
 export interface CompileRequest {
+  clientTaskId?: string;
+  expectedSource?: string;
   sourcePath: string;
   profile: CompileProfile;
   config: CompilerConfig;
 }
 
 export interface CompileResult {
+  command?: string[];
+  workingDirectory?: string;
+  taskId?: string;
+  diagnostics?: import("./lsp").LspDiagnostic[];
+  sourceChanged?: boolean;
   success: boolean;
   executablePath?: string;
   stdout: string;
@@ -77,7 +84,7 @@ export interface TestcaseInput {
   enabled: boolean;
 }
 
-export type TestcaseStatus = "AC" | "WA" | "RE" | "TLE" | "CE" | "Stopped" | "Running";
+export type TestcaseStatus = "AC" | "WA" | "RE" | "TLE" | "CE" | "OLE" | "Error" | "Stopped" | "Running";
 
 export interface TestcaseResult {
   testcaseId: number;

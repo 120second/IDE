@@ -34,7 +34,7 @@ def login(
     session: Session = Depends(get_db),
 ) -> TokenResponse:
     request.app.state.rate_limiter.check("login-account", normalize_identity(payload.identifier), 20, 300)
-    return request.app.state.auth_service.login(session, payload.identifier, payload.password)
+    return request.app.state.auth_service.login(session, payload.identifier, payload.password, payload.remember_me)
 
 
 @router.get("/me", response_model=UserResponse)

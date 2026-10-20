@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from conftest import register_user
 from app.db.models.user import User
+from app.core.security import decode_access_token
 
 
 def test_register_login_and_me(client: TestClient) -> None:
@@ -85,3 +86,18 @@ def test_password_is_stored_as_argon2id_hash(client: TestClient) -> None:
         assert user is not None
         assert user.password_hash.startswith("$argon2id$")
         assert "plain-password-must-not-remain" not in user.password_hash
+
+
+def test_remembered_login_lasts_30_days_and_session_login_uses_config(client: TestClient) -> None:
+    registered = register_user(client)
+    settings = client.app.state.settings
+    registration = decode_access_token(registered["accessToken"], settings)
+    assert registration["exp"] - registration["iat"] == 30 * 24 * 60 * 60
+    for remember, lifetime in [(True, 30 * 24 * 60 * 60), (False, 60 * 60)]:
+        response = client.post("/api/auth/login", json={
+            "identifier": "alice", "password": "correct-horse-battery", "rememberMe": remember,
+        })
+        assert response.status_code == 200
+        token = decode_access_token(response.json()["accessToken"], settings)
+        assert token["exp"] - token["iat"] == lifetime
+        assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {response.json()['accessToken']}"}).status_code == 200

@@ -5,12 +5,12 @@ export function restoreAuth(): Promise<AuthUser | null> {
   return invoke<AuthUser | null>("auth_restore");
 }
 
-export function register(username: string, email: string, password: string): Promise<AuthUser> {
-  return invoke<AuthUser>("auth_register", { username, email, password });
+export function register(username: string, email: string, password: string, rememberMe = true): Promise<AuthUser> {
+  return invoke<AuthUser>("auth_register", { username, email, password, rememberMe });
 }
 
-export function login(identifier: string, password: string): Promise<AuthUser> {
-  return invoke<AuthUser>("auth_login", { identifier, password });
+export function login(identifier: string, password: string, rememberMe = true): Promise<AuthUser> {
+  return invoke<AuthUser>("auth_login", { identifier, password, rememberMe });
 }
 
 export function getCurrentUser(): Promise<AuthUser> {

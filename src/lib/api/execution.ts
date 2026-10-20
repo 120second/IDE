@@ -16,11 +16,11 @@ export function runProgram(request: RunRequest): Promise<RunResult> {
   return invoke<RunResult>("run_program", { request });
 }
 
-export function stopProgram(): Promise<boolean> {
-  return invoke<boolean>("stop_program");
+export function stopProgram(clientRunId?: string): Promise<boolean> {
+  return invoke<boolean>("stop_program", { clientRunId });
 }
 
-export function stopCompilation(): Promise<boolean> { return invoke<boolean>("stop_compilation"); }
+export function stopCompilation(clientTaskId?: string): Promise<boolean> { return invoke<boolean>("stop_compilation", { clientTaskId }); }
 
 export function listTestcases(sourcePath: string): Promise<Testcase[]> {
   return invoke<Testcase[]>("list_testcases", { sourcePath });

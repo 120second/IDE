@@ -126,7 +126,7 @@
         scope={scopeBefore(nodes, index)}
         depth={0}
         position={String(index + 1)}
-        startExpanded={true}
+        startExpanded={false}
         {diagnostics}
         {ux}
         change={(updated) => update(index, updated)}

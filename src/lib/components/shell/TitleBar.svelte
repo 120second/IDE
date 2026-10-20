@@ -3,6 +3,7 @@
   import type { UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount } from "svelte";
+  let { controlsOnly = false }: { controlsOnly?: boolean } = $props();
 
   const appWindow = isTauri() ? getCurrentWindow() : undefined;
   let maximized = $state(false);
@@ -86,9 +87,10 @@
   }
 </script>
 
-{#if appWindow}
+{#if appWindow || controlsOnly}
   <header
     class:focused
+    class:controls-only={controlsOnly}
     class="window-titlebar"
     data-tauri-drag-region
     role="toolbar"

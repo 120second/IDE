@@ -190,7 +190,7 @@ export class StressStore {
   }
 
   async importReplay(): Promise<void> {
-    if (this.running || this.execution.running || this.execution.compiling || this.debuggerStore.active || this.disposed) return;
+    if (this.running || this.execution.busy || this.execution.running || this.execution.compiling || this.debuggerStore.active || this.disposed) return;
     this.running = true;
     this.cancelRequested = false;
     const previousStatus = this.status;
@@ -221,7 +221,7 @@ export class StressStore {
   }
 
   private async launch(continuing: boolean): Promise<void> {
-    if (this.running || this.execution.running || this.execution.compiling || this.debuggerStore.active || this.disposed) return;
+    if (this.running || this.execution.busy || this.execution.running || this.execution.compiling || this.debuggerStore.active || this.disposed) return;
     const active = this.editor.activeTab;
     if (!active?.path?.toLowerCase().endsWith(".cpp")) {
       this.error = "请先打开作为待测程序的工作区 .cpp 文件。";

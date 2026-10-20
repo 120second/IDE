@@ -17,6 +17,7 @@
   let username = $state("");
   let email = $state("");
   let password = $state("");
+  let rememberMe = $state(true);
   let resetCode = $state("");
   let transfer = $state<"upload" | "download">();
   let transferNotice = $state("");
@@ -32,19 +33,24 @@
 
   function switchMode(next: typeof mode): void {
     mode = next;
+    password = "";
     auth.error = "";
     auth.notice = "";
   }
 
   async function submit(): Promise<void> {
     if (mode === "login") {
-      await auth.signIn(identifier, password);
+      if (await auth.signIn(identifier, password, rememberMe)) password = "";
     } else if (mode === "register") {
-      await auth.signUp(username, email, password);
+      if (await auth.signUp(username, email, password, rememberMe)) password = "";
     } else if (mode === "forgot") {
       if (await auth.sendResetCode(email)) mode = "reset";
     } else {
-      if (await auth.completeReset(email || auth.resetEmail, resetCode, password)) mode = "login";
+      if (await auth.completeReset(email || auth.resetEmail, resetCode, password)) {
+        mode = "login";
+        password = "";
+        resetCode = "";
+      }
     }
   }
 
@@ -136,12 +142,16 @@
           <label><span>新密码</span><input required type="password" bind:value={password} autocomplete="new-password" /></label>
         {/if}
 
+        {#if mode === "login" || mode === "register"}
+          <label class="account-remember"><input type="checkbox" bind:checked={rememberMe} disabled={auth.submitting || auth.loading} /><span>记住登录 30 天，下次自动登录</span></label>
+          <p class="account-login-hint">凭证由系统安全保存。取消勾选则仅本次使用有效，退出登录会清除凭证。</p>
+        {/if}
         {#if auth.error}<p class="account-error" role="alert">{auth.error}</p>{/if}
         {#if auth.notice}<p class="account-notice" role="status">{auth.notice}</p>{/if}
 
         <div class="account-form-actions">
-          <button class="primary-button" type="submit" disabled={auth.submitting}>
-            {auth.submitting ? "请稍候…" : mode === "login" ? "登录" : mode === "register" ? "创建账户" : mode === "forgot" ? "发送验证码" : "重置密码"}
+          <button class="primary-button" type="submit" disabled={auth.submitting || auth.loading}>
+            {auth.loading ? "正在恢复登录…" : auth.submitting ? "请稍候…" : mode === "login" ? "登录" : mode === "register" ? "创建账户" : mode === "forgot" ? "发送验证码" : "重置密码"}
           </button>
           {#if mode === "login"}
             <button class="text-button" type="button" onclick={() => switchMode("forgot")}>忘记密码</button>

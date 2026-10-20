@@ -34,6 +34,7 @@ pub struct LspDiagnostic {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspStartResult {
+    pub session_id: String,
     pub executable: String,
     pub server_name: String,
     pub server_version: String,
@@ -43,10 +44,14 @@ pub struct LspStartResult {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum LspEvent {
     State {
+        #[serde(rename = "sessionId")]
+        session_id: String,
         state: String,
         message: String,
     },
     Diagnostics {
+        #[serde(rename = "sessionId")]
+        session_id: String,
         path: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         version: Option<i64>,

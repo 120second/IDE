@@ -5585,3 +5585,25 @@ button.status-item:hover {
     font-style: italic;
   }
 }
+.account-login-form .account-remember {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  gap: 8px;
+  cursor: pointer;
+}
+.account-login-form .account-remember input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.account-login-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}

@@ -1132,6 +1132,59 @@ fn join_numbers(values: &[i64]) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn sample_recognized_tree_queries_follow_resized_header_and_ranges() {
+        let mut fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../src/lib/generator/fixtures/sample-tree-queries.json"
+        ))
+        .unwrap();
+        fixture["nodes"][0]["fields"][0]["minimum"]["value"] = "2".into();
+        fixture["nodes"][0]["fields"][0]["maximum"]["value"] = "20".into();
+        fixture["nodes"][0]["fields"][1]["maximum"]["value"] = "8".into();
+        fixture["nodes"][1]["fields"][0]["maximum"]["value"] = "100".into();
+        let profile = serde_json::from_value(fixture).unwrap();
+        let result = generate_visual(&VisualGenerateRequest { profile, count: 25 });
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.cases.len(), 25);
+        for case in result.cases {
+            let rows: Vec<Vec<usize>> = case
+                .input
+                .lines()
+                .map(|line| {
+                    line.split_whitespace()
+                        .map(|value| value.parse().unwrap())
+                        .collect()
+                })
+                .collect();
+            let n = rows[0][0];
+            let q = rows[0][1];
+            assert!((2..=20).contains(&n) && (1..=8).contains(&q));
+            assert_eq!(rows.len(), 2 + n - 1 + q);
+            assert_eq!(rows[1].len(), n);
+            assert!(rows[1].iter().all(|value| (1..=100).contains(value)));
+            let mut parent: Vec<usize> = (0..=n).collect();
+            fn root(parent: &mut [usize], mut value: usize) -> usize {
+                while parent[value] != value {
+                    parent[value] = parent[parent[value]];
+                    value = parent[value];
+                }
+                value
+            }
+            for edge in &rows[2..n + 1] {
+                assert_eq!(edge.len(), 2);
+                assert!(edge.iter().all(|value| (1..=n).contains(value)));
+                let u = root(&mut parent, edge[0]);
+                let v = root(&mut parent, edge[1]);
+                assert_ne!(u, v, "tree must not contain a cycle");
+                parent[u] = v;
+            }
+            for query in &rows[n + 1..] {
+                assert_eq!(query.len(), 2);
+                assert!(query.iter().all(|value| (1..=n).contains(value)));
+            }
+        }
+    }
+
     fn generated(dsl: &str, strategy: GeneratorStrategy, shape: TreeShape, seed: u64) -> String {
         let result = generate(&GenerateRequest {
             dsl: dsl.to_owned(),

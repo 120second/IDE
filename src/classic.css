@@ -1,0 +1,46 @@
+/* Optional classic desktop shell. All selectors are scoped so LightCP stays intact. */
+:root[data-interface-style="classic"] { --ui-font: "Segoe UI", "Microsoft YaHei UI", sans-serif; --ui-font-small: 13px; --ui-font-caption: 12px; }
+[data-interface-style="classic"] .classic-menubar { position: relative; z-index: 15; display: flex; align-items: center; flex: 0 0 40px; gap: 8px; min-width: 0; padding-left: 13px; background: color-mix(in srgb, var(--sidebar-background) 94%, transparent); border-bottom: 1px solid var(--border); user-select: none; }
+.classic-brand { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.classic-brand > span { color: var(--accent-strong); font: 700 16px/1 Consolas, monospace; }
+.classic-brand strong { font-size: 14px; font-weight: 500; }
+.classic-menubar nav { display: flex; align-items: stretch; height: 100%; }
+.classic-menubar nav > button, .classic-menu-anchor > button { height: 100%; padding: 0 12px; font-size: 14px; border-radius: 0; background: transparent; color: var(--text-secondary); }
+.classic-menubar nav button:hover, .classic-menu-anchor > button.active { background: var(--hover-background); color: var(--text-primary); }
+.classic-menu-anchor { position: relative; }
+.classic-menu-popup { position: absolute; z-index: 50; top: 100%; left: 0; width: max-content; min-width: 225px; padding: 5px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--background-elevated); box-shadow: 0 5px 18px #0005; }
+.classic-menu-popup > button { width: 100%; min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 5px 10px; text-align: left; color: var(--text-primary); background: transparent; font-size: 13px; }
+.classic-menu-popup kbd { color: var(--text-muted); font-size: 11px; }
+.classic-title-drag { flex: 1; min-width: 8px; align-self: stretch; }
+.classic-file-search { display: flex; align-items: center; gap: 8px; min-height: 28px; min-width: 170px; padding: 4px 10px; background: var(--surface-raised); color: var(--text-secondary); border-radius: 4px; font-size: 12px; }
+.classic-file-search kbd { margin-left: auto; color: var(--text-muted); font: 11px "Segoe UI", sans-serif; }
+.classic-settings-shortcut { display: grid; width: 30px; height: 30px; place-items: center; background: transparent; color: var(--text-secondary); }
+.window-titlebar.controls-only { height: 40px; min-height: 40px; flex: 0 0 132px; padding: 0; background: transparent; border: 0; }
+.controls-only .window-titlebar-brand { display: none; }
+.controls-only .window-titlebar-controls { height: 100%; width: 100%; }
+.controls-only .window-titlebar-controls > button { height: 100%; width: 44px; }
+[data-interface-style="classic"] .activity-bar { width: 52px; flex-basis: 52px; padding-top: 9px; border-color: var(--border); }
+[data-interface-style="classic"] .activity-bar .brand-mark, [data-interface-style="classic"] .activity-bar button > span { display: none; }
+[data-interface-style="classic"] .activity-bar button { width: 52px; min-height: 54px; height: 54px; border-radius: 0; padding: 0; justify-content: center; color: var(--text-muted); }
+[data-interface-style="classic"] .activity-bar button.active { color: var(--text-primary); background: var(--active-background); box-shadow: inset 2px 0 var(--accent); }
+[data-interface-style="classic"] .activity-bar button svg { width: 23px; height: 23px; }
+[data-interface-style="classic"] .sidebar-header { height: 40px; flex-basis: 40px; text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 600; }
+[data-interface-style="classic"] .editor-breadcrumbs { display: none; }
+[data-interface-style="classic"] .tab-bar { height: 40px; min-height: 40px; border-bottom: 1px solid var(--accent); background: color-mix(in srgb, var(--tab-background) var(--editor-opacity-percent), transparent); }
+[data-interface-style="classic"] .editor-tab { height: 40px; min-height: 40px; min-width: 140px; padding-inline: 15px; border-radius: 4px 4px 0 0; border: 1px solid transparent; font-size: 14px; }
+[data-interface-style="classic"] .editor-tab.active { border-color: var(--border); border-bottom: 2px solid var(--text-primary); background: var(--tab-active-background); }
+[data-interface-style="classic"] .tree-row { min-height: 29px; font-size: 14px; border-radius: 2px; }
+[data-interface-style="classic"] .tree-row.selected { background: var(--active-background); border-left: 2px solid var(--accent); }
+[data-interface-style="classic"] .tree-file-icon:not(.cpp-file) { color: #e5b321; }
+[data-interface-style="classic"] .tree-file-icon.cpp-file { color: #19b5eb; }
+[data-interface-style="classic"] .tree-file-icon svg { fill: currentColor; fill-opacity: .15; }
+[data-interface-style="classic"] .sidebar { backdrop-filter: none; }
+[data-interface-style="classic"] .cm-with-minimap { position: relative; }
+[data-interface-style="classic"] .cm-with-minimap .cm-scroller { margin-right: 76px; }
+[data-interface-style="classic"] .cm-classic-minimap { position: absolute; top: 0; right: 0; height: 100%; width: 76px; cursor: pointer; background: color-mix(in srgb, var(--code-background) 80%, transparent); }
+[data-interface-style="classic"] .primary-button { border-radius: 4px; }
+[data-interface-style="classic"] .status-bar { font-size: 11px; background: var(--panel-background); }
+@media (min-width: 1250px) { .classic-file-search { position: absolute; left: 50%; transform: translateX(-50%); min-width: 225px; } }
+@media (max-width: 1050px) { .classic-menubar nav > button, .classic-menu-anchor > button { padding: 0 7px; font-size: 13px; } .classic-file-search { min-width: 115px; } .classic-file-search kbd { display: none; } }
+@media (max-width: 820px) { .classic-brand strong { display: none; } .classic-menubar { gap: 2px; } .classic-settings-shortcut { display: none; } }
+@media (prefers-reduced-motion: reduce) { .classic-menubar * { transition: none !important; } }

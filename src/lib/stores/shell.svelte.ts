@@ -1,5 +1,6 @@
 export type ActivityId =
   | "explorer"
+  | "todos"
   | "testcases"
   | "templates"
   | "community"
@@ -10,6 +11,7 @@ export type BottomPanelId = "problems" | "output" | "debugConsole";
 export type ProblemReaderDock = "left" | "right";
 
 export type SettingsPage =
+  | "updates"
   | "account"
   | "theme"
   | "interface"
@@ -128,8 +130,8 @@ export class ShellStore {
       || window.confirm("主题 JSON 还有未应用的修改，确定要放弃吗？");
   }
 
-  setSidebarWidth(width: number): void {
-    this.sidebarWidth = Math.min(380, Math.max(210, width));
+  setSidebarWidth(width: number, maximum = 380): void {
+    this.sidebarWidth = Math.min(maximum, Math.max(210, width));
   }
 
   setBottomPanelHeight(height: number): void {

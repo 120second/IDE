@@ -132,7 +132,8 @@
         {#if lsp.diagnostics.length > 0}
           <div class="lsp-results-heading">
             <strong>诊断（{lsp.errorCount} 个错误，{lsp.warningCount} 个警告）</strong>
-            <span>{lsp.message}</span>
+            <span>{lsp.checkStatus(workspace.activeTab?.path)}</span>
+            <button onclick={() => lsp.recheck(workspace.activeTab?.path)}>重新检查</button>
             {#if diagnosticPageCount > 1}
               <span>第 {currentDiagnosticPage + 1}/{diagnosticPageCount} 页</span>
               <button disabled={currentDiagnosticPage <= 0} onclick={() => (diagnosticPage = currentDiagnosticPage - 1)}>上一页</button>
@@ -141,22 +142,24 @@
           </div>
           <div class="lsp-result-list">
             {#each visibleDiagnostics as diagnostic, index (`${diagnostic.path}:${diagnostic.range.start.line}:${diagnostic.range.start.character}:${diagnostic.message}:${index}`)}
-              <button onclick={() => void workspace.openLocation({ path: diagnostic.path, range: diagnostic.range })}>
+              <button disabled={!!diagnostic.fileLevel} onclick={() => void workspace.openLocation({ path: diagnostic.path, range: diagnostic.range })}>
                 <span class:error={diagnostic.severity === 1} class:warning={diagnostic.severity === 2} class="lsp-severity">
                   {diagnostic.severity === 1 ? "错误" : diagnostic.severity === 2 ? "警告" : diagnostic.severity === 4 ? "提示" : "信息"}
                 </span>
                 <strong>{diagnostic.message}</strong>
-                <span>行 {diagnostic.range.start.line + 1}，列 {diagnostic.range.start.character + 1}</span>
+                <span>{diagnostic.fileLevel ? "构建任务" : `行 ${diagnostic.range.start.line + 1}，列 ${diagnostic.range.start.character + 1}`}</span>
                 <small>{diagnostic.path}{diagnostic.code ? ` · ${diagnostic.code}` : ""}</small>
               </button>
             {/each}
           </div>
         {:else if lsp.referencesResult.length === 0}
           <div class="panel-empty">
-            <Icon name="check" size={20} />
-            <span>{lsp.state === "ready" ? "当前工作区没有检测到问题。" : lsp.message}</span>
+            <Icon name={lsp.isChecked(workspace.activeTab?.path) ? "check" : "warning"} size={20} />
+            <span>{lsp.isChecked(workspace.activeTab?.path) ? "当前文件的此版本未检测到问题；其他文件可能尚未检查。" : lsp.checkStatus(workspace.activeTab?.path)}</span>
             {#if lsp.state === "unavailable" || lsp.state === "crashed"}
               <button onclick={() => lsp.reconnect()}>重新连接</button>
+            {:else if lsp.ready}
+              <button onclick={() => lsp.recheck(workspace.activeTab?.path)}>重新检查</button>
             {/if}
           </div>
         {/if}
@@ -167,6 +170,12 @@
           <button onclick={() => execution.clearOutput()}>清空</button>
           <span>{execution.compiling ? "正在编译…" : execution.running ? "正在运行…" : backendState === "ready" ? `后端就绪 · 数据库 v${health?.databaseSchemaVersion ?? 0}` : "后端不可用"}</span>
         </div>
+        {#if execution.buildDetails}
+          <details class="execution-build-details">
+            <summary>构建详情</summary>
+            <pre>{execution.buildDetails}</pre>
+          </details>
+        {/if}
         <textarea class="process-output" readonly spellcheck="false" aria-label="程序输出" value={execution.output || `[LightCP] 已就绪。当前共 ${workspace.tabs.length} 个编辑器状态。\n${workspace.notice ? `[文件] ${workspace.notice}\n` : ""}`}></textarea>
       </div>
     {:else}

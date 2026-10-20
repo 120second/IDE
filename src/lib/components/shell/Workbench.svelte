@@ -21,6 +21,7 @@
   import QuickArchiveDialog from "../archive/QuickArchiveDialog.svelte";
   import StressCenter from "../stress/StressCenter.svelte";
   import ActivityBar from "./ActivityBar.svelte";
+  import ClassicMenuBar from "./ClassicMenuBar.svelte";
   import BottomPanel from "./BottomPanel.svelte";
   import Icon from "./Icon.svelte";
   import { matchesShortcut } from "../../keybindings";
@@ -82,7 +83,7 @@
     && !workspace.activeTab.deleted
     && !workspace.activeTab.loading,
   ));
-  let buildReady = $derived(activeFileReady && backendState === "ready" && !execution.compiling && !execution.running);
+  let buildReady = $derived(activeFileReady && backendState === "ready" && !execution.busy && !execution.compiling && !execution.running && !stressStore.running && !debugStore.active);
   let workbenchCommands = $derived<WorkbenchCommand[]>([
     command("file.new", "新建 C++ 文件", "文件", "newFile", () => void createSourceFile()),
     command("file.openFolder", "打开文件夹", "文件", undefined, () => void fileWorkspace.openFolderPicker()),
@@ -93,7 +94,7 @@
     command("editor.close", "关闭当前编辑器", "编辑器", "closeEditor", () => void closeActiveEditor(), Boolean(workspace.activeId), "没有打开的编辑器"),
     command("build.compile", "编译当前文件", "运行", undefined, () => void execution.compileCurrent(), buildReady, buildDisabledReason()),
     command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent(), buildReady, buildDisabledReason()),
-    command("build.stop", "停止编译或运行", "运行", undefined, () => void execution.stop(), execution.running || execution.compiling, "当前没有编译或运行中的任务"),
+    command("build.stop", "停止编译或运行", "运行", undefined, () => void execution.stop(), execution.busy || execution.running || execution.compiling, "当前没有编译或运行中的任务"),
     command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }, buildReady && execution.testcases.length > 0, execution.testcases.length ? buildDisabledReason() : "尚未添加测试点"),
     command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }, debugStartReady(), debugDisabledReason()),
     { id: "debug.continue", label: "继续调试", category: "调试", shortcut: "F5", enabled: debugStore.active && debugStore.stopped && !debugStore.busy, disabledReason: "调试器尚未暂停", run: () => void debugStore.continueExecution() },
@@ -109,6 +110,7 @@
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("problem.listen", "CF / 洛谷题目导入设置", "竞赛", undefined, () => (problemImportOpen = true)),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
+    command("view.todos", "打开待刷题待办", "视图", undefined, () => showActivity("todos")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
     command("view.community", "打开 LightCP 社区", "视图", undefined, () => showActivity("community")),
     command("view.generator", "打开随机数据生成器", "竞赛", undefined, () => shell.openGenerator()),
@@ -417,6 +419,7 @@
   function buildDisabledReason(): string | undefined {
     if (!activeFileReady) return "当前没有可运行的文件";
     if (backendState !== "ready") return "本地后端尚未就绪";
+    if (execution.busy || stressStore.running || debugStore.active) return "请先结束当前编译、运行、调试或对拍任务";
     if (execution.compiling) return "正在编译";
     if (execution.running) return "程序正在运行";
     return undefined;
@@ -425,6 +428,8 @@
   function debugStartReady(): boolean {
     return activeFileReady
       && backendState === "ready"
+      && !execution.busy
+      && !stressStore.running
       && !execution.compiling
       && !execution.running
       && !debugStore.active
@@ -434,7 +439,7 @@
   function debugDisabledReason(): string | undefined {
     if (!activeFileReady) return "当前没有可调试文件";
     if (backendState !== "ready") return "本地后端尚未就绪";
-    if (execution.compiling || execution.running) return "请先结束当前编译或运行";
+    if (execution.busy || stressStore.running || execution.compiling || execution.running) return "请先结束当前编译或运行";
     if (debugStore.active) return "调试会话已启动";
     if (debugStore.busy) return "调试器正在处理命令";
     return undefined;
@@ -514,6 +519,9 @@
 
 <div class:zen-mode={shell.zenMode} class="app-shell">
   <div class="workspace-background" aria-hidden="true"></div>
+  {#if settings.value.interfaceStyle === "classic"}
+    <ClassicMenuBar commands={workbenchCommands} quickOpen={() => openQuickFile()} shortcut={settings.value.keybindings.quickOpen} settings={() => openSettingsPage("interface")} account={() => openSettingsPage("account")} about={() => openSettingsPage("updates")} />
+  {/if}
   <div class="shell-body">
     {#if !shell.zenMode}
       <ActivityBar
@@ -523,7 +531,7 @@
       />
     {/if}
     <div class="workbench">
-      {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge" && shell.activeActivity !== "community"}
+      {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge" && shell.activeActivity !== "community" && !(shell.activeActivity === "testcases" && shell.generatorOpen)}
         <Sidebar
           {shell}
           {workspace}
@@ -578,8 +586,8 @@
             compile={() => void execution.compileCurrent()}
             run={() => void execution.runCurrent()}
             stop={() => void execution.stop()}
-            busy={execution.compiling || execution.running}
-            running={execution.running}
+            busy={execution.busy || execution.compiling || execution.running || stressStore.running || debugStore.active}
+            running={execution.busy || execution.running}
             newFile={() => void createSourceFile()}
             readerOpen={shell.problemReaderVisible}
             sketchOpen={shell.sketchBoardVisible}

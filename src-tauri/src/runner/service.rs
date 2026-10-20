@@ -93,12 +93,19 @@ impl RunnerManager {
     }
 
     pub fn stop(&self) -> bool {
+        self.stop_matching(None)
+    }
+
+    pub fn stop_matching(&self, run_id: Option<&str>) -> bool {
         let Ok(active) = self.active.lock() else {
             return false;
         };
         let Some(active) = active.as_ref() else {
             return false;
         };
+        if run_id.is_some_and(|id| id != active.client_run_id) {
+            return false;
+        }
         active.stop_requested.store(true, Ordering::Release);
         true
     }
@@ -223,6 +230,7 @@ impl RunnerManager {
                     &mut pending_stdout,
                     &mut pending_stderr,
                     output_truncated,
+                    false,
                 );
                 last_emit = Instant::now();
             }
@@ -281,6 +289,7 @@ impl RunnerManager {
             &mut pending_stdout,
             &mut pending_stderr,
             output_truncated,
+            true,
         );
 
         Ok(RunResult {
@@ -368,20 +377,50 @@ fn emit_pending<F>(
     stdout: &mut Vec<u8>,
     stderr: &mut Vec<u8>,
     output_truncated: bool,
+    finished: bool,
 ) where
     F: FnMut(RunnerOutputBatch),
 {
-    if stdout.is_empty() && stderr.is_empty() {
+    let stdout_text = decode_pending(stdout, finished);
+    let stderr_text = decode_pending(stderr, finished);
+    if stdout_text.is_empty() && stderr_text.is_empty() {
         return;
     }
     emit(RunnerOutputBatch {
         client_run_id: request.client_run_id.clone(),
-        stdout: String::from_utf8_lossy(stdout).into_owned(),
-        stderr: String::from_utf8_lossy(stderr).into_owned(),
+        stdout: stdout_text,
+        stderr: stderr_text,
         output_truncated,
     });
-    stdout.clear();
-    stderr.clear();
+}
+
+fn decode_pending(bytes: &mut Vec<u8>, finished: bool) -> String {
+    let mut consumed = 0;
+    let mut text = String::new();
+    while consumed < bytes.len() {
+        match std::str::from_utf8(&bytes[consumed..]) {
+            Ok(valid) => {
+                text.push_str(valid);
+                consumed = bytes.len();
+            }
+            Err(error) => {
+                let valid_end = consumed + error.valid_up_to();
+                text.push_str(std::str::from_utf8(&bytes[consumed..valid_end]).unwrap());
+                consumed = valid_end;
+                if let Some(invalid) = error.error_len() {
+                    text.push('\u{fffd}');
+                    consumed += invalid;
+                } else if finished {
+                    text.push('\u{fffd}');
+                    consumed = bytes.len();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    bytes.drain(..consumed);
+    text
 }
 
 fn join_reader(handle: thread::JoinHandle<std::io::Result<()>>) -> AppResult<()> {
@@ -417,6 +456,19 @@ mod tests {
     use crate::compiler::{compile_current_file, CompileProfile, CompileRequest, CompilerConfig};
 
     use super::*;
+
+    #[test]
+    fn utf8_decoder_preserves_characters_split_across_batches() {
+        let mut bytes = vec![0xe4];
+        assert_eq!(decode_pending(&mut bytes, false), "");
+        bytes.extend([0xb8, 0xad]);
+        assert_eq!(decode_pending(&mut bytes, false), "中");
+        assert!(bytes.is_empty());
+        bytes.extend([b'a', 0xff, 0xf0, 0x9f]);
+        assert_eq!(decode_pending(&mut bytes, false), "a�");
+        bytes.extend([0x98, 0x80]);
+        assert_eq!(decode_pending(&mut bytes, true), "😀");
+    }
 
     #[test]
     fn output_capacity_keeps_streams_bounded() {
@@ -456,6 +508,8 @@ mod tests {
         let flag = Arc::new(AtomicBool::new(false));
         manager.begin("run-1", flag.clone()).unwrap();
         assert_eq!(manager.active_run_id().as_deref(), Some("run-1"));
+        assert!(!manager.stop_matching(Some("previous-run")));
+        assert!(!flag.load(Ordering::Acquire));
         assert!(manager.stop());
         assert!(flag.load(Ordering::Acquire));
         manager.finish("run-1");
@@ -477,10 +531,13 @@ mod tests {
             &source,
             r#"#include <iostream>
 #include <string>
+#include <thread>
+#include <chrono>
 int main() {
     std::string mode;
     std::cin >> mode;
     if (mode == "re") return 7;
+    if (mode == "utf8") { std::cout.put(char(0xe4)); std::cout.flush(); std::this_thread::sleep_for(std::chrono::milliseconds(120)); std::cout.put(char(0xb8)); std::cout.put(char(0xad)); std::cout.flush(); std::this_thread::sleep_for(std::chrono::milliseconds(120)); return 0; }
     if (mode == "loop") while (true) {}
     if (mode == "large") { for (int i = 0; i < 200000; ++i) std::cout << 'x'; return 0; }
     if (mode == "flood") { while (true) { std::cout << std::string(8192, 'x'); std::cout.flush(); } }
@@ -495,6 +552,8 @@ int main() {
             &root,
             &build,
             &CompileRequest {
+                client_task_id: None,
+                expected_source: None,
                 source_path: source.to_string_lossy().into_owned(),
                 profile: CompileProfile::Release,
                 config: CompilerConfig {
@@ -510,6 +569,15 @@ int main() {
         assert!(compile.success, "{}", compile.stderr);
         let executable = compile.executable_path.unwrap();
         let manager = RunnerManager::default();
+
+        let mut streamed = String::new();
+        let unicode = manager
+            .run(&request(&root, &executable, "utf8\n", 2000), |batch| {
+                streamed.push_str(&batch.stdout)
+            })
+            .unwrap();
+        assert_eq!(unicode.stdout, "中");
+        assert_eq!(streamed, unicode.stdout);
 
         let normal = manager
             .run(&request(&root, &executable, "hello\n", 1_000), |_| {})

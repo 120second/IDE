@@ -10,6 +10,7 @@
 
   const primaryItems: { id: ActivityId; label: string; shortLabel: string; icon: IconName }[] = [
     { id: "explorer", label: "资源管理器", shortLabel: "文件", icon: "explorer" },
+    { id: "todos", label: "待刷题待办", shortLabel: "待办", icon: "todo" },
     { id: "testcases", label: "测试点", shortLabel: "测试", icon: "testcases" },
     { id: "templates", label: "模板", shortLabel: "模板", icon: "templates" },
     { id: "debug", label: "调试", shortLabel: "调试", icon: "debug" },

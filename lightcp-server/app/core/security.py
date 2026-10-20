@@ -44,9 +44,11 @@ def create_access_token(
     user_id: str,
     token_version: int,
     settings: Settings,
+    remember_me: bool = False,
 ) -> tuple[str, datetime]:
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(minutes=settings.access_token_expire_minutes)
+    lifetime = timedelta(days=30) if remember_me else timedelta(minutes=settings.access_token_expire_minutes)
+    expires_at = now + lifetime
     payload: dict[str, Any] = {
         "sub": user_id,
         "ver": token_version,

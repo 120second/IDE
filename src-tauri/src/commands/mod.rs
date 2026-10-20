@@ -19,4 +19,6 @@ pub mod stress;
 pub mod templates;
 pub mod testcase;
 pub mod themes;
+pub mod todos;
+pub mod updates;
 pub mod workspace;

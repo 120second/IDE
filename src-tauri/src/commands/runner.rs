@@ -32,6 +32,6 @@ pub async fn run_program(
 }
 
 #[tauri::command]
-pub fn stop_program(state: State<'_, AppState>) -> bool {
-    state.runner.stop()
+pub fn stop_program(client_run_id: Option<String>, state: State<'_, AppState>) -> bool {
+    state.runner.stop_matching(client_run_id.as_deref())
 }

@@ -25,6 +25,12 @@ Swagger UI 在开发环境位于 `http://127.0.0.1:8100/docs`。生产环境会�
 
 JWT 密钥和验证码 HMAC 密钥必须不同，且不得提交到 Git。
 
+登录和注册请求支持 `rememberMe`（默认 `true`）：启用时签发固定 30 天有效的登录凭证，
+关闭时使用 `LIGHTCP_ACCESS_TOKEN_EXPIRE_MINUTES` 配置的有效期。桌面端关闭记住登录后
+仅在当前进程保存凭证，重启需重新登录；启用时使用 Windows 系统凭据库，不保存明文密码。
+密码重置仍会使全部旧凭证失效。客户端更新后也需部署本次服务端代码，
+已有凭证不会自动延长有效期，重新登录后才获得 30 天凭证。
+
 SMTP 配置可以暂时留空。此时服务器仍可启动，注册、登录和模板 API
 均可使用；`POST /api/auth/forgot-password` 会返回 HTTP 503 和
 `EMAIL_SERVICE_UNAVAILABLE`。配置 SMTP 后无需修改代码。

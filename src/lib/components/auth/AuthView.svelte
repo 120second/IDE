@@ -10,6 +10,7 @@
   let username = $state("");
   let email = $state("");
   let password = $state("");
+  let rememberMe = $state(true);
   let passwordConfirm = $state("");
   let code = $state("");
   let localError = $state("");
@@ -20,13 +21,16 @@
       localError = "请输入用户名或邮箱和密码。";
       return;
     }
-    await auth.signIn(identifier.trim(), password);
+    if (await auth.signIn(identifier.trim(), password, rememberMe)) password = "";
   }
 
   async function submitRegister(): Promise<void> {
     localError = validatePasswordConfirmation();
     if (localError) return;
-    await auth.signUp(username.trim(), email.trim(), password);
+    if (await auth.signUp(username.trim(), email.trim(), password, rememberMe)) {
+      password = "";
+      passwordConfirm = "";
+    }
   }
 
   async function submitForgot(): Promise<void> {
@@ -103,6 +107,8 @@
         </div>
         <input id="login-password" type="password" bind:value={password} autocomplete="current-password" maxlength="128" required />
 
+        <label class="auth-remember"><input type="checkbox" bind:checked={rememberMe} disabled={auth.submitting} />记住登录 30 天，下次自动登录</label>
+
         <button class="auth-submit" type="submit" disabled={auth.submitting}>
           {auth.submitting ? "正在登录…" : "登录"}
         </button>
@@ -121,6 +127,8 @@
 
         <label for="register-confirm">确认密码</label>
         <input id="register-confirm" type="password" bind:value={passwordConfirm} autocomplete="new-password" minlength="8" maxlength="128" required />
+
+        <label class="auth-remember"><input type="checkbox" bind:checked={rememberMe} disabled={auth.submitting} />记住登录 30 天，下次自动登录</label>
 
         <button class="auth-submit" type="submit" disabled={auth.submitting}>
           {auth.submitting ? "正在创建…" : "创建账号"}

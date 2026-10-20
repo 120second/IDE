@@ -102,7 +102,7 @@ export class DebugStore {
 
   get startDisabledReason(): string {
     if (this.active || this.busy) return "请先停止当前调试";
-    if (this.execution.compiling || this.execution.running) return "请等待编译或运行结束";
+    if (this.execution.busy || this.execution.compiling || this.execution.running) return "请等待编译或运行结束";
     const tab = this.editor.activeTab;
     if (!tab?.path || !tab.path.toLowerCase().endsWith(".cpp")) return "请先打开一个 C++ 文件";
     if (tab.loading || tab.deleted) return "当前文件尚未就绪";
@@ -446,7 +446,7 @@ export class DebugStore {
       // Release an exited/error backend before compiling the same executable.
       await stopDebugSession();
       if (this.editor.activeTab?.path !== sourcePath) throw new Error("当前文件已切换，请重新开始调试。");
-      const compiled = await this.execution.compileCurrent("debug");
+      const compiled = await this.execution.compileCurrent("debug", true);
       if (this.stopRequested || this.disposed) { this.state = "idle"; this.reason = "调试已取消"; return; }
       if (!compiled?.success || !compiled.executablePath || !sourcePath) {
         this.state = "idle";

@@ -21,7 +21,7 @@
   const lspLabel = () => {
     if (lsp.state === "ready") return lsp.serverVersion ? `clangd ${lsp.serverVersion}` : "clangd 就绪";
     if (lsp.state === "starting") return "clangd 连接中";
-    if (lsp.state === "unavailable") return "未找到 clangd";
+    if (lsp.state === "unavailable") return "clangd 诊断不可用";
     if (lsp.state === "crashed") return "clangd 已退出";
     return "clangd 未启动";
   };
@@ -45,8 +45,9 @@
       title="打开问题面板"
       onclick={() => shell.showBottomPanel("problems")}
     >
-      <Icon name={lsp.errorCount || lsp.warningCount ? "warning" : "check"} size={12} />
+      <Icon name={lsp.errorCount || lsp.warningCount || !lsp.isChecked(activeTab?.path) ? "warning" : "check"} size={12} />
       <span>{lsp.errorCount} 错误</span><span>{lsp.warningCount} 警告</span>
+      {#if !lsp.isChecked(activeTab?.path)}<span class="diagnostic-check-state" title={lsp.checkStatus(activeTab?.path)}>{lsp.checkStatus(activeTab?.path)}</span>{/if}
     </button>
     <span class="status-item backend-status" title={backendState === "ready" ? "Rust 后端已连接" : backendState === "checking" ? "正在连接 Rust 后端" : "浏览器预览模式不连接 Rust 后端"}>
       <span class:ready={backendState === "ready"} class:error={backendState === "error"} class="status-dot"></span>

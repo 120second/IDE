@@ -13,6 +13,7 @@
   ];
   const servicePages: { page: SettingsPage; title: string }[] = [
     { page: "account", title: "账户与云同步" },
+    { page: "updates", title: "关于与更新" },
   ];
 
   let { shell }: Props = $props();

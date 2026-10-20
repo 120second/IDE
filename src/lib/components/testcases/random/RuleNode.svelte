@@ -48,7 +48,7 @@
   }
 
   let { node, index, total, scope, depth, position, startExpanded = false, diagnostics, change, duplicate, move, wrapFollowing, remove, ux }: Props = $props();
-  let expanded = $state(true);
+  let expanded = $state(false);
   let actionMenu = $state<{ x: number; y: number }>();
   let ownDiagnostics = $derived(nodeDiagnostics(diagnostics, node.id));
   let invalid = $derived(ownDiagnostics.length > 0);
@@ -192,7 +192,7 @@
             scope={scopeBefore(node.children, childIndex, scope)}
             depth={depth + 1}
             position={`${orderLabel}.${childIndex + 1}`}
-            startExpanded={true}
+            startExpanded={false}
             {diagnostics}
             {ux}
             change={(updated) => updateChild(childIndex, updated)}

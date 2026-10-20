@@ -2,6 +2,12 @@ export type ThemePreference = "system" | "dark" | "light";
 export type ResolvedTheme = "dark" | "light";
 export type ColorThemeId = "signal" | "graphite" | "forest";
 export type UiDensity = "compact" | "standard" | "comfortable";
+export type InterfaceStyle = "lightcp" | "classic";
+export type TestcaseStyle = "follow" | "standard" | "compact";
+
+export function effectiveTestcaseStyle(settings: Pick<AppSettings, "interfaceStyle" | "testcaseStyle">): "standard" | "compact" {
+  return settings.testcaseStyle === "follow" ? (settings.interfaceStyle === "classic" ? "compact" : "standard") : settings.testcaseStyle;
+}
 export type BackgroundFit = "cover" | "contain" | "fill";
 
 export interface ThemeColorOverrides {
@@ -70,6 +76,8 @@ export interface CustomThemeDefinition {
 }
 
 export interface AppSettings {
+  interfaceStyle: InterfaceStyle;
+  testcaseStyle: TestcaseStyle;
   theme: ThemePreference;
   colorTheme: ColorThemeId;
   editorTheme: string;

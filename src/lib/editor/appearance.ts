@@ -5,6 +5,7 @@ import {
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+import { createMinimapExtension } from "./minimap";
 import { resolveEditorThemeColors } from "../theme/themes";
 import {
   resolveThemePreference,
@@ -19,7 +20,7 @@ export function editorAppearanceKey(settings: Partial<AppSettings>): string {
     activeCustomTheme: settings.activeCustomTheme ?? "",
     customThemes: settings.customThemes ?? [],
   }, variant);
-  return JSON.stringify([variant, colors, settings.fontFamily, settings.fontSize, settings.lineHeight]);
+  return JSON.stringify([variant, colors, settings.interfaceStyle, settings.fontFamily, settings.fontSize, settings.lineHeight]);
 }
 
 export function createAppearanceExtension(settings: Partial<AppSettings>): Extension {
@@ -28,12 +29,16 @@ export function createAppearanceExtension(settings: Partial<AppSettings>): Exten
   const fontFamily = settings.fontFamily ?? "Cascadia Code, JetBrains Mono, Consolas, monospace";
   const fontSize = settings.fontSize ?? 14;
   const lineHeight = settings.lineHeight ?? 1.55;
-  const colors = resolveEditorThemeColors({
+  let colors = resolveEditorThemeColors({
     colorTheme: settings.colorTheme ?? "signal",
     editorTheme: settings.editorTheme ?? "inherit",
     activeCustomTheme: settings.activeCustomTheme ?? "",
     customThemes: settings.customThemes ?? [],
   }, variant);
+
+  if (settings.interfaceStyle === "classic" && (!settings.editorTheme || settings.editorTheme === "inherit") && !light) {
+    colors = { ...colors, text: "#d4d4d4", muted: "#85858c", activeLine: "#ffffff06", selection: "#264f78", keyword: "#c586c0", type: "#4ec9b0", function: "#dcdcaa", comment: "#6a9955", string: "#ce9178", number: "#b5cea8", variable: "#d4d4d4" };
+  }
 
   const editorTheme = EditorView.theme(
     {
@@ -80,6 +85,34 @@ export function createAppearanceExtension(settings: Partial<AppSettings>): Exten
       ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
       ".cm-searchMatch": { backgroundColor: "rgba(231, 175, 75, 0.28)" },
       ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "rgba(78, 133, 209, 0.38)" },
+      ".cm-lintRange-error, .cm-lintRange-warning": {
+        backgroundImage: "none",
+        textDecorationLine: "underline",
+        textDecorationStyle: "wavy",
+        textDecorationThickness: "2px",
+        textUnderlineOffset: "3px",
+      },
+      ".cm-lintRange-error": {
+        textDecorationColor: "var(--danger)",
+        backgroundColor: "color-mix(in srgb, var(--danger) 12%, transparent)",
+      },
+      ".cm-lintRange-warning": {
+        textDecorationColor: "var(--warning)",
+        backgroundColor: "color-mix(in srgb, var(--warning) 10%, transparent)",
+      },
+      ".cm-lintPoint-error:after": { borderBottom: "6px solid var(--danger)" },
+      ".cm-lintPoint-warning:after": { borderBottom: "6px solid var(--warning)" },
+      ".cm-lint-marker-error, .cm-lint-marker-warning": {
+        width: "13px", height: "13px", margin: "3px 2px",
+        borderRadius: "2px", backgroundImage: "none",
+        color: "var(--background)", fontFamily: "sans-serif", fontSize: "11px", fontWeight: "bold",
+        lineHeight: "13px", textAlign: "center",
+      },
+      ".cm-lint-marker-error": { backgroundColor: "var(--danger)" },
+      ".cm-lint-marker-warning": { backgroundColor: "var(--warning)" },
+      ".cm-lint-marker-error:after, .cm-lint-marker-warning:after": { content: '"!"' },
+      ".cm-diagnostic-error": { borderLeftColor: "var(--danger)" },
+      ".cm-diagnostic-warning": { borderLeftColor: "var(--warning)" },
     },
     { dark: !light },
   );
@@ -96,5 +129,5 @@ export function createAppearanceExtension(settings: Partial<AppSettings>): Exten
     { tag: tags.meta, color: colors.keyword },
   ]);
 
-  return [editorTheme, syntaxHighlighting(highlightStyle)];
+  return [editorTheme, syntaxHighlighting(highlightStyle), ...(settings.interfaceStyle === "classic" ? [createMinimapExtension()] : [])];
 }

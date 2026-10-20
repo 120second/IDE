@@ -55,17 +55,17 @@ export class AuthStore {
     this.notice = "";
   }
 
-  async signIn(identifier: string, password: string): Promise<boolean> {
+  async signIn(identifier: string, password: string, rememberMe = true): Promise<boolean> {
     return this.submit(async () => {
-      this.user = await login(identifier, password);
+      this.user = await login(identifier.trim(), password, rememberMe);
       this.connection = "online";
       this.notice = "";
     });
   }
 
-  async signUp(username: string, email: string, password: string): Promise<boolean> {
+  async signUp(username: string, email: string, password: string, rememberMe = true): Promise<boolean> {
     return this.submit(async () => {
-      this.user = await register(username, email, password);
+      this.user = await register(username, email, password, rememberMe);
       this.connection = "online";
       this.notice = "";
     });

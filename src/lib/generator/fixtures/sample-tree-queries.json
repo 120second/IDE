@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "strategy": "random",
+  "treeShape": "mixed",
+  "seed": "42",
+  "seedLocked": true,
+  "nodes": [
+    { "type": "line", "id": "header", "fields": [
+      { "type": "integer", "id": "n", "name": "n", "minimum": { "type": "constant", "value": "4" }, "maximum": { "type": "constant", "value": "4" } },
+      { "type": "integer", "id": "q", "name": "q", "minimum": { "type": "constant", "value": "1" }, "maximum": { "type": "constant", "value": "1" } }
+    ] },
+    { "type": "line", "id": "values", "fields": [
+      { "type": "array", "id": "a", "name": "a", "length": { "type": "variable", "name": "n", "offset": 0 }, "minimum": { "type": "constant", "value": "1" }, "maximum": { "type": "constant", "value": "4" } }
+    ] },
+    { "type": "tree", "id": "tree", "nodes": { "type": "variable", "name": "n", "offset": 0 }, "indexBase": 1 },
+    { "type": "repeat", "id": "queries", "count": { "type": "variable", "name": "q", "offset": 0 }, "children": [
+      { "type": "line", "id": "pair", "fields": [
+        { "type": "integer", "id": "u", "name": "u", "minimum": { "type": "constant", "value": "1" }, "maximum": { "type": "variable", "name": "n", "offset": 0 } },
+        { "type": "integer", "id": "v", "name": "v", "minimum": { "type": "constant", "value": "1" }, "maximum": { "type": "variable", "name": "n", "offset": 0 } }
+      ] }
+    ] }
+  ]
+}

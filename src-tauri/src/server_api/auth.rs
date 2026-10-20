@@ -38,12 +38,15 @@ struct RegisterRequest<'a> {
     username: &'a str,
     email: &'a str,
     password: &'a str,
+    remember_me: bool,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct LoginRequest<'a> {
     identifier: &'a str,
     password: &'a str,
+    remember_me: bool,
 }
 
 #[derive(Serialize)]
@@ -70,6 +73,7 @@ pub async fn register(
     username: &str,
     email: &str,
     password: &str,
+    remember_me: bool,
 ) -> AppResult<AuthUser> {
     let response: TokenResponse = api
         .post(
@@ -78,26 +82,33 @@ pub async fn register(
                 username,
                 email,
                 password,
+                remember_me,
             },
             false,
         )
         .await?;
-    save_access_token(&response.access_token)?;
+    save_access_token(&response.access_token, remember_me)?;
     Ok(response.user)
 }
 
-pub async fn login(api: &ServerApi, identifier: &str, password: &str) -> AppResult<AuthUser> {
+pub async fn login(
+    api: &ServerApi,
+    identifier: &str,
+    password: &str,
+    remember_me: bool,
+) -> AppResult<AuthUser> {
     let response: TokenResponse = api
         .post(
             "/auth/login",
             &LoginRequest {
                 identifier,
                 password,
+                remember_me,
             },
             false,
         )
         .await?;
-    save_access_token(&response.access_token)?;
+    save_access_token(&response.access_token, remember_me)?;
     Ok(response.user)
 }
 

@@ -13,7 +13,10 @@ pub async fn compile_current_file(
 ) -> Result<CompileResult, CommandError> {
     let workspace_root = state.active_workspace_root().map_err(CommandError::from)?;
     let build_root = state.paths.data_dir.join("build");
-    let compilation = state.compiler.reserve().map_err(CommandError::from)?;
+    let compilation = state
+        .compiler
+        .reserve_for(request.client_task_id.clone())
+        .map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
         compilation.compile(&workspace_root, &build_root, &request)
     })
@@ -27,6 +30,6 @@ pub async fn compile_current_file(
 }
 
 #[tauri::command]
-pub fn stop_compilation(state: State<'_, AppState>) -> bool {
-    state.compiler.stop()
+pub fn stop_compilation(client_task_id: Option<String>, state: State<'_, AppState>) -> bool {
+    state.compiler.stop_matching(client_task_id.as_deref())
 }

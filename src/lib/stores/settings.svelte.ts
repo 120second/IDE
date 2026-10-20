@@ -1,5 +1,6 @@
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { loadSettings, saveSettings } from "../api/settings";
+import { classicInterfaceColors } from "../theme/interfaceStyle";
 import {
   resolveThemePreference,
   type AppSettings,
@@ -27,6 +28,8 @@ import {
 } from "../theme/themes";
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  interfaceStyle: "lightcp",
+  testcaseStyle: "follow",
   theme: "system",
   colorTheme: "signal",
   editorTheme: "inherit",
@@ -134,6 +137,8 @@ export class SettingsStore {
 
   resetAppearance(): void {
     this.update({
+      interfaceStyle: DEFAULT_SETTINGS.interfaceStyle,
+      testcaseStyle: DEFAULT_SETTINGS.testcaseStyle,
       theme: DEFAULT_SETTINGS.theme,
       colorTheme: DEFAULT_SETTINGS.colorTheme,
       editorTheme: DEFAULT_SETTINGS.editorTheme,
@@ -349,6 +354,7 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   const variant = resolveThemePreference(settings.theme);
   const custom = getActiveCustomTheme(settings);
   root.dataset.theme = variant;
+  root.dataset.interfaceStyle = settings.interfaceStyle;
   root.dataset.themeMode = settings.theme;
   root.dataset.colorTheme = getEffectiveBaseTheme(settings);
   root.dataset.customTheme = custom?.id ?? "";
@@ -374,13 +380,14 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   root.style.setProperty("--workspace-background-size", settings.backgroundFit === "fill" ? "100% 100%" : settings.backgroundFit);
   root.style.setProperty("--workspace-background-position", `${settings.backgroundPositionX}% ${settings.backgroundPositionY}%`);
   root.style.setProperty("--workspace-background-scale", String(settings.backgroundScale));
-  root.style.setProperty("--code-background", resolveEditorBackground(settings, variant));
+  root.style.setProperty("--code-background", settings.interfaceStyle === "classic" && settings.editorTheme === "inherit" ? (variant === "dark" ? "#25252b" : "#ffffff") : resolveEditorBackground(settings, variant));
   const backgroundUrl = resolveBackgroundUrl(settings.backgroundImage);
   root.style.setProperty(
     "--workspace-background-image",
     backgroundUrl ? `url("${escapeCssUrl(backgroundUrl)}")` : "none",
   );
-  for (const [token, value] of Object.entries(resolveThemeColors(settings, variant))) {
+  const colors = { ...resolveThemeColors(settings, variant), ...(settings.interfaceStyle === "classic" ? classicInterfaceColors(variant) : {}) };
+  for (const [token, value] of Object.entries(colors)) {
     root.style.setProperty(THEME_CSS_VARIABLES[token as ThemeColorToken], value);
   }
 }
@@ -389,6 +396,8 @@ function normalizeSettings(settings: AppSettings): AppSettings {
   const customThemes = normalizeCustomThemes(settings.customThemes);
   const requestedCustomTheme = String(settings.activeCustomTheme ?? "");
   return {
+    interfaceStyle: settings.interfaceStyle === "classic" ? "classic" : "lightcp",
+    testcaseStyle: settings.testcaseStyle === "compact" || settings.testcaseStyle === "standard" ? settings.testcaseStyle : "follow",
     theme: normalizeTheme(settings.theme),
     colorTheme: normalizeColorTheme(settings.colorTheme),
     editorTheme: ["inherit", "signal", "graphite", "forest", ...customThemes.map((theme) => `custom:${theme.id}`)].includes(settings.editorTheme)

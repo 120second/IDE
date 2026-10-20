@@ -18,22 +18,35 @@ pub async fn auth_register(
     username: String,
     email: String,
     password: String,
+    remember_me: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<AuthUser, CommandError> {
-    auth::register(&state.server_api, &username, &email, &password)
-        .await
-        .map_err(CommandError::from)
+    auth::register(
+        &state.server_api,
+        &username,
+        &email,
+        &password,
+        remember_me.unwrap_or(true),
+    )
+    .await
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]
 pub async fn auth_login(
     identifier: String,
     password: String,
+    remember_me: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<AuthUser, CommandError> {
-    auth::login(&state.server_api, &identifier, &password)
-        .await
-        .map_err(CommandError::from)
+    auth::login(
+        &state.server_api,
+        &identifier,
+        &password,
+        remember_me.unwrap_or(true),
+    )
+    .await
+    .map_err(CommandError::from)
 }
 
 #[tauri::command]

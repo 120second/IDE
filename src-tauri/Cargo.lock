@@ -1949,7 +1949,7 @@ dependencies = [
 
 [[package]]
 name = "lightcp"
-version = "0.1.1-dev.4"
+version = "0.1.1-dev.5"
 dependencies = [
  "dunce",
  "keyring",
@@ -1957,6 +1957,7 @@ dependencies = [
  "notify",
  "reqwest 0.12.28",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "tauri",

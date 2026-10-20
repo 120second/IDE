@@ -6,6 +6,7 @@ import "./appearance.css";
 import "./auth.css";
 import "./community.css";
 import "./generator.css";
+import "./classic.css";
 
 const target = document.getElementById("app");
 

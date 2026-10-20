@@ -91,7 +91,7 @@
     const clangdPath = settings.value.clangdPath;
     const compilerPath = settings.value.compilerPath;
     const compilerStandard = settings.value.compilerStandard;
-    const compilerArgs = [...settings.value.releaseArgs];
+    const compilerArgs = [...(execution?.profile === "debug" ? settings.value.debugArgs : settings.value.releaseArgs)];
     untrack(() => lspStore?.configure(
       root,
       clangdPath,
@@ -157,10 +157,11 @@
           editor,
           settings,
           shell,
-          (sourcePath) => lspStore?.acceptSuccessfulCompile(sourcePath),
+          (sourcePath, result, snapshot) => lspStore?.acceptCompileResult(sourcePath, result, snapshot),
         );
         debugStore = new DebugStore(editor, execution, settings, shell);
         stressStore = new StressStore(editor, generator, execution, debugStore, settings, shell);
+        execution.setExternalBusy((allowDebug) => !!stressStore?.running || (!allowDebug && !!debugStore?.active));
         sessionStore = new SessionStore(fileWorkspace, editor, shell, ux);
         registerPerformanceReaders(
           () => execution!.approximateOutputBytes + debugStore!.approximateOutputBytes,
@@ -221,7 +222,7 @@
 </svelte:head>
 
 <div class="window-frame">
-  <TitleBar />
+  {#if settings.value.interfaceStyle !== "classic"}<TitleBar />{/if}
   <div class="window-content">
     {#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
       <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {auth} {backendState} {health} />

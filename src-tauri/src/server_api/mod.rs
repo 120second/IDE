@@ -2,7 +2,7 @@ pub mod auth;
 pub mod community;
 pub mod templates;
 
-use std::time::Duration;
+use std::{sync::Mutex, time::Duration};
 
 use reqwest::{Method, RequestBuilder, StatusCode, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -13,6 +13,7 @@ use crate::error::{AppError, AppResult};
 const DEFAULT_API_BASE_URL: &str = "https://114.55.109.162/lightcp-api";
 const CREDENTIAL_SERVICE: &str = "com.lightcp.ide";
 const CREDENTIAL_USER: &str = "lightcp-access-token";
+static SESSION_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
 #[derive(Clone)]
 pub struct ServerApi {
@@ -182,13 +183,28 @@ async fn response_error(response: reqwest::Response) -> AppError {
     }
 }
 
-pub fn save_access_token(token: &str) -> AppResult<()> {
-    credential_entry()?
-        .set_password(token)
-        .map_err(|error| AppError::Configuration(format!("could not store access token: {error}")))
+pub fn save_access_token(token: &str, remember_me: bool) -> AppResult<()> {
+    if remember_me {
+        credential_entry()?.set_password(token).map_err(|error| {
+            AppError::Configuration(format!("could not store access token: {error}"))
+        })?;
+    } else {
+        delete_access_token()?;
+    }
+    *SESSION_TOKEN
+        .lock()
+        .map_err(|_| AppError::Internal("session lock poisoned".into()))? = Some(token.to_owned());
+    Ok(())
 }
 
 pub fn load_access_token() -> AppResult<Option<String>> {
+    if let Some(token) = SESSION_TOKEN
+        .lock()
+        .map_err(|_| AppError::Internal("session lock poisoned".into()))?
+        .clone()
+    {
+        return Ok(Some(token));
+    }
     match credential_entry()?.get_password() {
         Ok(token) => Ok(Some(token)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -200,7 +216,12 @@ pub fn load_access_token() -> AppResult<Option<String>> {
 
 pub fn delete_access_token() -> AppResult<()> {
     match credential_entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Ok(()) | Err(keyring::Error::NoEntry) => {
+            *SESSION_TOKEN
+                .lock()
+                .map_err(|_| AppError::Internal("session lock poisoned".into()))? = None;
+            Ok(())
+        }
         Err(error) => Err(AppError::Configuration(format!(
             "could not delete access token: {error}"
         ))),

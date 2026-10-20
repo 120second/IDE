@@ -3961,8 +3961,8 @@ button.status-item:hover {
   }
 }
 
-.cm-tooltip .cm-lsp-hover,
-.cm-tooltip .cm-lsp-signature {
+.cm-tooltip.cm-lsp-hover,
+.cm-tooltip.cm-lsp-signature {
   max-width: min(640px, 72vw);
   max-height: 280px;
   overflow: auto;
@@ -6373,3 +6373,10 @@ input[type="range"]:disabled {
 .performance-mode .tab-loading {
   animation: none;
 }
+
+.execution-build-details { padding: 6px 10px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.execution-build-details summary { cursor: pointer; }
+.execution-build-details pre { max-height: 120px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--editor-font-family); font-size: 12px; }
+.result-ole, .result-error { color: var(--danger); }
+
+.diagnostic-check-state { max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

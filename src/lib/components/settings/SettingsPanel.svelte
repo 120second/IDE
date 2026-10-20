@@ -5,6 +5,8 @@
   import type { AuthStore } from "../../stores/auth.svelte";
   import type { TemplateStore } from "../../stores/templates.svelte";
   import AccountSettings from "./AccountSettings.svelte";
+  import UpdateSettings from "./UpdateSettings.svelte";
+  import InterfaceStylePicker from "./InterfaceStylePicker.svelte";
   import AppearanceRange from "./AppearanceRange.svelte";
   import AppearancePreview from "./AppearancePreview.svelte";
   import {
@@ -65,6 +67,7 @@
     { id: "fill", label: "拉伸" },
   ];
   const pageDetails: Record<SettingsPage, { title: string; description: string }> = {
+    updates: { title: "关于与更新", description: "查看当前版本，检查并下载 LightCP 更新。" },
     account: { title: "账户与云同步", description: "LightCP 始终可以离线使用；登录只用于可选的云端模板。" },
     theme: { title: "主题", description: "显示模式、内置颜色主题与自定义主题。" },
     interface: { title: "界面", description: "调整工作台密度、透明度与背景模糊。" },
@@ -109,6 +112,8 @@
       });
     } else if (shell.settingsPage === "interface") {
       settings.update({
+        interfaceStyle: DEFAULT_SETTINGS.interfaceStyle,
+        testcaseStyle: DEFAULT_SETTINGS.testcaseStyle,
         uiDensity: DEFAULT_SETTINGS.uiDensity,
         sidebarOpacity: DEFAULT_SETTINGS.sidebarOpacity,
         editorOpacity: DEFAULT_SETTINGS.editorOpacity,
@@ -234,6 +239,10 @@
     <AccountSettings {auth} {templateStore} {ux} />
   {/if}
 
+  {#if shell.settingsPage === "updates"}
+    <UpdateSettings />
+  {/if}
+
   {#if appearancePage}
   <div class="appearance-layout">
   <section class="settings-section settings-detail-section" data-settings-page={shell.settingsPage}>
@@ -296,6 +305,7 @@
     {/if}
 
     {#if shell.settingsPage === "interface"}
+    <InterfaceStylePicker {settings} />
     <div class="appearance-block">
       <div class="appearance-block-heading">
         <strong>界面密度</strong>

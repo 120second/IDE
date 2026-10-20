@@ -38,7 +38,10 @@ export class ExecutionStore {
   compileResult = $state<CompileResult>();
   sourcePath = $state("");
   output = $state("");
+  buildDetails = $state("");
   error = $state("");
+  busy = $state(false);
+  profile = $state<CompileProfile>("release");
   compiling = $state(false);
   running = $state(false);
   stopping = $state(false);
@@ -47,8 +50,10 @@ export class ExecutionStore {
   private unlisten: UnlistenFn | undefined;
   private testcaseRequest = 0;
   private runSequence = 0;
+  private taskSequence = 0;
+  private clientTaskId = "";
   private activeClientRunId = "";
-  private streamReceived = false;
+  private externalBusy: ((allowDebug: boolean) => boolean) | undefined;
   private readonly outputBuffer = new BoundedOutputBuffer(
     FRONTEND_OUTPUT_LIMIT,
     "[较早的输出因界面容量限制已被丢弃]\n",
@@ -67,7 +72,7 @@ export class ExecutionStore {
     private readonly editor: EditorWorkspace,
     private readonly settings: SettingsStore,
     private readonly shell: ShellStore,
-    private readonly onSuccessfulCompile?: (sourcePath: string) => void,
+    private readonly onCompileResult?: (sourcePath: string, result: CompileResult, snapshot?: { text: string; revision: number; dirty: boolean; documents?: { path: string; revision: number }[] }) => void,
   ) {}
 
   async initialize(): Promise<void> {
@@ -76,7 +81,6 @@ export class ExecutionStore {
       const unlisten = await listen<RunnerOutputBatch>("runner-output", (event) => {
         recordIpcEvent();
         if (event.payload.clientRunId !== this.activeClientRunId) return;
-        this.streamReceived = true;
         this.appendOutput(event.payload.stdout);
         this.appendOutput(event.payload.stderr);
         if (event.payload.outputTruncated) this.appendTruncationNotice();
@@ -90,8 +94,8 @@ export class ExecutionStore {
 
   dispose(): void {
     this.disposed = true;
-    if (this.compiling) void stopCompilation().catch(() => undefined);
-    if (this.running) void stopProgram().catch(() => undefined);
+    if (this.compiling) void stopCompilation(this.clientTaskId).catch(() => undefined);
+    if (this.running) void stopProgram(this.activeClientRunId).catch(() => undefined);
     this.unlisten?.();
     this.unlisten = undefined;
     if (this.outputTimer) clearTimeout(this.outputTimer);
@@ -173,138 +177,110 @@ export class ExecutionStore {
     }
   }
 
-  async compileCurrent(profile: CompileProfile = "release"): Promise<CompileResult | undefined> {
-    if (this.compiling || this.running) return undefined;
+  setExternalBusy(check: (allowDebug: boolean) => boolean): void {
+    this.externalBusy = check;
+  }
+
+  private async task<T>(action: () => Promise<T>, allowDebug = false): Promise<T | undefined> {
+    if (this.busy || this.compiling || this.running || this.disposed || this.externalBusy?.(allowDebug)) return undefined;
+    this.busy = true;
+    this.clientTaskId = `compile-${Date.now()}-${++this.taskSequence}`;
     this.compileCancelled = false;
-    this.compiling = true;
-    try {
-      const sourcePath = await this.prepareSource();
-      if (!sourcePath) return undefined;
-      return await this.compileSource(sourcePath, profile, true);
+    this.compileResult = undefined;
+    this.buildDetails = "";
+    try { return await action(); }
+    catch (error) {
+      this.error = errorMessage(error);
+      this.appendOutput(`[任务] ${this.error}\n`);
+      return undefined;
     } finally {
+      this.busy = false;
       this.compiling = false;
+      this.running = false;
       this.stopping = false;
     }
   }
 
-  async runCurrent(): Promise<void> {
-    if (this.compiling || this.running) return;
-    this.compileCancelled = false;
-    this.compiling = true;
-    let sourcePath: string | undefined;
-    let compiled: CompileResult | undefined;
-    try {
-      sourcePath = await this.prepareSource();
-      if (!sourcePath) return;
-      this.results = [];
-      this.clearOutput();
-      compiled = await this.compileSource(sourcePath, "release", false);
-    } finally {
-      this.compiling = false;
-      this.stopping = false;
-    }
-    if (!compiled?.success || !compiled.executablePath) return;
-    this.shell.showBottomPanel("output");
-    this.appendOutput(`\n[运行] ${fileName(sourcePath)}\n`);
-    await this.execute(compiled.executablePath, sourcePath, "");
+  async compileCurrent(profile: CompileProfile = "release", allowDebug = false): Promise<CompileResult | undefined> {
+    return this.task(async () => {
+      this.compiling = true;
+      const source = await this.prepareSource();
+      return source ? this.compileSource(source, profile, true) : undefined;
+    }, allowDebug);
   }
+
+  async runCurrent(): Promise<void> { await this.runInput("", "当前程序"); }
 
   async runInput(stdin: string, label = "随机数据"): Promise<void> {
-    if (this.compiling || this.running) return;
-    this.compileCancelled = false;
-    this.compiling = true;
-    let sourcePath: string | undefined;
-    let compiled: CompileResult | undefined;
-    try {
-      sourcePath = await this.prepareSource();
-      if (!sourcePath) return;
+    await this.task(async () => {
+      this.compiling = true;
+      const source = await this.prepareSource();
+      if (!source) return;
       this.results = [];
       this.clearOutput();
-      compiled = await this.compileSource(sourcePath, "release", false);
-    } finally {
+      const compiled = await this.compileSource(source, "release", false);
       this.compiling = false;
-      this.stopping = false;
-    }
-    if (!compiled?.success || !compiled.executablePath) return;
-    this.shell.showBottomPanel("output");
-    this.appendOutput(`\n[运行] ${label}\n`);
-    await this.execute(compiled.executablePath, sourcePath, stdin);
+      if (!compiled?.success || !compiled.executablePath || this.compileCancelled) return;
+      this.appendOutput(`\n[运行] ${label}\n`);
+      await this.execute(compiled.executablePath, source, stdin);
+    });
   }
 
   async runOne(testcase: Testcase): Promise<void> {
-    if (this.compiling || this.running) return;
-    this.compileCancelled = false;
-    this.compiling = true;
-    let sourcePath: string | undefined;
-    let compiled: CompileResult | undefined;
-    try {
-      const preparedTestcase = await this.beforeTestRun?.(testcase.id);
-      if (preparedTestcase === false) return;
-      if (preparedTestcase) testcase = preparedTestcase;
-      sourcePath = await this.prepareSource();
-      if (!sourcePath) return;
+    await this.task(async () => {
+      this.compiling = true;
+      const prepared = await this.beforeTestRun?.(testcase.id);
+      if (prepared === false) return;
+      if (prepared) testcase = prepared;
+      const source = await this.prepareSource();
+      if (!source) return;
       this.clearOutput();
-      compiled = await this.compileSource(sourcePath, "release", false);
-    } finally {
+      const compiled = await this.compileSource(source, "release", false);
       this.compiling = false;
-      this.stopping = false;
-    }
-    if (!compiled?.success || !compiled.executablePath) {
-      this.setResult(compileFailureResult(testcase));
-      return;
-    }
-    await this.executeTestcase(compiled.executablePath, sourcePath, testcase);
+      if (!compiled?.success || !compiled.executablePath || this.compileCancelled) {
+        this.setResult({ ...emptyResult(testcase), status: this.compileCancelled ? "Stopped" : this.error ? "Error" : "CE", stderr: this.error || compiled?.stderr || "" });
+        return;
+      }
+      await this.executeTestcase(compiled.executablePath, source, testcase);
+    });
   }
 
   async runAll(): Promise<void> {
-    if (this.compiling || this.running) return;
-    this.compileCancelled = false;
-    this.compiling = true;
-    let sourcePath: string | undefined;
-    let compiled: CompileResult | undefined;
-    let enabled: Testcase[] = [];
-    try {
+    await this.task(async () => {
+      this.compiling = true;
       if (await this.beforeTestRun?.() === false) return;
-      sourcePath = await this.prepareSource();
-      if (!sourcePath) return;
-      await this.syncActiveSource(sourcePath);
-      enabled = this.testcases.filter((testcase) => testcase.enabled);
-      if (!enabled.length) {
-        this.error = "请至少添加或启用一个测试点后再全部运行。";
-        return;
-      }
+      const source = await this.prepareSource();
+      if (!source) return;
+      await this.syncActiveSource(source);
+      const enabled = this.testcases.filter((testcase) => testcase.enabled);
+      if (!enabled.length) { this.error = "请至少添加或启用一个测试点后再全部运行。"; return; }
       this.results = [];
       this.clearOutput();
-      compiled = await this.compileSource(sourcePath, "release", false);
-    } finally {
+      const compiled = await this.compileSource(source, "release", false);
       this.compiling = false;
-      this.stopping = false;
-    }
-    if (!compiled?.success || !compiled.executablePath) {
-      this.results = enabled.map(compileFailureResult);
-      return;
-    }
-
-    for (const testcase of enabled) {
-      const result = await this.executeTestcase(compiled.executablePath, sourcePath, testcase);
-      if (result?.status === "Stopped") {
-        for (const pending of enabled.slice(enabled.indexOf(testcase) + 1)) {
-          this.setResult({ ...emptyResult(pending), status: "Stopped" });
-        }
-        break;
+      if (!compiled?.success || !compiled.executablePath || this.compileCancelled) {
+        this.results = enabled.map((testcase) => ({ ...emptyResult(testcase), status: this.compileCancelled ? "Stopped" : this.error ? "Error" : "CE", stderr: this.error || compiled?.stderr || "" }));
+        return;
       }
-    }
+      for (let index = 0; index < enabled.length; index++) {
+        const testcase = enabled[index];
+        const result = this.compileCancelled ? { ...emptyResult(testcase), status: "Stopped" as const }
+          : await this.executeTestcase(compiled.executablePath, source, testcase);
+        if (this.compileCancelled || result.status === "Stopped" || result.status === "Error") {
+          for (const pending of enabled.slice(index + 1)) this.setResult({ ...emptyResult(pending), status: "Stopped" });
+          if (this.compileCancelled) this.setResult({ ...result, status: "Stopped" });
+          break;
+        }
+      }
+    });
   }
 
   async stop(): Promise<void> {
-    if ((!this.running && !this.compiling) || this.stopping) return;
+    if ((!this.busy && !this.running && !this.compiling) || this.stopping) return;
     this.stopping = true;
-    if (this.compiling) this.compileCancelled = true;
-    try {
-      await Promise.all([stopProgram(), stopCompilation()]);
-    } catch (error) {
-      this.error = errorMessage(error);
-    }
+    this.compileCancelled = true;
+    try { await Promise.all([stopProgram(this.activeClientRunId), stopCompilation(this.clientTaskId)]); }
+    catch (error) { this.error = errorMessage(error); }
   }
 
   clearOutput(): void {
@@ -349,27 +325,45 @@ export class ExecutionStore {
       this.stopping = false;
       return undefined;
     }
+    this.profile = profile;
+    this.compileResult = undefined;
     this.error = "";
+    const sourceSnapshot = this.editor.sourceSnapshot?.(sourcePath);
+    const snapshot = sourceSnapshot ? { ...sourceSnapshot, documents: this.editor.tabs?.flatMap((tab) => {
+      const state = tab.path ? this.editor.sourceSnapshot(tab.path) : undefined;
+      return state && tab.path ? [{ path: tab.path, revision: state.revision }] : [];
+    }) } : undefined;
     if (clearOutput) this.clearOutput();
     this.shell.showBottomPanel("output");
     this.appendOutput(`[编译] ${fileName(sourcePath)} · ${profile === "release" ? "发布模式" : "调试模式"}\n`);
     const settings = this.settings.value;
+    const config = { compilerPath: settings.compilerPath, standard: settings.compilerStandard,
+      releaseArgs: [...settings.releaseArgs], debugArgs: [...settings.debugArgs], maxOutputBytes: settings.maxOutputBytes };
+    const configuration = JSON.stringify(config);
+    this.buildDetails = JSON.stringify({ sourcePath, profile, ...config }, null, 2);
     try {
       const result = await compileCurrentFile({
         sourcePath,
+        clientTaskId: this.clientTaskId,
+        expectedSource: snapshot?.text,
         profile,
-        config: {
-          compilerPath: settings.compilerPath,
-          standard: settings.compilerStandard,
-          releaseArgs: [...settings.releaseArgs],
-          debugArgs: [...settings.debugArgs],
-          maxOutputBytes: settings.maxOutputBytes,
-        },
+        config,
       });
+      const currentSettings = this.settings.value;
+      const currentConfig = { compilerPath: currentSettings.compilerPath, standard: currentSettings.compilerStandard,
+        releaseArgs: [...currentSettings.releaseArgs], debugArgs: [...currentSettings.debugArgs], maxOutputBytes: currentSettings.maxOutputBytes };
+      if (configuration !== JSON.stringify(currentConfig)) {
+        this.error = "编译期间配置已更改，请重新编译。";
+        this.appendOutput(`[编译] ${this.error}\n`);
+        return undefined;
+      }
       this.compileResult = result;
-      if (result.success) this.onSuccessfulCompile?.(sourcePath);
+      if (result.command) this.buildDetails = JSON.stringify({ taskId: result.taskId, workingDirectory: result.workingDirectory, command: result.command }, null, 2);
+      if (!this.compileCancelled && !this.disposed) this.onCompileResult?.(sourcePath, result, snapshot);
       this.appendOutput(result.stdout);
-      this.appendOutput(result.stderr);
+      this.appendOutput(result.diagnostics?.length
+        ? result.diagnostics.map((d) => `[${d.severity === 1 ? "错误" : d.severity === 2 ? "警告" : "说明"}] ${d.fileLevel ? d.path : `${d.path}:${d.range.start.line + 1}:${d.range.start.character + 1}`} ${d.message}\n`).join("")
+        : result.stderr);
       this.appendOutput(
         `[编译] ${result.success ? "成功" : "失败"}，耗时 ${result.durationMs}ms`
           + `${result.exitCode === undefined ? "" : ` · 退出码 ${result.exitCode}`}\n`,
@@ -377,38 +371,39 @@ export class ExecutionStore {
       if (result.outputTruncated) this.appendTruncationNotice();
       return this.compileCancelled || this.disposed ? undefined : result;
     } catch (error) {
-      this.error = errorMessage(error);
-      this.appendOutput(`[编译] ${this.error}\n`);
+      const code = (error as { code?: string })?.code;
+      if (code === "PROCESS_CANCELLED") this.compileCancelled = true;
+      this.compileResult = undefined;
+      this.error = this.compileCancelled ? "" : errorMessage(error);
+      if (!this.compileCancelled && !this.disposed) this.onCompileResult?.(sourcePath, {
+        success: false, stdout: "", stderr: this.error, durationMs: 0, outputTruncated: false,
+        diagnostics: [{ path: sourcePath, severity: 1, source: "工具链", code: code || "toolchain_error", fileLevel: true, message: this.error, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }],
+      }, snapshot);
+      this.appendOutput(`[编译] ${this.compileCancelled ? "已停止" : this.error}\n`);
       return undefined;
     } finally {
       this.stopping = false;
     }
   }
 
-  private async executeTestcase(
-    executablePath: string,
-    sourcePath: string,
-    testcase: Testcase,
-  ): Promise<TestcaseResult | undefined> {
+  private async executeTestcase(executablePath: string, sourcePath: string, testcase: Testcase): Promise<TestcaseResult> {
     this.setResult({ ...emptyResult(testcase), status: "Running" });
     this.appendOutput(`\n[测试] ${testcase.name}\n`);
     const run = await this.execute(executablePath, sourcePath, testcase.input);
-    if (!run) return undefined;
     let status: TestcaseStatus;
-    if (run.status === "timedOut") status = "TLE";
-    else if (run.status === "stopped") status = "Stopped";
+    if (this.compileCancelled || run?.status === "stopped") status = "Stopped";
+    else if (!run) status = "Error";
+    else if (run.status === "timedOut") status = "TLE";
     else if (run.exitCode !== 0) status = "RE";
-    else status = await compareTestcaseOutput(run.stdout, testcase.expectedOutput) ? "AC" : "WA";
-    const result: TestcaseResult = {
-      testcaseId: testcase.id,
-      name: testcase.name,
-      status,
-      durationMs: run.durationMs,
-      actualOutput: run.stdout,
-      expectedOutput: testcase.expectedOutput,
-      stderr: run.stderr,
-      exitCode: run.exitCode,
-    };
+    else if (run.outputTruncated) status = "OLE";
+    else {
+      try { status = await compareTestcaseOutput(run.stdout, testcase.expectedOutput) ? "AC" : "WA"; }
+      catch (error) { this.error = errorMessage(error); status = "Error"; }
+    }
+    if (this.compileCancelled) status = "Stopped";
+    const result: TestcaseResult = { testcaseId: testcase.id, name: testcase.name, status,
+      durationMs: run?.durationMs ?? 0, actualOutput: run?.stdout ?? "", expectedOutput: testcase.expectedOutput,
+      stderr: run?.stderr || this.error, exitCode: run?.exitCode };
     this.setResult(result);
     return result;
   }
@@ -420,7 +415,10 @@ export class ExecutionStore {
   ): Promise<RunResult | undefined> {
     const clientRunId = `run-${Date.now()}-${++this.runSequence}`;
     this.activeClientRunId = clientRunId;
-    this.streamReceived = false;
+    if (this.compileCancelled || this.disposed) return undefined;
+    if (this.outputTimer) clearTimeout(this.outputTimer);
+    this.flushOutput();
+    const outputPrefix = this.output;
     this.running = true;
     this.stopping = false;
     const request: RunRequest = {
@@ -434,10 +432,12 @@ export class ExecutionStore {
     };
     try {
       const result = await runProgram(request);
-      if (!this.streamReceived) {
-        this.appendOutput(result.stdout);
-        this.appendOutput(result.stderr);
-      }
+      if (this.outputTimer) clearTimeout(this.outputTimer);
+      this.outputTimer = undefined;
+      this.outputBuffer.clear();
+      this.output = outputPrefix;
+      this.appendOutput(result.stdout);
+      this.appendOutput(result.stderr);
       this.appendOutput(
         `\n[运行] ${runLabel(result)} · ${result.durationMs}ms`
           + `${result.exitCode === undefined ? "" : ` · 退出码 ${result.exitCode}`}\n`,
@@ -495,10 +495,6 @@ function emptyResult(testcase: Testcase): TestcaseResult {
   };
 }
 
-function compileFailureResult(testcase: Testcase): TestcaseResult {
-  return { ...emptyResult(testcase), status: "CE" };
-}
-
 function runLabel(result: RunResult): string {
   if (result.status === "timedOut") return "运行超时";
   if (result.status === "stopped") return "已停止";
@@ -516,7 +512,9 @@ function fileName(path: string): string {
 function errorMessage(error: unknown): string {
   if (typeof error === "object" && error) {
     const commandError = error as { userMessage?: unknown; technicalMessage?: unknown };
-    if (typeof commandError.userMessage === "string") return commandError.userMessage;
+    if (typeof commandError.userMessage === "string") {
+      return commandError.userMessage + (typeof commandError.technicalMessage === "string" ? `\n${commandError.technicalMessage}` : "");
+    }
     if (typeof commandError.technicalMessage === "string") return commandError.technicalMessage;
   }
   return error instanceof Error ? error.message : String(error);

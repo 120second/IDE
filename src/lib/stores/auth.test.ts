@@ -85,4 +85,23 @@ describe("AuthStore", () => {
     expect(authApi.logout).toHaveBeenCalledOnce();
     expect(store.user).toBeUndefined();
   });
+
+  it("requests a remembered login by default and allows a session-only login", async () => {
+    authApi.login.mockResolvedValue(user);
+    const store = new AuthStore();
+    expect(await store.signIn(" alice ", "password")).toBe(true);
+    expect(authApi.login).toHaveBeenLastCalledWith("alice", "password", true);
+    expect(await store.signIn("alice", "password", false)).toBe(true);
+    expect(authApi.login).toHaveBeenLastCalledWith("alice", "password", false);
+  });
+
+  it("retains the user and reports the error when logout cannot clear credentials", async () => {
+    authApi.restoreAuth.mockResolvedValue(user);
+    authApi.logout.mockRejectedValue(new Error("credential store unavailable"));
+    const store = new AuthStore();
+    await store.initialize();
+    await store.signOut();
+    expect(store.user).toEqual(user);
+    expect(store.error).toBe("credential store unavailable");
+  });
 });

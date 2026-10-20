@@ -4,6 +4,7 @@ import {
   EditorState,
   StateEffect,
   StateField,
+  Prec,
   type Extension,
 } from "@codemirror/state";
 import {
@@ -23,16 +24,16 @@ interface LspExtensionCallbacks {
   definition: () => void;
   references: () => void;
   signatureHelp: () => void;
+  dismissSignatureHelp?: () => void;
 }
 
 const setSignatureTooltipEffect = StateEffect.define<{ position: number; text: string } | null>();
 const signatureTooltipField = StateField.define<readonly Tooltip[]>({
   create: () => [],
   update(tooltips, transaction) {
-    let next = tooltips.map((tooltip) => ({
-      ...tooltip,
-      pos: transaction.changes.mapPos(tooltip.pos),
-    }));
+    // Parameter help belongs to the exact cursor/document it was requested for.
+    // Mapping its anchor through edits leaves an unrelated popup stuck on screen.
+    let next = transaction.docChanged || transaction.selection ? [] : tooltips;
     for (const effect of transaction.effects) {
       if (!effect.is(setSignatureTooltipEffect)) continue;
       next = effect.value
@@ -50,6 +51,16 @@ export function createLspExtensions(
 ): Extension[] {
   return [
     signatureTooltipField,
+    Prec.high(keymap.of([{ key: "Escape", run: (view) => {
+      callbacks.dismissSignatureHelp?.();
+      return closeSignatureTooltip(view);
+    } }])),
+    EditorView.domEventHandlers({
+      blur: (_event, view) => {
+        callbacks.dismissSignatureHelp?.();
+        closeSignatureTooltip(view);
+      },
+    }),
     keymap.of([
       { key: "F12", run: () => (callbacks.definition(), true) },
       { key: "Shift-F12", run: () => (callbacks.references(), true) },
@@ -67,6 +78,12 @@ export function createLspExtensions(
         ]
       : []),
   ];
+}
+
+export function closeSignatureTooltip(view: EditorView): boolean {
+  if (!view.state.field(signatureTooltipField, false)?.length) return false;
+  showSignatureTooltip(view, null);
+  return true;
 }
 
 export function showSignatureTooltip(

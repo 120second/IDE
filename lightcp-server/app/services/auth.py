@@ -69,9 +69,9 @@ class AuthService:
             session.rollback()
             raise AppError(409, "ACCOUNT_ALREADY_EXISTS", "用户名或邮箱已被使用。") from error
         session.refresh(user)
-        return self.issue_token(user)
+        return self.issue_token(user, remember_me=request.remember_me)
 
-    def login(self, session: Session, identifier: str, password: str) -> TokenResponse:
+    def login(self, session: Session, identifier: str, password: str, remember_me: bool = True) -> TokenResponse:
         normalized = normalize_identity(identifier)
         user = session.scalar(
             select(User).where(
@@ -83,13 +83,14 @@ class AuthService:
         )
         if not user or not user.is_active or not verify_password(password, user.password_hash):
             raise AppError(401, "INVALID_CREDENTIALS", "用户名、邮箱或密码不正确。")
-        return self.issue_token(user)
+        return self.issue_token(user, remember_me=remember_me)
 
-    def issue_token(self, user: User) -> TokenResponse:
+    def issue_token(self, user: User, *, remember_me: bool = True) -> TokenResponse:
         token, expires_at = create_access_token(
             user_id=user.id,
             token_version=user.token_version,
             settings=self.settings,
+            remember_me=remember_me,
         )
         return TokenResponse(
             access_token=token,

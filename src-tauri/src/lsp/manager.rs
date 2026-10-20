@@ -264,6 +264,7 @@ impl Drop for ClangdManager {
 }
 
 struct ClangdSession {
+    session_id: String,
     executable: String,
     workspace_root: PathBuf,
     compiler_executable: String,
@@ -313,6 +314,7 @@ impl ClangdSession {
             let mut command = Command::new(&executable);
             command
                 .arg("--background-index")
+                .arg("--enable-config=false")
                 .arg(format!("--query-driver={compiler_executable}"))
                 .current_dir(&workspace_root)
                 .stdin(Stdio::piped())
@@ -329,6 +331,7 @@ impl ClangdSession {
                         return Err(lsp_error("clangd stdio pipes are unavailable"));
                     };
                     let session = Arc::new(Self {
+                        session_id: uuid::Uuid::new_v4().to_string(),
                         executable: executable.clone(),
                         workspace_root,
                         compiler_executable,
@@ -426,6 +429,7 @@ impl ClangdSession {
             },
         );
         Ok(LspStartResult {
+            session_id: self.session_id.clone(),
             executable: self.executable.clone(),
             server_name,
             server_version,
@@ -456,9 +460,8 @@ impl ClangdSession {
     }
 
     fn configure_document(&self, path: &str) -> AppResult<()> {
-        if has_compilation_database(Path::new(path)) {
-            return Ok(());
-        }
+        // LightCP builds with its explicit settings; editor checks use those
+        // same commands, regardless of an unrelated compilation database.
         let working_directory = Path::new(path)
             .parent()
             .unwrap_or(&self.workspace_root)
@@ -701,6 +704,7 @@ impl ClangdSession {
             .filter_map(parse_diagnostic)
             .collect();
         (self.emit)(LspEvent::Diagnostics {
+            session_id: self.session_id.clone(),
             path: path.to_string_lossy().into_owned(),
             version,
             diagnostics,
@@ -752,6 +756,7 @@ impl ClangdSession {
 
     fn emit_state(&self, state: &str, message: impl Into<String>) {
         (self.emit)(LspEvent::State {
+            session_id: self.session_id.clone(),
             state: state.to_owned(),
             message: message.into(),
         });
@@ -836,22 +841,6 @@ fn normalize_compiler_standard(value: &str) -> String {
     } else {
         value.chars().take(32).collect()
     }
-}
-
-fn has_compilation_database(source: &Path) -> bool {
-    let mut directory = source.parent();
-    while let Some(candidate) = directory {
-        if candidate.join("compile_commands.json").is_file()
-            || candidate
-                .join("build")
-                .join("compile_commands.json")
-                .is_file()
-        {
-            return true;
-        }
-        directory = candidate.parent();
-    }
-    false
 }
 
 fn clangd_candidates(configured_path: &str) -> Vec<String> {
@@ -942,6 +931,9 @@ fn did_change_params(path: &str, version: i64, changes: Vec<LspTextChange>) -> A
             "version": version,
         },
         "contentChanges": changes,
+        // The frontend coalesces edits. Check each sent revision explicitly
+        // instead of waiting for clangd's adaptive diagnostic scheduling.
+        "wantDiagnostics": true,
     }))
 }
 
@@ -1063,6 +1055,265 @@ mod tests {
     static CLANGD_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn undeclared_function_in_chinese_file_is_published() {
+        let _lock = CLANGD_TEST_LOCK.lock().expect("test lock");
+        let Some(clangd) = clangd_candidates("").into_iter().find(|candidate| {
+            Command::new(candidate)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+        }) else {
+            return;
+        };
+        let root = std::env::temp_dir().join(format!("lightcp-函数诊断-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("CF570D Tree Requests 中文.cpp");
+        let text = format!("#include <bits/stdc++.h>\n{}\nvoid\nvoid dfs2(int u, int fa, bool keep) {{ add_subtree(u, 1); }}\nint main() {{}}\n", "\n".repeat(120));
+        let declaration_line = text.lines().position(|line| line == "void").unwrap() as u32;
+        fs::write(&source, &text).unwrap();
+        let manager = ClangdManager::default();
+        let (sender, receiver) = mpsc::channel();
+        manager
+            .start(
+                root.clone(),
+                clangd,
+                "g++".into(),
+                "c++20".into(),
+                Vec::new(),
+                move |event| {
+                    let _ = sender.send(event);
+                },
+            )
+            .unwrap();
+        let wait_for = |expected_version: i64, has_error: bool| {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            while Instant::now() < deadline {
+                if let Ok(LspEvent::Diagnostics {
+                    path,
+                    version,
+                    diagnostics,
+                    ..
+                }) = receiver.recv_timeout(Duration::from_millis(100))
+                {
+                    if version != Some(expected_version) {
+                        continue;
+                    }
+                    assert_eq!(path, source.to_string_lossy());
+                    assert_eq!(
+                        diagnostics
+                            .iter()
+                            .any(|item| item.message.contains("add_subtree") && item.severity == 1),
+                        has_error,
+                        "revision {expected_version}: {diagnostics:?}"
+                    );
+                    if !has_error {
+                        assert!(
+                            diagnostics.is_empty(),
+                            "the fixed source must have no errors"
+                        );
+                    }
+                    return;
+                }
+            }
+            panic!("missing diagnostics for revision {expected_version}");
+        };
+        manager
+            .did_open(&source.to_string_lossy(), text.clone(), 1)
+            .unwrap();
+        wait_for(1, true);
+        let definition = "void add_subtree(int, int) {}";
+        manager
+            .did_change(
+                &source.to_string_lossy(),
+                2,
+                vec![LspTextChange {
+                    range: LspRange {
+                        start: LspPosition {
+                            line: declaration_line,
+                            character: 0,
+                        },
+                        end: LspPosition {
+                            line: declaration_line,
+                            character: 4,
+                        },
+                    },
+                    text: definition.into(),
+                }],
+            )
+            .unwrap();
+        wait_for(2, false);
+        manager
+            .did_change(
+                &source.to_string_lossy(),
+                3,
+                vec![LspTextChange {
+                    range: LspRange {
+                        start: LspPosition {
+                            line: declaration_line,
+                            character: 0,
+                        },
+                        end: LspPosition {
+                            line: declaration_line,
+                            character: definition.len() as u32,
+                        },
+                    },
+                    text: "void".into(),
+                }],
+            )
+            .unwrap();
+        wait_for(3, true);
+        assert_eq!(
+            fs::read_to_string(&source).unwrap(),
+            text,
+            "checks must use unsaved edits"
+        );
+        manager.stop().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn edit_notifications_explicitly_request_diagnostics() {
+        let path = std::env::temp_dir().join("lightcp-lsp-params.cpp");
+        let params = did_change_params(
+            &path.to_string_lossy(),
+            2,
+            vec![LspTextChange {
+                range: LspRange {
+                    start: LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: LspPosition {
+                        line: 0,
+                        character: 0,
+                    },
+                },
+                text: "missing_name".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(params["wantDiagnostics"], true);
+        assert_eq!(params["textDocument"]["version"], 2);
+    }
+
+    #[test]
+    fn unsaved_edits_report_clear_and_report_undeclared_variables() {
+        let _lock = CLANGD_TEST_LOCK.lock().expect("test lock");
+        let Some(clangd) = clangd_candidates("").into_iter().find(|candidate| {
+            Command::new(candidate)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+        }) else {
+            return;
+        };
+        let root =
+            std::env::temp_dir().join(format!("lightcp-live-diagnostics-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("main.cpp");
+        let broken = "int main() { return missing_name; }";
+        let fixed = "int main() { return 0; }";
+        fs::write(&source, broken).unwrap();
+        let manager = ClangdManager::default();
+        let (sender, receiver) = mpsc::channel();
+        manager
+            .start(
+                root.clone(),
+                clangd,
+                "g++".into(),
+                "c++20".into(),
+                Vec::new(),
+                move |event| {
+                    let _ = sender.send(event);
+                },
+            )
+            .unwrap();
+        let wait_for = |version: i64, has_error: bool| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if let Ok(LspEvent::Diagnostics {
+                    version: Some(received),
+                    diagnostics,
+                    ..
+                }) = receiver.recv_timeout(Duration::from_millis(100))
+                {
+                    if received != version {
+                        continue;
+                    }
+                    assert_eq!(
+                        diagnostics
+                            .iter()
+                            .any(|diagnostic| diagnostic.severity == 1),
+                        has_error,
+                        "version {version}: {diagnostics:?}"
+                    );
+                    if has_error {
+                        assert!(
+                            diagnostics
+                                .iter()
+                                .any(|diagnostic| diagnostic.message.contains("missing_name")),
+                            "must identify the undeclared variable"
+                        );
+                    }
+                    return;
+                }
+            }
+            panic!("no diagnostics for unsaved revision {version}");
+        };
+        manager
+            .did_open(&source.to_string_lossy(), broken.into(), 1)
+            .unwrap();
+        wait_for(1, true);
+        manager
+            .did_change(
+                &source.to_string_lossy(),
+                2,
+                vec![LspTextChange {
+                    range: LspRange {
+                        start: LspPosition {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: LspPosition {
+                            line: 0,
+                            character: broken.len() as u32,
+                        },
+                    },
+                    text: fixed.into(),
+                }],
+            )
+            .unwrap();
+        wait_for(2, false);
+        manager
+            .did_change(
+                &source.to_string_lossy(),
+                3,
+                vec![LspTextChange {
+                    range: LspRange {
+                        start: LspPosition {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: LspPosition {
+                            line: 0,
+                            character: fixed.len() as u32,
+                        },
+                    },
+                    text: broken.into(),
+                }],
+            )
+            .unwrap();
+        wait_for(3, true);
+        assert_eq!(
+            fs::read_to_string(&source).unwrap(),
+            broken,
+            "checks must use unsaved content"
+        );
+        manager.stop().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn parses_diagnostics_without_materializing_unbounded_input() {
         let diagnostic = parse_diagnostic(&json!({
             "range": {
@@ -1113,7 +1364,18 @@ mod tests {
         fs::create_dir_all(root.join("nested")).expect("nested directory should be created");
         let source = root.join("main.cpp");
         let text = "#include <bits/stdc++.h>\nint helper(int value) { return value; }\nint main() { std::vector<int> values; return helper(missing_name); }\n";
-        fs::write(&source, text).expect("source should be written");
+        let text = format!("{text}\n#if __cplusplus < 202002L\n#error CONFIG_MISMATCH\n#endif\n");
+        fs::write(&source, &text).expect("source should be written");
+        fs::write(
+            root.join("compile_commands.json"),
+            serde_json::to_vec(&json!([{
+                "directory": root, "file": source,
+                "arguments": ["g++", "-std=c++17", source]
+            }]))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(root.join(".clangd"), "CompileFlags:\n  Add: [-std=c++11]\n").unwrap();
 
         let manager = ClangdManager::default();
         let (event_sender, event_receiver) = std::sync::mpsc::channel();
@@ -1179,6 +1441,12 @@ mod tests {
                         diagnostic.code == "pp_file_not_found"
                             || diagnostic.message.contains("file not found")
                     });
+                    assert!(
+                        !diagnostics
+                            .iter()
+                            .any(|d| d.message.contains("CONFIG_MISMATCH")),
+                        "editor checks must use the app compiler configuration"
+                    );
                     received_diagnostic = true;
                     break;
                 }

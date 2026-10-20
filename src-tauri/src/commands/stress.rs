@@ -19,7 +19,9 @@ pub async fn start_stress_test(
         .reserve(&request.session_id)
         .map_err(CommandError::from)?;
     let performance = state.performance.clone();
+    let compiler_reservation = state.compiler.reserve().map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _compiler_reservation = compiler_reservation;
         job.run(&workspace_root, &build_root, &request, None, |event| {
             performance.record_ipc_event();
             if let Err(error) = app.emit("stress-event", event) {
@@ -63,7 +65,9 @@ pub async fn replay_stress_test(
         .reserve(&session_id)
         .map_err(CommandError::from)?;
     let performance = state.performance.clone();
+    let compiler_reservation = state.compiler.reserve().map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _compiler_reservation = compiler_reservation;
         let bundle = crate::stress::replay::load(std::path::Path::new(&path))?;
         crate::stress::replay::run(
             bundle,

@@ -2,7 +2,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     fs,
     hash::{Hash, Hasher},
-    io::Read,
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -23,11 +23,15 @@ const DEFAULT_OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct CompilerManager {
-    active: Mutex<Option<Arc<AtomicBool>>>,
+    active: Mutex<Option<(Option<String>, Arc<AtomicBool>)>>,
 }
 
 impl CompilerManager {
     pub fn reserve(self: &Arc<Self>) -> AppResult<Compilation> {
+        self.reserve_for(None)
+    }
+
+    pub fn reserve_for(self: &Arc<Self>, task_id: Option<String>) -> AppResult<Compilation> {
         let stop = Arc::new(AtomicBool::new(false));
         {
             let mut active = self
@@ -37,7 +41,7 @@ impl CompilerManager {
             if active.is_some() {
                 return Err(AppError::Process("another compilation is running".into()));
             }
-            *active = Some(stop.clone());
+            *active = Some((task_id, stop.clone()));
         }
         Ok(Compilation {
             manager: self.clone(),
@@ -45,12 +49,19 @@ impl CompilerManager {
         })
     }
     pub fn stop(&self) -> bool {
+        self.stop_matching(None)
+    }
+
+    pub fn stop_matching(&self, task_id: Option<&str>) -> bool {
         let Ok(active) = self.active.lock() else {
             return false;
         };
-        let Some(stop) = active.as_ref() else {
+        let Some((current_id, stop)) = active.as_ref() else {
             return false;
         };
+        if task_id.is_some() && current_id.as_deref() != task_id {
+            return false;
+        }
         stop.store(true, Ordering::Release);
         true
     }
@@ -77,7 +88,7 @@ impl Drop for Compilation {
         if let Ok(mut active) = self.manager.active.lock() {
             if active
                 .as_ref()
-                .is_some_and(|current| Arc::ptr_eq(current, &self.stop))
+                .is_some_and(|(_, current)| Arc::ptr_eq(current, &self.stop))
             {
                 *active = None;
             }
@@ -110,8 +121,21 @@ pub fn compile_with_stop(
         return Err(AppError::ProcessCancelled);
     }
     let source = checked_source(workspace_root, &request.source_path)?;
-    fs::create_dir_all(build_root)?;
-    let executable = output_path(build_root, &source);
+    let source_before = fs::read(&source)?;
+    if request
+        .expected_source
+        .as_ref()
+        .is_some_and(|text| text.as_bytes() != source_before)
+    {
+        return Err(AppError::Configuration(
+            "源码已更改，请保存当前版本后重新编译。".into(),
+        ));
+    }
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let task_root = build_root.join("tasks").join(&task_id);
+    fs::create_dir_all(&task_root)?;
+    prune_build_cache(&task_root);
+    let executable = output_path(&task_root, &source);
     let compiler_executable = compatible_compiler_output(&executable)?;
     let compiler = request.config.compiler_path.trim();
     let compiler = if compiler.is_empty() { "g++" } else { compiler };
@@ -125,6 +149,21 @@ pub fn compile_with_stop(
         CompileProfile::Release => &request.config.release_args,
         CompileProfile::Debug => &request.config.debug_args,
     };
+    if profile_args
+        .iter()
+        .any(|arg| matches!(arg.trim(), "-c" | "-S" | "-E" | "-fsyntax-only"))
+    {
+        return Err(AppError::Configuration(
+            "构建可执行程序不能使用 -c、-S、-E 或 -fsyntax-only；请从编译参数中移除。".into(),
+        ));
+    }
+    let compiler_name = Path::new(compiler)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+    let json_diagnostics = !compiler_name.contains("clang")
+        && (compiler_name.ends_with("g++") || compiler_name.ends_with("gcc"));
 
     let mut command = Command::new(compiler);
     command
@@ -134,6 +173,11 @@ pub fn compile_with_stop(
                 .iter()
                 .filter(|argument| !argument.trim().is_empty()),
         )
+        .arg("-fdiagnostics-color=never");
+    if json_diagnostics {
+        command.arg("-fdiagnostics-format=json");
+    }
+    command
         .arg(&source)
         .arg("-o")
         .arg(&compiler_executable)
@@ -144,6 +188,13 @@ pub fn compile_with_stop(
     configure_hidden(&mut command);
 
     let started = Instant::now();
+    let command_line = std::iter::once(compiler.to_owned())
+        .chain(
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned()),
+        )
+        .collect();
     let mut child = command.spawn().map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             AppError::CompilerNotFound(format!("{compiler}: {error}"))
@@ -184,7 +235,24 @@ pub fn compile_with_stop(
             return Err(error);
         }
     };
-    let success = status.success();
+    let source_changed = fs::read(&source).map_or(true, |current| current != source_before);
+    let mut success = status.success() && !source_changed;
+    let mut diagnostics = super::diagnostics::parse(&stderr, &source, status.success());
+    if source_changed {
+        diagnostics.push(super::diagnostics::task_error(
+            &source,
+            "编译期间源码已修改，本次结果已过期，请重新编译。",
+            "source_changed",
+        ));
+    }
+    if success && !valid_executable(&compiler_executable) {
+        success = false;
+        diagnostics.push(super::diagnostics::task_error(
+            &source,
+            "编译器没有生成有效的可执行文件，请检查编译参数。",
+            "invalid_artifact",
+        ));
+    }
     if success && compiler_executable != executable {
         let copied = fs::copy(&compiler_executable, &executable);
         let _ = fs::remove_file(&compiler_executable);
@@ -194,6 +262,15 @@ pub fn compile_with_stop(
     }
 
     Ok(CompileResult {
+        command: command_line,
+        working_directory: source
+            .parent()
+            .unwrap_or(workspace_root)
+            .to_string_lossy()
+            .into_owned(),
+        task_id,
+        diagnostics,
+        source_changed,
         success,
         executable_path: success.then(|| path_text(&executable)),
         stdout,
@@ -262,6 +339,43 @@ fn output_path(build_root: &Path, source: &Path) -> PathBuf {
     build_root.join(format!("{stem}-{:016x}.exe", hasher.finish()))
 }
 
+fn prune_build_cache(current: &Path) {
+    let Some(parent) = current.parent() else {
+        return;
+    };
+    let Ok(root) = dunce::canonicalize(parent) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(&root) else {
+        return;
+    };
+    let mut jobs = entries
+        .flatten()
+        .filter_map(|entry| {
+            let kind = entry.file_type().ok()?;
+            if !kind.is_dir()
+                || kind.is_symlink()
+                || uuid::Uuid::parse_str(&entry.file_name().to_string_lossy()).is_err()
+            {
+                return None;
+            }
+            let path = dunce::canonicalize(entry.path()).ok()?;
+            if path.parent() != Some(root.as_path()) {
+                return None;
+            }
+            Some((entry.metadata().ok()?.modified().ok()?, path))
+        })
+        .collect::<Vec<_>>();
+    jobs.sort_by_key(|job| std::cmp::Reverse(job.0));
+    let current = dunce::canonicalize(current).ok();
+    for (_, job) in jobs.into_iter().skip(32) {
+        if current.as_ref() != Some(&job) {
+            // Windows keeps running executables locked; retain those jobs.
+            let _ = fs::remove_dir_all(&job);
+        }
+    }
+}
+
 #[cfg(windows)]
 fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
     if desired.as_os_str().to_string_lossy().is_ascii() {
@@ -277,14 +391,41 @@ fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
         }
         let staging = root.join(format!("lightcp-compiler-output-{}", std::process::id()));
         if fs::create_dir_all(&staging).is_ok() {
-            return Ok(staging.join(
-                desired
-                    .file_name()
-                    .unwrap_or_else(|| std::ffi::OsStr::new("solution.exe")),
-            ));
+            return Ok(staging.join(format!("{}.exe", uuid::Uuid::new_v4())));
         }
     }
     Ok(desired.to_owned())
+}
+
+fn valid_executable(path: &Path) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut bytes = [0u8; 64];
+    if file.read_exact(&mut bytes).is_err() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        if !bytes.starts_with(b"MZ") {
+            return false;
+        }
+        let offset = u32::from_le_bytes(bytes[60..64].try_into().unwrap()) as usize;
+        let mut header = [0u8; 24];
+        if file.seek(SeekFrom::Start(offset as u64)).is_err()
+            || file.read_exact(&mut header).is_err()
+        {
+            return false;
+        }
+        let flags = u16::from_le_bytes([header[22], header[23]]);
+        header.starts_with(b"PE\0\0") && flags & 2 != 0 && flags & 0x2000 == 0
+    }
+    #[cfg(not(windows))]
+    {
+        bytes.starts_with(b"\x7fELF")
+            || bytes.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
+            || bytes.starts_with(&[0xce, 0xfa, 0xed, 0xfe])
+    }
 }
 
 #[cfg(not(windows))]
@@ -367,6 +508,19 @@ fn configure_hidden(_command: &mut Command) {}
 #[cfg(test)]
 mod tests {
     #[test]
+    fn stale_stop_does_not_cancel_a_new_compilation() {
+        let manager = Arc::new(CompilerManager::default());
+        let first = manager.reserve_for(Some("first".into())).unwrap();
+        assert!(!manager.stop_matching(Some("previous")));
+        assert!(!first.stop.load(Ordering::Acquire));
+        drop(first);
+        let second = manager.reserve_for(Some("second".into())).unwrap();
+        assert!(!manager.stop_matching(Some("first")));
+        assert!(!second.stop.load(Ordering::Acquire));
+        assert!(manager.stop_matching(Some("second")));
+        assert!(second.stop.load(Ordering::Acquire));
+    }
+    #[test]
     fn compilation_is_cancellable_before_the_worker_starts() {
         let manager = Arc::new(CompilerManager::default());
         let compilation = manager.reserve().unwrap();
@@ -440,16 +594,85 @@ mod tests {
         assert_eq!(compiled.exit_code, Some(0));
         assert!(compiled.executable_path.is_some());
 
+        fs::write(
+            &source,
+            "#include <iostream>\nint main(){std::cout << 7 << '\\n';}\n",
+        )
+        .unwrap();
+        let next = compile_current_file(&root, &build, &request).unwrap();
+        assert!(next.success, "{}", next.stderr);
+        assert_ne!(
+            compiled.executable_path, next.executable_path,
+            "build jobs must never overwrite one another"
+        );
+        assert!(Path::new(compiled.executable_path.as_ref().unwrap()).is_file());
+        assert_eq!(
+            String::from_utf8_lossy(
+                &Command::new(next.executable_path.as_ref().unwrap())
+                    .output()
+                    .unwrap()
+                    .stdout
+            )
+            .trim(),
+            "7"
+        );
+        for flag in ["-fsyntax-only", "-c", "-E", "-S"] {
+            let mut invalid = request.clone();
+            invalid.config.release_args = vec![flag.into()];
+            assert!(matches!(
+                compile_current_file(&root, &build, &invalid),
+                Err(AppError::Configuration(_))
+            ));
+        }
+        let mut stale = request.clone();
+        stale.expected_source = Some("a different source snapshot".into());
+        assert!(matches!(
+            compile_current_file(&root, &build, &stale),
+            Err(AppError::Configuration(_))
+        ));
+
         fs::write(&source, "int main( {\n").unwrap();
         let failed = compile_current_file(&root, &build, &request).unwrap();
         assert!(!failed.success);
         assert_ne!(failed.exit_code, Some(0));
         assert!(!failed.stderr.is_empty());
+        assert!(
+            failed
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == 1 && !d.file_level),
+            "stderr: {}; parsed: {:?}",
+            failed.stderr,
+            failed.diagnostics
+        );
+        assert!(failed.executable_path.is_none());
+        fs::write(
+            &source,
+            "void add_subtree(int,int); int main(){ add_subtree(1,1); }\n",
+        )
+        .unwrap();
+        let linked = compile_current_file(&root, &build, &request).unwrap();
+        assert!(!linked.success);
+        assert!(linked
+            .diagnostics
+            .iter()
+            .any(|d| d.file_level && d.message.contains("add_subtree")));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_non_executable_artifact() {
+        let root = temporary_root("invalid-artifact");
+        let artifact = root.join("object.exe");
+        fs::write(&artifact, b"this is not an executable").unwrap();
+        assert!(!valid_executable(&artifact));
         fs::remove_dir_all(root).unwrap();
     }
 
     fn request(source: &Path) -> CompileRequest {
         CompileRequest {
+            client_task_id: None,
+            expected_source: None,
             source_path: path_text(source),
             profile: CompileProfile::Release,
             config: CompilerConfig {

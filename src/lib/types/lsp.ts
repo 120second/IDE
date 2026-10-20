@@ -14,6 +14,7 @@ export interface LspTextChange {
 }
 
 export interface LspDiagnostic {
+  fileLevel?: boolean;
   path: string;
   range: LspRange;
   severity: number;
@@ -50,6 +51,7 @@ export interface LspSignatureHelp {
 }
 
 export interface LspStartResult {
+  sessionId?: string;
   executable: string;
   serverName: string;
   serverVersion: string;
@@ -63,9 +65,10 @@ export type LspConnectionState =
   | "crashed";
 
 export type LspEvent =
-  | { type: "state"; state: LspConnectionState; message: string }
+  | { type: "state"; state: LspConnectionState; message: string; sessionId?: string }
   | {
       type: "diagnostics";
+      sessionId?: string;
       path: string;
       version?: number;
       diagnostics: Omit<LspDiagnostic, "path">[];

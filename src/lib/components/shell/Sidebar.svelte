@@ -15,6 +15,7 @@
   import TemplateSidebar from "../templates/TemplateSidebar.svelte";
   import Icon from "./Icon.svelte";
   import DebugPanel from "../debug/DebugPanel.svelte";
+  import TodoPanel from "../todos/TodoPanel.svelte";
 
   interface Props {
     shell: ShellStore;
@@ -32,6 +33,7 @@
 
   const titles: Record<ActivityId, string> = {
     explorer: "资源管理器",
+    todos: "待刷题待办",
     testcases: "测试点",
     templates: "模板",
     community: "社区",
@@ -40,6 +42,7 @@
   };
 
   let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug, ux, newFile }: Props = $props();
+  let displayedWidth = $derived(settings.value.interfaceStyle === "classic" ? Math.max(420, shell.sidebarWidth) : shell.sidebarWidth);
   let stopResize = () => {};
   onDestroy(() => stopResize());
 
@@ -47,9 +50,9 @@
     event.preventDefault();
     stopResize();
     const startX = event.clientX;
-    const startWidth = shell.sidebarWidth;
+    const startWidth = displayedWidth;
     const onMove = (moveEvent: PointerEvent) =>
-      shell.setSidebarWidth(startWidth + moveEvent.clientX - startX);
+      shell.setSidebarWidth(startWidth + moveEvent.clientX - startX, settings.value.interfaceStyle === "classic" ? 600 : 380);
     const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -64,11 +67,11 @@
   function resizeWithKeyboard(event: KeyboardEvent): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    shell.setSidebarWidth(shell.sidebarWidth + (event.key === "ArrowRight" ? 12 : -12));
+    shell.setSidebarWidth(displayedWidth + (event.key === "ArrowRight" ? 12 : -12), settings.value.interfaceStyle === "classic" ? 600 : 380);
   }
 </script>
 
-<aside class="sidebar" style:width={`${shell.sidebarWidth}px`} aria-label={titles[shell.activeActivity]}>
+<aside class="sidebar" style:width={`${displayedWidth}px`} aria-label={titles[shell.activeActivity]}>
   <header class="sidebar-header">
     <span>{titles[shell.activeActivity]}</span>
     <button aria-label="隐藏侧栏" title={`隐藏侧栏 · ${settings.value.keybindings.toggleSidebar}`} onclick={() => shell.toggleSidebar()}>
@@ -83,6 +86,8 @@
   >
     {#if shell.activeActivity === "explorer"}
       <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} />
+    {:else if shell.activeActivity === "todos"}
+      <TodoPanel />
     {:else if shell.activeActivity === "testcases"}
       <TestcasePanel {workspace} {execution} {shell} {settings} {ux} keybindings={settings.value.keybindings} />
     {:else if shell.activeActivity === "templates"}
@@ -106,9 +111,9 @@
     role="separator"
     aria-label="调整侧栏宽度"
     aria-orientation="vertical"
-    aria-valuemin="210"
-    aria-valuemax="380"
-    aria-valuenow={shell.sidebarWidth}
+    aria-valuemin={settings.value.interfaceStyle === "classic" ? 420 : 210}
+    aria-valuemax={settings.value.interfaceStyle === "classic" ? 600 : 380}
+    aria-valuenow={displayedWidth}
     tabindex="0"
     onpointerdown={beginResize}
     onkeydown={resizeWithKeyboard}

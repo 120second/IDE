@@ -20,6 +20,8 @@ pub mod state;
 pub mod stress;
 pub mod templates;
 pub mod testcase;
+mod todos;
+mod updates;
 
 use tauri::Manager;
 
@@ -61,6 +63,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::updates::check_app_update,
+            commands::updates::open_update_url,
+            commands::todos::list_problem_todos,
+            commands::todos::save_problem_todo,
+            commands::todos::delete_problem_todo,
+            commands::todos::open_problem_todo_url,
             commands::health::health_check,
             commands::problem_import::start_problem_listener,
             commands::problem_import::stop_problem_listener,

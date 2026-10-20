@@ -1,6 +1,7 @@
 <script lang="ts">
   export type IconName =
     | "explorer"
+    | "todo"
     | "testcases"
     | "search"
     | "templates"
@@ -73,6 +74,8 @@
 >
   {#if name === "explorer"}
     <path d="M4 3.5h6l2 2H20v15H4z" /><path d="M4 8h16" />
+  {:else if name === "todo"}
+    <rect x="5" y="4" width="15" height="17" rx="2" /><path d="M9 3h7v4H9zM9 12l1.5 1.5L13 11M15 12h2M9 17h8" />
   {:else if name === "testcases"}
     <rect x="4" y="3.5" width="16" height="17" rx="2" /><path d="m8 9 1.6 1.6L13 7.5M8 15h8" />
   {:else if name === "search"}

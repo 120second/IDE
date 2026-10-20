@@ -37,6 +37,23 @@ pub enum UiDensity {
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+pub enum InterfaceStyle {
+    #[default]
+    Lightcp,
+    Classic,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TestcaseStyle {
+    #[default]
+    Follow,
+    Standard,
+    Compact,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum BackgroundFit {
     #[default]
     Cover,
@@ -81,6 +98,8 @@ impl Default for CustomThemeDefinition {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AppSettings {
+    pub interface_style: InterfaceStyle,
+    pub testcase_style: TestcaseStyle,
     pub theme: ThemePreference,
     pub color_theme: ColorTheme,
     pub editor_theme: String,
@@ -118,6 +137,8 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            interface_style: InterfaceStyle::Lightcp,
+            testcase_style: TestcaseStyle::Follow,
             theme: ThemePreference::System,
             color_theme: ColorTheme::Signal,
             editor_theme: "inherit".to_owned(),
@@ -438,10 +459,14 @@ mod tests {
     #[test]
     fn appearance_controls_roundtrip_and_legacy_defaults() {
         let legacy: AppSettings = serde_json::from_str(r#"{"colorTheme":"forest"}"#).unwrap();
+        assert_eq!(legacy.interface_style, InterfaceStyle::Lightcp);
+        assert_eq!(legacy.testcase_style, TestcaseStyle::Follow);
         assert_eq!(legacy.editor_theme, "inherit");
         assert_eq!(legacy.background_scale, 1.0);
         assert_eq!(legacy.background_position_x, 50.0);
         let settings = AppSettings {
+            interface_style: InterfaceStyle::Classic,
+            testcase_style: TestcaseStyle::Compact,
             editor_theme: "graphite".to_owned(),
             background_position_x: 27.0,
             background_position_y: 83.0,
@@ -452,6 +477,11 @@ mod tests {
         }
         .sanitize();
         let value = serde_json::to_value(&settings).unwrap();
+        assert_eq!(value["interfaceStyle"], "classic");
+        assert_eq!(value["testcaseStyle"], "compact");
+        let restored: AppSettings = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(restored.interface_style, InterfaceStyle::Classic);
+        assert_eq!(restored.testcase_style, TestcaseStyle::Compact);
         let restored: AppSettings = serde_json::from_value(value).unwrap();
         assert_eq!(restored.editor_theme, "graphite");
         assert_eq!(restored.background_position_x, 27.0);

@@ -1,7 +1,10 @@
 <script lang="ts">
   import { invoke, isTauri } from "@tauri-apps/api/core";
   import { open, save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { onDestroy, tick, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { slide } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
+  import { effectiveTestcaseStyle } from "../../types/settings";
   import type { EditorWorkspace } from "../../editor/workspace.svelte";
   import type { ExecutionStore } from "../../stores/execution.svelte";
   import type { ShellStore } from "../../stores/shell.svelte";
@@ -30,6 +33,17 @@
   let draft = $state<TestcaseInput>(emptyDraft(""));
   let observedSource = "";
   let sourceTimer: ReturnType<typeof setTimeout> | undefined;
+  let reducedMotion = $state(false);
+  let compactStyle = $derived(effectiveTestcaseStyle(settings.value) === "compact");
+  let motionDuration = $derived(reducedMotion || settings.value.performanceMode ? 0 : 140);
+
+  onMount(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updateMotion = () => { reducedMotion = media.matches; };
+    updateMotion();
+    media.addEventListener("change", updateMotion);
+    return () => media.removeEventListener("change", updateMotion);
+  });
 
   onDestroy(() => {
     if (sourceTimer) clearTimeout(sourceTimer);
@@ -83,14 +97,22 @@
   async function persistDraft(closeAfterSave: boolean): Promise<Testcase | undefined> {
     if (!draft.name.trim() || saving) return;
     saving = true;
-    const saved = await execution.saveTestcase(draft, editingId);
-    saving = false;
-    if (saved) {
-      editingId = saved.id;
-      draft = inputFromTestcase(saved);
-      if (closeAfterSave) formOpen = false;
+    const submitted = { ...draft };
+    const submittedId = editingId;
+    try {
+      const saved = await execution.saveTestcase(submitted, submittedId);
+      if (saved && editingId === submittedId && workspace.activeTab?.path === submitted.sourcePath) {
+        editingId = saved.id;
+        // Typing may continue while persistence is in flight. Keep those edits.
+        if (JSON.stringify(draft) === JSON.stringify(submitted)) {
+          draft = inputFromTestcase(saved);
+          if (closeAfterSave) formOpen = false;
+        }
+      }
+      return saved;
+    } finally {
+      saving = false;
     }
-    return saved;
   }
 
   async function save(): Promise<void> {
@@ -143,6 +165,8 @@
   }
 
   function statusLabel(status?: string): string {
+    if (status === "Error") return "执行失败";
+    if (status === "OLE") return "输出超限";
     if (status === "Stopped") return "已停止";
     if (status === "Running") return "运行中";
     return status ?? "";
@@ -233,50 +257,10 @@
     return error instanceof Error ? error.message : String(error);
   }
 
-  function autoSizeTextarea(node: HTMLTextAreaElement, value: string) {
-    let frame = 0;
-    let lastWidth = node.clientWidth;
-
-    const resize = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        node.style.height = "auto";
-        const minHeight = 64;
-        const maxHeight = 220;
-        const contentHeight = node.scrollHeight;
-        node.style.height = `${Math.min(maxHeight, Math.max(minHeight, contentHeight))}px`;
-        node.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
-      });
-    };
-
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width;
-      if (Math.abs(width - lastWidth) < 0.5) return;
-      lastWidth = width;
-      resize();
-    });
-
-    node.addEventListener("input", resize);
-    observer.observe(node);
-    resize();
-
-    return {
-      update(nextValue: string) {
-        value = nextValue;
-        void value;
-        resize();
-      },
-      destroy() {
-        cancelAnimationFrame(frame);
-        observer.disconnect();
-        node.removeEventListener("input", resize);
-      },
-    };
-  }
 </script>
 
 {#snippet testcaseEditor()}
-  <form bind:this={editorElement} class="case-editor" aria-label={editingId ? "编辑测试点" : "新建测试点"} onsubmit={(event) => { event.preventDefault(); void save(); }}>
+  <form bind:this={editorElement} class="case-editor" transition:slide={{ duration: motionDuration, easing: cubicOut }} aria-label={editingId ? "编辑测试点" : "新建测试点"} onsubmit={(event) => { event.preventDefault(); void save(); }}>
     {#if editingId === undefined}
       <header class="case-editor-header">
         <strong>新建测试点</strong>
@@ -292,14 +276,14 @@
           <strong>输入</strong>
           <button type="button" onclick={() => void readFromFile("input")}><Icon name="file" size={13} />从文件读取</button>
         </span>
-        <span class="case-code-field"><textarea use:autoSizeTextarea={draft.input} spellcheck="false" aria-label="测试点输入" placeholder="在这里输入测试数据…" bind:value={draft.input}></textarea></span>
+        <span class="case-code-field"><textarea rows="4" spellcheck="false" aria-label="测试点输入" placeholder="输入测试数据…" bind:value={draft.input}></textarea></span>
       </label>
       <label class="case-io-field">
         <span class="case-io-heading">
           <strong>期望输出</strong>
           <button type="button" onclick={() => void readFromFile("expectedOutput")}><Icon name="file" size={13} />从文件读取</button>
         </span>
-        <span class="case-code-field"><textarea use:autoSizeTextarea={draft.expectedOutput} spellcheck="false" aria-label="测试点期望输出" placeholder="在这里输入正确答案…" bind:value={draft.expectedOutput}></textarea></span>
+        <span class="case-code-field"><textarea rows="4" spellcheck="false" aria-label="测试点期望输出" placeholder="输入期望输出…" bind:value={draft.expectedOutput}></textarea></span>
       </label>
     </div>
 
@@ -319,7 +303,7 @@
 
         <div class="case-limit-row">
           <span>时限:</span>
-          <strong>{settings.value.runTimeoutMs}</strong>
+          <input type="number" aria-label="运行时限（毫秒）" title="应用于所有测试点" min="100" max="60000" step="100" value={settings.value.runTimeoutMs} onchange={(event) => settings.update({ runTimeoutMs: Number(event.currentTarget.value) })} />
           <em>ms</em>
         </div>
       {/if}
@@ -338,7 +322,7 @@
   </form>
 {/snippet}
 
-<div class="testcase-panel">
+<div class="testcase-panel" class:compact-style={compactStyle}>
   <nav class="testcase-tabs" aria-label="测试点模式">
     <button class:active={!shell.generatorOpen} aria-pressed={!shell.generatorOpen} onclick={() => (shell.generatorOpen = false)}>
       <span>测试点</span><em>{execution.testcases.length}</em>
@@ -360,12 +344,12 @@
         <small title={workspace.activeTab.title}>{workspace.activeTab.title}</small>
       </div>
       <div class="case-toolbar-actions">
-        {#if execution.running || execution.compiling}
+        {#if execution.busy || execution.running || execution.compiling}
           <button class="danger-button" onclick={() => void execution.stop()} disabled={execution.stopping}><Icon name="stop" size={13} />{execution.stopping ? "停止中…" : "停止"}</button>
         {:else}
-          <button class="primary-button run-all" title={`运行全部 · ${keybindings.runAll}`} onclick={() => { shell.generatorOpen = false; void execution.runAll(); }} disabled={saving || execution.compiling || execution.testcases.every((testcase) => !testcase.enabled)}><Icon name="play" size={13} /><span>运行全部</span><kbd>{keybindings.runAll}</kbd></button>
+          <button class="primary-button run-all" title={`运行全部 · ${keybindings.runAll}`} onclick={() => { shell.generatorOpen = false; void execution.runAll(); }} disabled={saving || execution.busy || execution.compiling || execution.testcases.every((testcase) => !testcase.enabled)}><Icon name="play" size={13} /><span>运行全部</span><kbd>{keybindings.runAll}</kbd></button>
         {/if}
-        <button class="secondary-button new-case" disabled={execution.running || execution.compiling} onclick={() => beginCreate()}><Icon name="plus" size={13} /><span>新建</span></button>
+        <button class="secondary-button new-case" disabled={execution.busy || execution.running || execution.compiling} onclick={() => beginCreate()}><Icon name="plus" size={13} /><span>新建</span></button>
       </div>
     </section>
 
@@ -380,16 +364,15 @@
             class="testcase-card-row"
             role="group"
             class:disabled={!testcase.enabled}
-            draggable="true"
-            ondragstart={(event) => beginDrag(event, testcase)}
             ondragover={(event) => event.preventDefault()}
             ondrop={(event) => dropBefore(event, index)}
           >
+            <button class="case-sort-handle" draggable="true" ondragstart={(event) => beginDrag(event, testcase)} onkeydown={(event) => moveWithKeyboard(event, testcase, index)} aria-label={`拖动排序 ${testcase.name}`} title="拖动排序 · Alt+↑/↓"><svg width="10" height="16" viewBox="0 0 10 16" aria-hidden="true"><path d="M3 3h.1M7 3h.1M3 8h.1M7 8h.1M3 13h.1M7 13h.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
             <button
               class="testcase-main"
               class:active={formOpen && editingId === testcase.id}
               aria-expanded={formOpen && editingId === testcase.id}
-              title="展开测试点 · 拖动排序 · Alt+↑/↓ 排序"
+              title="展开或收起测试点"
               onclick={() => beginEdit(testcase)}
               onkeydown={(event) => moveWithKeyboard(event, testcase, index)}
             >
@@ -401,7 +384,7 @@
             {:else}
               <span class="case-status pending">待运行</span>
             {/if}
-            <button class="case-run-button" title={`运行 ${testcase.name}`} disabled={saving || execution.running || execution.compiling || !testcase.enabled} onclick={() => { shell.generatorOpen = false; void execution.runOne(testcase); }}><Icon name="play" size={13} /><span>{result?.status === "Running" ? "运行中" : "运行"}</span></button>
+            <button class="case-run-button" title={`运行 ${testcase.name}`} disabled={saving || execution.busy || execution.running || execution.compiling || !testcase.enabled} onclick={() => { shell.generatorOpen = false; void execution.runOne(testcase); }}><Icon name="play" size={13} /><span>{result?.status === "Running" ? "运行中" : "运行"}</span></button>
             <button class="case-delete-button" title="删除测试点" aria-label={`删除 ${testcase.name}`} onclick={() => void removeTestcase(testcase)}><Icon name="close" size={17} /></button>
             <button class="case-expand-button" title={formOpen && editingId === testcase.id ? "收起" : "展开"} aria-label={`${formOpen && editingId === testcase.id ? "收起" : "展开"} ${testcase.name}`} aria-expanded={formOpen && editingId === testcase.id} onclick={() => beginEdit(testcase)}><Icon name="chevron-right" size={16} /></button>
           </div>
@@ -1412,7 +1395,7 @@
     font-size: var(--ui-font-small);
   }
 
-  .case-limit-row strong {
+  .case-limit-row input {
     min-width: 72px;
     padding: 7px 10px;
     border: 1px solid var(--border-strong);
@@ -1493,4 +1476,47 @@
       width: 30px;
     }
   }
+  /* Keep press feedback local. Text input never resets its height on a keystroke. */
+  .testcase-card { transition: border-color 100ms ease, background-color 100ms ease; }
+  .testcase-card-row { position: relative; }
+  .case-sort-handle { position: absolute; top: 12px; left: 0; width: 12px; height: 26px; padding: 0; opacity: 0; cursor: grab; color: var(--text-muted); background: transparent; }
+  .testcase-card-row:hover .case-sort-handle, .case-sort-handle:focus-visible { opacity: 1; }
+  .case-sort-handle:active { cursor: grabbing; }
+  .case-code-field textarea { min-height: 96px; height: 112px; max-height: 480px; resize: vertical; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; transition: border-color 90ms ease; }
+  .case-output-section pre { resize: vertical; overflow: auto; overscroll-behavior: contain; }
+  .case-run-button, .case-delete-button, .case-expand-button, .case-io-heading button, .case-export-button, .case-toolbar button, .case-editor-footer button { transition: background-color 90ms ease, border-color 90ms ease, color 90ms ease; }
+  .case-run-button:active:not(:disabled), .case-toolbar button:active:not(:disabled), .case-editor-footer button:active:not(:disabled) { filter: brightness(.88); transform: none; }
+  .case-expand-button { transition: transform 140ms cubic-bezier(.2,.8,.2,1), color 90ms ease; }
+  .case-editor, .testcase-card .case-editor { contain: layout style; }
+  .case-limit-row input { width: 84px; min-width: 0; height: 30px; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--input-background); color: var(--text-primary); font: 13px var(--utility-font); }
+  .compact-style .fixed-testcase-list { gap: 10px; padding: 10px; }
+  .compact-style .testcase-card { border-radius: 7px; border-color: var(--border); background: color-mix(in srgb, var(--panel-background) 90%, transparent); }
+  .compact-style .testcase-card.expanded { border-color: var(--border-strong); background: color-mix(in srgb, var(--panel-background) 90%, transparent); }
+  .compact-style .testcase-card.expanded > .testcase-card-row::before { display: none; }
+  .compact-style .testcase-card-row { min-height: 48px; padding: 5px 10px 5px 14px; gap: 6px; background: color-mix(in srgb, var(--surface-raised) 45%, transparent); }
+  .compact-style .testcase-main { font-size: 14px; }
+  .compact-style .case-status.pending, .compact-style .case-duration { display: none; }
+  .compact-style .case-status { font-size: 10px; min-width: 25px; height: 20px; padding: 2px 4px; }
+  .compact-style .case-run-button { height: 30px; border-radius: 4px; padding: 0 10px; font-size: 13px; }
+  .compact-style .case-run-button :global(svg) { display: none; }
+  .compact-style .case-delete-button { height: 30px; width: 30px; border: 0; border-radius: 4px; color: white; background: color-mix(in srgb, var(--danger) 35%, var(--surface-sunken)); }
+  .compact-style .case-expand-button { height: 30px; width: 20px; }
+  .compact-style .case-editor, .compact-style .testcase-card .case-editor { padding: 12px; gap: 12px; }
+  .compact-style .case-io-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .compact-style .case-io-heading { min-height: 25px; height: auto; gap: 4px; flex-wrap: wrap; align-content: end; }
+  .compact-style .case-io-heading strong, .compact-style .case-output-section > header strong { font-size: 13px; font-weight: 600; }
+  .compact-style .case-io-heading button { height: 25px; padding: 0 5px; font-size: 11px; border: 0; background: var(--surface-raised); }
+  .compact-style .case-io-heading button :global(svg) { display: none; }
+  .compact-style .case-code-field textarea { height: 90px; min-height: 76px; padding: 8px 9px; border: 1px solid transparent; background: color-mix(in srgb, var(--surface-raised) 92%, transparent); font-size: 13px; line-height: 1.5; }
+  .compact-style .case-code-field textarea:focus { border-color: var(--accent); }
+  .compact-style .case-output-section { gap: 4px; }
+  .compact-style .case-output-section > header { height: 25px; }
+  .compact-style .case-output-section pre { min-height: 82px; padding: 8px 9px; border-color: transparent; background: color-mix(in srgb, var(--surface-raised) 92%, transparent); font-size: 13px; line-height: 1.5; }
+  .compact-style .case-export-button { height: 24px; padding: 0 6px; font-size: 11px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+  .compact-style .case-limit-row { min-height: 42px; padding-top: 9px; font-size: 12px; }
+  .compact-style .case-editor-footer { min-height: 32px; gap: 8px; padding-top: 8px; flex-wrap: wrap; }
+  .compact-style .case-editor-footer button { min-height: 26px; padding: 3px 8px; font-size: 12px; }
+  .compact-style .case-enabled strong { font-size: 11px; }
+  .compact-style .case-enabled small { display: none; }
+  @media (prefers-reduced-motion: reduce) { .testcase-panel *, .testcase-panel *::before { transition: none !important; animation: none !important; } }
 </style>
