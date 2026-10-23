@@ -590,10 +590,18 @@ mod tests {
         fs::write(&source, "int main(){add_subtree(1,1);}\n").unwrap();
         let failure = build(&request);
         assert!(!failure.success && !failure.cache_hit && failure.executable_path.is_none());
-        assert!(failure
-            .diagnostics
-            .iter()
-            .any(|d| d.message.contains("add_subtree") && d.path == source.to_string_lossy()));
+        // GetTempPath may contain RUNNER~1 on Windows, while diagnostics use
+        // the canonical long path. Compare file identity, not path spelling.
+        let expected_source = dunce::canonicalize(&source).unwrap();
+        assert!(
+            failure
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("add_subtree")
+                    && dunce::canonicalize(&d.path).is_ok_and(|path| path == expected_source)),
+            "missing current-source diagnostic: {:?}",
+            failure.diagnostics
+        );
         fs::write(&source, "int main(){}\n").unwrap();
         assert!(build(&request).success);
         request.reuse_artifact = false;
