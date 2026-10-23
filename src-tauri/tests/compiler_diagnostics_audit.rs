@@ -4,6 +4,12 @@ use lightcp_lib::compiler::{
 };
 use std::{fs, path::Path, sync::Arc};
 
+fn same_file(actual: &str, expected: &Path) -> bool {
+    // Windows GetTempPath can use RUNNER~1 while native results are canonical.
+    let expected = dunce::canonicalize(expected).expect("fixture must exist");
+    dunce::canonicalize(actual).is_ok_and(|actual| actual == expected)
+}
+
 fn request(source: &Path, reuse: bool) -> CompileRequest {
     CompileRequest {
         reuse_artifact: reuse,
@@ -114,11 +120,11 @@ fn build_dependencies_include_only_real_inputs_and_hash_normalized_contents() {
     assert!(!result
         .dependencies
         .iter()
-        .any(|d| Path::new(&d.path) == unused));
+        .any(|d| same_file(&d.path, &unused)));
     let dependency = result
         .dependencies
         .iter()
-        .find(|d| Path::new(&d.path) == header)
+        .find(|d| same_file(&d.path, &header))
         .unwrap();
     assert_eq!(
         dependency.content_hash.as_deref(),
@@ -408,7 +414,7 @@ fn unsaved_header_changes_refresh_main_diagnostics() {
                 ..
             }) = receiver.recv_timeout(Duration::from_millis(100))
             {
-                if path != source.to_string_lossy() || current != version {
+                if !same_file(&path, &source) || current != version {
                     continue;
                 }
                 assert_eq!(
@@ -552,7 +558,7 @@ fn failed_preprocessing_preserves_known_dependencies_without_claiming_completene
     assert!(result
         .dependencies
         .iter()
-        .any(|dependency| Path::new(&dependency.path) == header));
+        .any(|dependency| same_file(&dependency.path, &header)));
     assert!(result.stderr.contains("old_disk_error"));
     fs::remove_dir_all(root).unwrap();
 }
@@ -576,7 +582,7 @@ fn mp_phony_rules_do_not_turn_successful_builds_into_failures() {
     assert!(result
         .dependencies
         .iter()
-        .any(|dependency| Path::new(&dependency.path) == header));
+        .any(|dependency| same_file(&dependency.path, &header)));
     assert_eq!(
         std::process::Command::new(result.executable_path.unwrap())
             .status()
