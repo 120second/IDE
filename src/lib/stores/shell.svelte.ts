@@ -9,6 +9,7 @@ export type ActivityId =
 
 export type BottomPanelId = "problems" | "output" | "debugConsole";
 export type ProblemReaderDock = "left" | "right";
+export type SublimeToolPage = "testcases" | "statement";
 
 export type SettingsPage =
   | "updates"
@@ -36,6 +37,10 @@ export class ShellStore {
   settingsWindowOpen = $state(false);
   settingsPage = $state<SettingsPage>("theme");
   sidebarWidth = $state(264);
+  classicSidebarWidth = $state(420);
+  sublimeSidebarWidth = $state(288);
+  sublimeToolsVisible = $state(true);
+  sublimeToolPage = $state<SublimeToolPage>("testcases");
   bottomPanelHeight = $state(190);
   problemReaderWidth = $state(460);
 
@@ -116,6 +121,11 @@ export class ShellStore {
     if (!this.zenMode) this.problemReaderVisible = !this.problemReaderVisible;
   }
 
+  showSublimeTool(page: SublimeToolPage): void {
+    this.sublimeToolPage = page;
+    this.sublimeToolsVisible = true;
+  }
+
   toggleSketchBoard(): void {
     if (!this.zenMode) this.sketchBoardVisible = !this.sketchBoardVisible;
   }
@@ -130,8 +140,16 @@ export class ShellStore {
       || window.confirm("主题 JSON 还有未应用的修改，确定要放弃吗？");
   }
 
-  setSidebarWidth(width: number, maximum = 380): void {
-    this.sidebarWidth = Math.min(maximum, Math.max(210, width));
+  setSidebarWidth(width: number): void {
+    this.sidebarWidth = Math.min(380, Math.max(210, width));
+  }
+
+  setClassicSidebarWidth(width: number): void {
+    this.classicSidebarWidth = Math.min(600, Math.max(420, width));
+  }
+
+  setSublimeSidebarWidth(width: number): void {
+    this.sublimeSidebarWidth = Math.min(520, Math.max(200, width));
   }
 
   setBottomPanelHeight(height: number): void {

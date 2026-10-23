@@ -70,7 +70,7 @@ import {
   normalizePastedLineEndings,
   type LineEnding,
 } from "./lineEndings";
-import { usesLanguageServices } from "./languageServicePolicy";
+import { usesLanguageServices, usesCppLanguageServices } from "./languageServicePolicy";
 import { normalizeSnippetTemplate } from "./snippets";
 import {
   completionType,
@@ -196,6 +196,26 @@ const debugLocationField = StateField.define<DecorationSet>({
 });
 
 export class EditorWorkspace {
+  private externalInputSequence = 0;
+  private externalInputs = new Map<string, number>();
+  private externalInputFloor = 0;
+
+  buildInputVersion(): number { return this.externalInputSequence; }
+
+  buildInputsChangedSince(version: number, paths: readonly string[]): boolean {
+    return version < this.externalInputFloor || [...this.externalInputs].some(([changed, revision]) =>
+      revision > version && paths.some((path) => sameOrChildPath(path, changed)));
+  }
+
+  private externalInputChanged(path: string): void {
+    const revision = ++this.externalInputSequence;
+    if (this.externalInputs.size >= 4096) {
+      this.externalInputs.clear();
+      this.externalInputFloor = revision;
+    }
+    this.externalInputs.set(normalizedPath(path), revision);
+    this.lspClient?.inputChanged?.(path, true);
+  }
   tabs = $state.raw<EditorTab[]>([]);
   activeId = $state("");
   cursorLine = $state(1);
@@ -322,7 +342,7 @@ export class EditorWorkspace {
     this.captureActiveView();
     return this.tabs.flatMap((tab) =>
       tab.path && !tab.deleted && !tab.deferred
-        && usesLanguageServices(tab.state.doc)
+        && usesCppLanguageServices(tab.path ?? "", tab.state.doc)
         ? [{ path: tab.path, text: tab.state.doc.toString() }]
         : [],
     );
@@ -594,7 +614,7 @@ export class EditorWorkspace {
         externalModified: false,
       };
       this.tabs = [...this.tabs, tab];
-      if (usesLanguageServices(state.doc)) {
+      if (usesCppLanguageServices(file.path, state.doc)) {
         this.lspClient?.didOpen(file.path, state.doc.toString());
       }
       if (request === this.openSequence) {
@@ -769,6 +789,7 @@ export class EditorWorkspace {
   }
 
   async handleExternalChange(change: WorkspaceChange): Promise<void> {
+    if (change.kind !== "changed") for (const path of change.paths) this.externalInputChanged(path);
     if (change.kind === "renamed" && change.paths.length >= 2) {
       this.handlePathRenamed(change.paths[0], change.paths[1]);
       return;
@@ -785,13 +806,14 @@ export class EditorWorkspace {
 
     for (const path of change.paths) {
       const tab = this.tabs.find((candidate) => candidate.path && samePath(candidate.path, path));
-      if (!tab) continue;
+      if (!tab) { this.externalInputChanged(path); continue; }
 
       try {
         const observed = await getTextFileRevision(path);
         const current = this.tabs.find((candidate) => candidate.id === tab.id);
         if (!current || current.deleted || !current.path || !samePath(current.path, path)) continue;
         if (current.diskRevision === observed.revision) continue;
+        this.externalInputChanged(path);
         if (current.dirty) {
           this.markExternalConflict(current.id, observed.revision);
           this.notice = `${current.title} 在磁盘上已更改，但编辑器中仍有未保存内容。`;
@@ -817,6 +839,8 @@ export class EditorWorkspace {
   }
 
   handlePathRenamed(previousPath: string, nextPath: string): void {
+    this.externalInputChanged(previousPath);
+    this.externalInputChanged(nextPath);
     this.captureActiveView();
     const renamed: { previous: string; next: string; text?: string }[] = [];
     this.tabs = this.tabs.map((tab) => {
@@ -826,7 +850,7 @@ export class EditorWorkspace {
       renamed.push({
         previous: tab.path,
         next: path,
-        text: usesLanguageServices(tab.state.doc) ? tab.state.doc.toString() : undefined,
+        text: usesCppLanguageServices(path, tab.state.doc) ? tab.state.doc.toString() : undefined,
       });
       return {
         ...tab,
@@ -836,18 +860,19 @@ export class EditorWorkspace {
       };
     });
     for (const document of renamed) {
-      this.lspClient?.didClose(document.previous);
+      this.lspClient?.didClose(document.previous, true);
       if (document.text !== undefined) this.lspClient?.didOpen(document.next, document.text);
     }
     if (renamed.length) this.notifySessionChange();
   }
 
   handlePathDeleted(path: string): void {
+    this.externalInputChanged(path);
     let affected = false;
     this.tabs = this.tabs.map((tab) => {
       if (!tab.path || tab.deleted || !sameOrChildPath(tab.path, path)) return tab;
       affected = true;
-      this.lspClient?.didClose(tab.path);
+      this.lspClient?.didClose(tab.path, true);
       return { ...tab, deleted: true };
     });
     if (affected) this.notice = `${fileName(path)} 已在当前编辑器外部被删除。`;
@@ -863,7 +888,7 @@ export class EditorWorkspace {
       this.captureActiveView();
     }
     const closing = this.tabs[index];
-    if (closing.path && !closing.deleted && !closing.deferred) this.lspClient?.didClose(closing.path);
+    if (closing.path && !closing.deleted && !closing.deferred) this.lspClient?.didClose(closing.path, closing.dirty);
     const remaining = this.tabs.filter((tab) => tab.id !== id);
 
     if (remaining.length === 0) {
@@ -998,7 +1023,7 @@ export class EditorWorkspace {
         externalModified: true,
         externalRevision: file.revision,
       });
-      if (usesLanguageServices(state.doc)) this.lspClient?.didOpen(file.path, state.doc.toString());
+      if (usesCppLanguageServices(file.path, state.doc)) this.lspClient?.didOpen(file.path, state.doc.toString());
       this.notice = `${current.title} 已在磁盘上重新创建，编辑器中的未保存内容已保留。`;
       this.notifySessionChange();
     } catch {
@@ -1009,7 +1034,7 @@ export class EditorWorkspace {
   closeAllTabs(): void {
     this.captureActiveView();
     for (const tab of this.tabs) {
-      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
+      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path, tab.dirty);
     }
     this.resetEmptyWorkspace();
     this.saveState = "idle";
@@ -1036,7 +1061,7 @@ export class EditorWorkspace {
 
     this.captureActiveView();
     for (const tab of this.tabs) {
-      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
+      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path, tab.dirty);
     }
     this.tabs = uniquePaths.map((path, index) => {
       const eol: LineEnding = "lf";
@@ -1103,7 +1128,7 @@ export class EditorWorkspace {
   async restoreRecoverySnapshot(snapshot: EditorRecoverySnapshot): Promise<void> {
     this.captureActiveView();
     for (const tab of this.tabs) {
-      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path);
+      if (tab.path && !tab.deleted && !tab.deferred) this.lspClient?.didClose(tab.path, tab.dirty);
     }
 
     const restored: EditorTab[] = [];
@@ -1187,7 +1212,7 @@ export class EditorWorkspace {
         loading: false,
       };
       restored.push(tab);
-      if (tab.path && !tab.deleted && usesLanguageServices(tab.state.doc)) {
+      if (tab.path && !tab.deleted && usesCppLanguageServices(tab.path ?? "", tab.state.doc)) {
         this.lspClient?.didOpen(tab.path, tab.state.doc.toString());
       }
     }
@@ -1242,7 +1267,7 @@ export class EditorWorkspace {
         deleted: false,
       };
       this.replaceTab(id, hydrated);
-      if (usesLanguageServices(state.doc)) {
+      if (usesCppLanguageServices(file.path, state.doc)) {
         this.lspClient?.didOpen(file.path, state.doc.toString());
       }
       if (this.activeId === id) {
@@ -1367,11 +1392,12 @@ export class EditorWorkspace {
     this.updateCursor(update.state);
     const path = this.activeTab?.path;
     if (update.docChanged && path && this.lspClient) {
-      const wasEnabled = usesLanguageServices(update.startState.doc);
-      const isEnabled = usesLanguageServices(update.state.doc);
+      this.lspClient.inputChanged?.(path);
+      const wasEnabled = usesCppLanguageServices(path, update.startState.doc);
+      const isEnabled = usesCppLanguageServices(path, update.state.doc);
       const changes = isEnabled ? incrementalChanges(update) : [];
       if (wasEnabled && !isEnabled) {
-        this.lspClient.didClose(path);
+        this.lspClient.didClose(path, true);
       } else if (!wasEnabled && isEnabled) {
         this.lspClient.didOpen(path, update.state.doc.toString());
       } else if (isEnabled && changes.length) {
@@ -1505,10 +1531,11 @@ export class EditorWorkspace {
         : candidate,
     );
     if (tab.path && this.lspClient) {
-      const wasEnabled = usesLanguageServices(previousState.doc);
-      const isEnabled = usesLanguageServices(state.doc);
+      this.lspClient.inputChanged?.(tab.path);
+      const wasEnabled = usesCppLanguageServices(tab.path ?? "", previousState.doc);
+      const isEnabled = usesCppLanguageServices(tab?.path ?? "", state.doc);
       if (wasEnabled && !isEnabled) {
-        this.lspClient.didClose(tab.path);
+        this.lspClient.didClose(tab.path, true);
       } else if (!wasEnabled && isEnabled) {
         this.lspClient.didOpen(tab.path, state.doc.toString());
       } else if (isEnabled) {
@@ -1527,7 +1554,7 @@ export class EditorWorkspace {
   private lspPosition(): { path: string; position: LspPosition } | undefined {
     const tab = this.activeTab;
     const state = this.view?.state ?? tab?.state;
-    if (!tab?.path || !state || !this.lspClient?.ready || !usesLanguageServices(state.doc)) {
+    if (!tab?.path || !state || !this.lspClient?.ready || !usesCppLanguageServices(tab?.path ?? "", state.doc)) {
       return undefined;
     }
     return { path: tab.path, position: positionAt(state, state.selection.main.head) };
@@ -1535,7 +1562,7 @@ export class EditorWorkspace {
 
   private async lspCompletion(context: CompletionContext): Promise<CompletionResult | null> {
     const tab = this.activeTab;
-    if (!tab?.path || !this.lspClient?.ready || !usesLanguageServices(context.state.doc)) {
+    if (!tab?.path || !this.lspClient?.ready || !usesCppLanguageServices(tab.path, context.state.doc)) {
       return null;
     }
     const word = context.matchBefore(/[\w:]*$/);
@@ -1607,7 +1634,7 @@ export class EditorWorkspace {
 
   private async lspHoverTooltip(view: EditorView, position: number): Promise<Tooltip | null> {
     const tab = this.activeTab;
-    if (!tab?.path || !this.lspClient?.ready || !usesLanguageServices(view.state.doc)) {
+    if (!tab?.path || !this.lspClient?.ready || !usesCppLanguageServices(tab.path, view.state.doc)) {
       return null;
     }
     const initialState = view.state;

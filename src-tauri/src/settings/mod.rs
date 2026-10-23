@@ -41,6 +41,7 @@ pub enum InterfaceStyle {
     #[default]
     Lightcp,
     Classic,
+    Sublime,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -106,6 +107,7 @@ pub struct AppSettings {
     pub active_custom_theme: String,
     pub custom_themes: Vec<CustomThemeDefinition>,
     pub ui_density: UiDensity,
+    pub sublime_transparency: f64,
     pub background_image: String,
     pub background_image_name: String,
     pub background_image_opacity: f64,
@@ -145,6 +147,7 @@ impl Default for AppSettings {
             active_custom_theme: String::new(),
             custom_themes: Vec::new(),
             ui_density: UiDensity::Compact,
+            sublime_transparency: 0.03,
             background_image: String::new(),
             background_image_name: String::new(),
             background_image_opacity: 0.42,
@@ -177,6 +180,7 @@ impl Default for AppSettings {
 
 impl AppSettings {
     pub fn sanitize(mut self) -> Self {
+        self.sublime_transparency = finite_clamp(self.sublime_transparency, 0.0, 1.0, 0.03);
         self.background_image = self.background_image.trim().chars().take(4096).collect();
         self.background_image_name = self
             .background_image_name
@@ -455,6 +459,63 @@ fn is_theme_color(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sublime_transparency_defaults_roundtrips_and_clamps() {
+        let legacy: AppSettings =
+            serde_json::from_str(r#"{"interfaceStyle":"sublime","editorOpacity":0.2}"#).unwrap();
+        assert_eq!(legacy.sublime_transparency, 0.03);
+        for transparency in [0.0, 0.03, 0.75, 1.0] {
+            let settings = AppSettings {
+                sublime_transparency: transparency,
+                ..AppSettings::default()
+            }
+            .sanitize();
+            let json = serde_json::to_value(&settings).unwrap();
+            assert_eq!(json["sublimeTransparency"], transparency);
+            let restored: AppSettings = serde_json::from_value(json).unwrap();
+            assert_eq!(restored.sublime_transparency, transparency);
+        }
+        assert_eq!(
+            AppSettings {
+                sublime_transparency: f64::NAN,
+                ..AppSettings::default()
+            }
+            .sanitize()
+            .sublime_transparency,
+            0.03
+        );
+        assert_eq!(
+            AppSettings {
+                sublime_transparency: -1.0,
+                ..AppSettings::default()
+            }
+            .sanitize()
+            .sublime_transparency,
+            0.0
+        );
+        assert_eq!(
+            AppSettings {
+                sublime_transparency: 2.0,
+                ..AppSettings::default()
+            }
+            .sanitize()
+            .sublime_transparency,
+            1.0
+        );
+    }
+
+    #[test]
+    fn sublime_style_roundtrips_with_legacy_defaults() {
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"interfaceStyle":"sublime"}"#).unwrap();
+        assert_eq!(settings.interface_style, InterfaceStyle::Sublime);
+        assert_eq!(settings.testcase_style, TestcaseStyle::Follow);
+        let value = serde_json::to_value(settings.sanitize()).unwrap();
+        assert_eq!(value["interfaceStyle"], "sublime");
+        let restored: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.interface_style, InterfaceStyle::Sublime);
+    }
 
     #[test]
     fn appearance_controls_roundtrip_and_legacy_defaults() {

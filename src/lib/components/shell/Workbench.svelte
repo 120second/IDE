@@ -41,6 +41,10 @@
   import RandomGenerator from "../testcases/random/RandomGenerator.svelte";
   import CommunityHub from "../community/CommunityHub.svelte";
   import { ProblemImportStore } from "../../stores/problemImport.svelte";
+  import SublimeToolsPanel from "./SublimeToolsPanel.svelte";
+  import TodoPanel from "../todos/TodoPanel.svelte";
+  import DebugPanel from "../debug/DebugPanel.svelte";
+  import type { TestcaseInput } from "../../types/execution";
 
   interface Props {
     shell: ShellStore;
@@ -62,6 +66,8 @@
 
   let { shell, workspace, fileWorkspace, templateStore, execution, generator, archiveStore, debugStore, stressStore, lspStore, settings, ux, auth, backendState, health }: Props = $props();
   let quickSearchOpen = $state(false);
+  let sublimeTestDrafts = $state<Record<number, TestcaseInput>>({});
+  let sublime = $derived(settings.value.interfaceStyle === "sublime");
   let problemImportOpen = $state(false);
   let ProblemImportDialog = $state.raw<(typeof import("../reader/ProblemImportDialog.svelte"))["default"]>();
   const problemImport = untrack(() => new ProblemImportStore(workspace, fileWorkspace, shell, execution, ux, templateStore));
@@ -93,7 +99,7 @@
     command("file.reveal", "在资源管理器中显露当前文件", "文件", undefined, revealCurrentFile, activeFileReady, "当前没有工作区文件"),
     command("editor.close", "关闭当前编辑器", "编辑器", "closeEditor", () => void closeActiveEditor(), Boolean(workspace.activeId), "没有打开的编辑器"),
     command("build.compile", "编译当前文件", "运行", undefined, () => void execution.compileCurrent(), buildReady, buildDisabledReason()),
-    command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void execution.runCurrent(), buildReady, buildDisabledReason()),
+    command("build.run", "编译并运行当前文件", "运行", "runCurrent", () => void runCurrentFile(), buildReady, buildDisabledReason()),
     command("build.stop", "停止编译或运行", "运行", undefined, () => void execution.stop(), execution.busy || execution.running || execution.compiling, "当前没有编译或运行中的任务"),
     command("test.runAll", "运行全部测试点", "运行", "runAll", () => { showActivity("testcases"); void execution.runAll(); }, buildReady && execution.testcases.length > 0, execution.testcases.length ? buildDisabledReason() : "尚未添加测试点"),
     command("debug.start", "开始调试", "调试", "debug", () => { showActivity("debug"); void debugStore.startCurrent(); }, debugStartReady(), debugDisabledReason()),
@@ -110,6 +116,7 @@
     command("stress.start", "开始对拍", "竞赛", "stress", () => { showActivity("judge"); void stressStore.start(); }),
     command("problem.listen", "CF / 洛谷题目导入设置", "竞赛", undefined, () => (problemImportOpen = true)),
     command("view.explorer", "显示资源管理器", "视图", undefined, () => showActivity("explorer")),
+    command("view.testcases", "显示测试点", "视图", undefined, () => showActivity("testcases")),
     command("view.todos", "打开待刷题待办", "视图", undefined, () => showActivity("todos")),
     command("view.templates", "显示代码模板", "视图", undefined, () => showActivity("templates")),
     command("view.community", "打开 LightCP 社区", "视图", undefined, () => showActivity("community")),
@@ -117,13 +124,19 @@
     command("view.settings", "打开设置", "视图", undefined, () => openSettingsPage("theme")),
     command("view.problems", "显示问题面板", "视图", undefined, () => shell.showBottomPanel("problems")),
     command("view.output", "显示输出面板", "视图", undefined, () => shell.showBottomPanel("output")),
-    command("view.problemReader", "切换读题面板", "视图", undefined, () => shell.toggleProblemReader()),
+    command("view.problemReader", "切换读题面板", "视图", undefined, toggleReader),
     command("view.sketchBoard", "切换思路画板", "视图", undefined, () => shell.toggleSketchBoard()),
     command("view.toggleSidebar", "切换侧栏", "视图", "toggleSidebar", () => shell.toggleSidebar()),
     command("view.togglePanel", "切换底部面板", "视图", "togglePanel", () => shell.toggleBottomPanel()),
     { id: "view.zen", label: "切换禅模式", category: "视图", shortcut: "Ctrl+K Z", run: () => shell.toggleZenMode() },
     { id: "lsp.reconnect", label: "重新连接 clangd", category: "语言服务", enabled: Boolean(fileWorkspace.info) && lspStore.state !== "starting", disabledReason: fileWorkspace.info ? "clangd 正在连接" : "请先打开工作区", run: () => lspStore.reconnect() },
   ]);
+
+  $effect(() => {
+    if (sublime && shell.activeActivity === "testcases" && !shell.generatorOpen) {
+      untrack(() => { shell.showSublimeTool("testcases"); shell.activeActivity = "explorer"; });
+    }
+  });
 
   $effect(() => {
     if (shell.activeActivity === "templates") void templateStore.initialize();
@@ -296,14 +309,13 @@
         event.preventDefault();
         if (event.repeat) return;
         if (shell.activeActivity === "templates") shell.activeActivity = "explorer";
-        void execution.runCurrent();
+        void runCurrentFile();
         return;
       }
       if (matchesShortcut(event, "runAll", keybindings)) {
         event.preventDefault();
         if (event.repeat) return;
-        shell.activeActivity = "testcases";
-        shell.sidebarVisible = true;
+        showActivity("testcases");
         void execution.runAll();
         return;
       }
@@ -381,8 +393,23 @@
 
   function showActivity(activity: typeof shell.activeActivity): void {
     shell.generatorOpen = false;
+    if (sublime && activity === "testcases") {
+      shell.showSublimeTool("testcases");
+      shell.activeActivity = "explorer";
+      return;
+    }
     shell.activeActivity = activity;
     shell.sidebarVisible = true;
+  }
+
+  function toggleReader(): void {
+    if (!sublime) { shell.toggleProblemReader(); return; }
+    if (shell.activeActivity === "explorer" && shell.sublimeToolsVisible && shell.sublimeToolPage === "statement") shell.sublimeToolsVisible = false;
+    else { showActivity("explorer"); shell.showSublimeTool("statement"); }
+  }
+
+  async function runCurrentFile(): Promise<void> {
+    await execution.runCurrent();
   }
 
   function openSettingsPage(page: SettingsPage): void {
@@ -519,8 +546,8 @@
 
 <div class:zen-mode={shell.zenMode} class="app-shell">
   <div class="workspace-background" aria-hidden="true"></div>
-  {#if settings.value.interfaceStyle === "classic"}
-    <ClassicMenuBar commands={workbenchCommands} quickOpen={() => openQuickFile()} shortcut={settings.value.keybindings.quickOpen} settings={() => openSettingsPage("interface")} account={() => openSettingsPage("account")} about={() => openSettingsPage("updates")} />
+  {#if settings.value.interfaceStyle !== "lightcp"}
+    <ClassicMenuBar minimal={settings.value.interfaceStyle === "sublime"} commands={workbenchCommands} quickOpen={() => openQuickFile()} shortcut={settings.value.keybindings.quickOpen} settings={() => openSettingsPage("interface")} account={() => openSettingsPage("account")} about={() => openSettingsPage("updates")} />
   {/if}
   <div class="shell-body">
     {#if !shell.zenMode}
@@ -531,7 +558,7 @@
       />
     {/if}
     <div class="workbench">
-      {#if shell.sidebarVisible && !shell.zenMode && shell.activeActivity !== "judge" && shell.activeActivity !== "community" && !(shell.activeActivity === "testcases" && shell.generatorOpen)}
+      {#if shell.sidebarVisible && !shell.zenMode && (sublime || shell.activeActivity !== "judge" && shell.activeActivity !== "community" && !(shell.activeActivity === "testcases" && shell.generatorOpen))}
         <Sidebar
           {shell}
           {workspace}
@@ -554,6 +581,10 @@
             close={() => shell.closeThemeStudio()}
             setDirty={(dirty) => shell.setThemeStudioDirty(dirty)}
           />
+        {:else if sublime && shell.activeActivity === "todos" && !shell.zenMode}
+          <TodoPanel />
+        {:else if sublime && shell.activeActivity === "debug" && !shell.zenMode}
+          <DebugPanel debug={debugStore} {execution} {workspace} />
         {:else if shell.activeActivity === "community" && !shell.zenMode}
           <CommunityHub {auth} {shell} {ux} />
         {:else if shell.activeActivity === "templates" && !shell.zenMode}
@@ -572,24 +603,25 @@
             }}
           />
         {:else}
+          <div class="editor-layout" class:sublime-layout={sublime} class:tools-open={sublime && shell.sublimeToolsVisible && !shell.zenMode} style:--sublime-tools-width={`${shell.problemReaderWidth}px`}>
           <TabBar
             {workspace}
             {ux}
             lsp={lspStore}
             keybindings={settings.value.keybindings}
             togglePanel={() => shell.toggleBottomPanel()}
-            toggleReader={() => shell.toggleProblemReader()}
+            toggleReader={toggleReader}
             openProblemImport={() => (problemImportOpen = true)}
             problemListening={problemImport.listening}
             toggleSketch={() => shell.toggleSketchBoard()}
             toggleZen={() => shell.toggleZenMode()}
             compile={() => void execution.compileCurrent()}
-            run={() => void execution.runCurrent()}
+            run={() => void runCurrentFile()}
             stop={() => void execution.stop()}
             busy={execution.busy || execution.compiling || execution.running || stressStore.running || debugStore.active}
             running={execution.busy || execution.running}
             newFile={() => void createSourceFile()}
-            readerOpen={shell.problemReaderVisible}
+            readerOpen={sublime ? shell.sublimeToolsVisible && shell.sublimeToolPage === "statement" : shell.problemReaderVisible}
             sketchOpen={shell.sketchBoardVisible}
           />
           {#if workspace.activeTab && !shell.zenMode}
@@ -621,7 +653,9 @@
                 {/key}
               {/if}
             </div>
-            {#if shell.problemReaderVisible && !shell.zenMode && ProblemReader}
+            {#if sublime}
+              <SublimeToolsPanel {shell} {workspace} {execution} lsp={lspStore} drafts={sublimeTestDrafts} {ux} openGenerator={() => shell.openGenerator()} importSample={importStatementSample}/>
+            {:else if shell.problemReaderVisible && !shell.zenMode && ProblemReader}
               <ProblemReader
                 sourcePath={workspace.activeTab?.path}
                 sourceTitle={workspace.activeTab?.title}
@@ -643,6 +677,7 @@
               />
             {/if}
           </div>
+          </div>
           {#if shell.bottomPanelVisible && !shell.zenMode && (workspace.activeTab || execution.running)}
             <BottomPanel {shell} {workspace} {execution} debug={debugStore} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} {health} />
           {/if}
@@ -660,6 +695,10 @@
   </div>
   <StatusBar {shell} {workspace} {fileWorkspace} lsp={lspStore} keybindings={settings.value.keybindings} {backendState} />
 </div>
+
+<style>
+  .editor-layout { display: contents; }
+</style>
 
 {#if settingsMenuAnchor}
   <SettingsMenu

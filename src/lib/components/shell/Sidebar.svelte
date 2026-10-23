@@ -42,9 +42,17 @@
   };
 
   let { shell, workspace, fileWorkspace, templateStore, settings, execution, generator, archiveStore, debug, ux, newFile }: Props = $props();
-  let displayedWidth = $derived(settings.value.interfaceStyle === "classic" ? Math.max(420, shell.sidebarWidth) : shell.sidebarWidth);
+  let activity = $derived(settings.value.interfaceStyle === "sublime" ? "explorer" : shell.activeActivity);
+  let sublimeMinimum = 200;
+  let displayedWidth = $derived(settings.value.interfaceStyle === "sublime" ? Math.max(sublimeMinimum, shell.sublimeSidebarWidth) : settings.value.interfaceStyle === "classic" ? shell.classicSidebarWidth : shell.sidebarWidth);
   let stopResize = () => {};
   onDestroy(() => stopResize());
+
+  function resizeSidebar(width: number): void {
+    if (settings.value.interfaceStyle === "sublime") shell.setSublimeSidebarWidth(Math.max(sublimeMinimum, width));
+    else if (settings.value.interfaceStyle === "classic") shell.setClassicSidebarWidth(width);
+    else shell.setSidebarWidth(width);
+  }
 
   function beginResize(event: PointerEvent): void {
     event.preventDefault();
@@ -52,7 +60,7 @@
     const startX = event.clientX;
     const startWidth = displayedWidth;
     const onMove = (moveEvent: PointerEvent) =>
-      shell.setSidebarWidth(startWidth + moveEvent.clientX - startX, settings.value.interfaceStyle === "classic" ? 600 : 380);
+      resizeSidebar(startWidth + moveEvent.clientX - startX);
     const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -67,25 +75,25 @@
   function resizeWithKeyboard(event: KeyboardEvent): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    shell.setSidebarWidth(displayedWidth + (event.key === "ArrowRight" ? 12 : -12), settings.value.interfaceStyle === "classic" ? 600 : 380);
+    resizeSidebar(displayedWidth + (event.key === "ArrowRight" ? 12 : -12));
   }
 </script>
 
-<aside class="sidebar" style:width={`${displayedWidth}px`} aria-label={titles[shell.activeActivity]}>
+<aside class="sidebar" style:width={`${displayedWidth}px`} aria-label={titles[activity]}>
   <header class="sidebar-header">
-    <span>{titles[shell.activeActivity]}</span>
+    <span>{settings.value.interfaceStyle === "sublime" ? "FOLDERS" : titles[activity]}</span>
     <button aria-label="隐藏侧栏" title={`隐藏侧栏 · ${settings.value.keybindings.toggleSidebar}`} onclick={() => shell.toggleSidebar()}>
       <Icon name="close" size={14} />
     </button>
   </header>
 
   <div
-    class:explorer-content={shell.activeActivity === "explorer"}
-    class:templates-content={shell.activeActivity === "templates"}
+    class:explorer-content={activity === "explorer"}
+    class:templates-content={activity === "templates"}
     class="sidebar-content"
   >
-    {#if shell.activeActivity === "explorer"}
-      <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} />
+    {#if activity === "explorer"}
+      <ExplorerPanel {fileWorkspace} {archiveStore} editor={workspace} {ux} {newFile} keybindings={settings.value.keybindings} filesOnly={settings.value.interfaceStyle === "sublime"} />
     {:else if shell.activeActivity === "todos"}
       <TodoPanel />
     {:else if shell.activeActivity === "testcases"}
@@ -111,8 +119,8 @@
     role="separator"
     aria-label="调整侧栏宽度"
     aria-orientation="vertical"
-    aria-valuemin={settings.value.interfaceStyle === "classic" ? 420 : 210}
-    aria-valuemax={settings.value.interfaceStyle === "classic" ? 600 : 380}
+    aria-valuemin={settings.value.interfaceStyle === "sublime" ? sublimeMinimum : settings.value.interfaceStyle === "classic" ? 420 : 210}
+    aria-valuemax={settings.value.interfaceStyle === "sublime" ? 520 : settings.value.interfaceStyle === "classic" ? 600 : 380}
     aria-valuenow={displayedWidth}
     tabindex="0"
     onpointerdown={beginResize}

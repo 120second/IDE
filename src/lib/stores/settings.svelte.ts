@@ -1,6 +1,6 @@
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { loadSettings, saveSettings } from "../api/settings";
-import { classicInterfaceColors } from "../theme/interfaceStyle";
+import { classicInterfaceColors, sublimeInterfaceColors } from "../theme/interfaceStyle";
 import {
   resolveThemePreference,
   type AppSettings,
@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   activeCustomTheme: "",
   customThemes: [],
   uiDensity: "standard",
+  sublimeTransparency: 0.03,
   backgroundImage: "",
   backgroundImageName: "",
   backgroundImageOpacity: 0.42,
@@ -144,6 +145,7 @@ export class SettingsStore {
       editorTheme: DEFAULT_SETTINGS.editorTheme,
       activeCustomTheme: "",
       uiDensity: DEFAULT_SETTINGS.uiDensity,
+      sublimeTransparency: DEFAULT_SETTINGS.sublimeTransparency,
       backgroundImage: DEFAULT_SETTINGS.backgroundImage,
       backgroundImageName: DEFAULT_SETTINGS.backgroundImageName,
       backgroundImageOpacity: DEFAULT_SETTINGS.backgroundImageOpacity,
@@ -361,11 +363,12 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   root.dataset.density = settings.uiDensity;
   root.classList.toggle("performance-mode", settings.performanceMode);
   const hasBackground = Boolean(settings.backgroundImage);
+  const windowOpacity = settings.interfaceStyle === "sublime" ? 1 - settings.sublimeTransparency : 1;
   const controlOpacity = settings.popupOpacity;
-  root.style.setProperty("--background-opacity", hasBackground ? `${settings.backgroundImageOpacity}` : "0");
+  root.style.setProperty("--background-opacity", hasBackground ? `${settings.backgroundImageOpacity * windowOpacity}` : "0");
   root.style.setProperty("--background-dim-percent", hasBackground ? `${settings.backgroundDim * 100}%` : "100%");
-  root.style.setProperty("--window-opacity", "1");
-  root.style.setProperty("--window-opacity-percent", "100%");
+  root.style.setProperty("--window-opacity", String(windowOpacity));
+  root.style.setProperty("--window-opacity-percent", `${windowOpacity * 100}%`);
   root.style.setProperty("--sidebar-opacity", `${settings.sidebarOpacity}`);
   root.style.setProperty("--sidebar-opacity-percent", `${settings.sidebarOpacity * 100}%`);
   root.style.setProperty("--editor-opacity", `${settings.editorOpacity}`);
@@ -380,13 +383,14 @@ export function applyDocumentAppearance(settings: AppSettings): void {
   root.style.setProperty("--workspace-background-size", settings.backgroundFit === "fill" ? "100% 100%" : settings.backgroundFit);
   root.style.setProperty("--workspace-background-position", `${settings.backgroundPositionX}% ${settings.backgroundPositionY}%`);
   root.style.setProperty("--workspace-background-scale", String(settings.backgroundScale));
-  root.style.setProperty("--code-background", settings.interfaceStyle === "classic" && settings.editorTheme === "inherit" ? (variant === "dark" ? "#25252b" : "#ffffff") : resolveEditorBackground(settings, variant));
+  const interfaceEditorBackground = settings.interfaceStyle === "sublime" ? (variant === "dark" ? "#242622" : "#f7f8fa") : (variant === "dark" ? "#25252b" : "#ffffff");
+  root.style.setProperty("--code-background", settings.interfaceStyle !== "lightcp" && settings.editorTheme === "inherit" ? interfaceEditorBackground : resolveEditorBackground(settings, variant));
   const backgroundUrl = resolveBackgroundUrl(settings.backgroundImage);
   root.style.setProperty(
     "--workspace-background-image",
     backgroundUrl ? `url("${escapeCssUrl(backgroundUrl)}")` : "none",
   );
-  const colors = { ...resolveThemeColors(settings, variant), ...(settings.interfaceStyle === "classic" ? classicInterfaceColors(variant) : {}) };
+  const colors = { ...resolveThemeColors(settings, variant), ...(settings.interfaceStyle === "sublime" ? sublimeInterfaceColors(variant) : settings.interfaceStyle === "classic" ? classicInterfaceColors(variant) : {}) };
   for (const [token, value] of Object.entries(colors)) {
     root.style.setProperty(THEME_CSS_VARIABLES[token as ThemeColorToken], value);
   }
@@ -396,7 +400,7 @@ function normalizeSettings(settings: AppSettings): AppSettings {
   const customThemes = normalizeCustomThemes(settings.customThemes);
   const requestedCustomTheme = String(settings.activeCustomTheme ?? "");
   return {
-    interfaceStyle: settings.interfaceStyle === "classic" ? "classic" : "lightcp",
+    interfaceStyle: settings.interfaceStyle === "classic" || settings.interfaceStyle === "sublime" ? settings.interfaceStyle : "lightcp",
     testcaseStyle: settings.testcaseStyle === "compact" || settings.testcaseStyle === "standard" ? settings.testcaseStyle : "follow",
     theme: normalizeTheme(settings.theme),
     colorTheme: normalizeColorTheme(settings.colorTheme),
@@ -407,6 +411,7 @@ function normalizeSettings(settings: AppSettings): AppSettings {
       : "",
     customThemes,
     uiDensity: normalizeDensity(settings.uiDensity),
+    sublimeTransparency: clamp(settings.sublimeTransparency, 0, 1, DEFAULT_SETTINGS.sublimeTransparency),
     backgroundImage: String(settings.backgroundImage ?? "").trim().slice(0, 4096),
     backgroundImageName: String(settings.backgroundImageName ?? "").trim().slice(0, 256),
     backgroundImageOpacity: clamp(settings.backgroundImageOpacity, 0, 1, DEFAULT_SETTINGS.backgroundImageOpacity),

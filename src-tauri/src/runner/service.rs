@@ -552,6 +552,7 @@ int main() {
             &root,
             &build,
             &CompileRequest {
+                reuse_artifact: false,
                 client_task_id: None,
                 expected_source: None,
                 source_path: source.to_string_lossy().into_owned(),

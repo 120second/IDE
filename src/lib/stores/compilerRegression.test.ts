@@ -65,6 +65,28 @@ it("an old successful compile cannot clear errors for newer saved content", asyn
   await pending;
   expect(store.errorCount).toBe(1);
 });
+
+it("never launches an executable after the editor changes while compilation is pending", async () => {
+  const store = execution();
+  let finish!: (result: typeof compiled) => void;
+  api.compileCurrentFile.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const pending = store.runCurrent();
+  await vi.advanceTimersByTimeAsync(0);
+  (store as any).editor.sourceSnapshot = () => ({ text: "int main(){return missing;}", revision: 21, dirty: true });
+  finish(compiled);
+  await pending;
+  expect(api.runProgram).not.toHaveBeenCalled();
+  expect(store.compileResult).toBeUndefined();
+  expect(store.error).toContain("已过期");
+});
+
+it("never launches a build whose disk source changed even if the editor has not reloaded yet", async () => {
+  api.compileCurrentFile.mockResolvedValueOnce({ ...compiled, success: false, sourceChanged: true });
+  const store = execution();
+  await store.runCurrent();
+  expect(api.runProgram).not.toHaveBeenCalled();
+  expect(store.error).toContain("已过期");
+});
 it("reopening rejects diagnostics from the previous document incarnation", () => {
   const store = lsp();
   store.didClose(path);
@@ -163,6 +185,17 @@ it("marks edits pending and performs only one automatic resynchronization withou
   expect(store.isChecked(path)).toBe(true);
 });
 
+it("allows one new resynchronization after a later edit without an endless retry loop", async () => {
+  const store = lsp();
+  (store as any).editor.openLspDocuments = () => [{ path, text: "int main(){}" }];
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(lspApi.lspDidOpen).toHaveBeenCalledTimes(2);
+  store.didChange(path, [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: "x" }]);
+  await vi.advanceTimersByTimeAsync(15000);
+  expect(lspApi.lspDidOpen).toHaveBeenCalledTimes(3);
+  expect(store.isChecked(path)).toBe(false);
+});
+
 it("retains useful toolchain details while distinguishing cancellation from failures", async () => {
   api.compileCurrentFile.mockRejectedValueOnce({ code: "PROCESS_START_FAILED", userMessage: "无法启动", technicalMessage: "Win32 error 193: bad executable format" });
   const store = execution();
@@ -170,4 +203,70 @@ it("retains useful toolchain details while distinguishing cancellation from fail
   expect(store.error).toContain("Win32 error 193");
   expect(store.results[0].status).toBe("Error");
   expect(store.buildDetails).toContain("g++");
+});
+
+it("classifies an internal compiler crash as a toolchain failure, not a source-code CE", async () => {
+  api.compileCurrentFile.mockResolvedValueOnce({ ...compiled, success: false, executablePath: undefined, diagnostics: [{ path, fileLevel: true, source: "工具链", severity: 1, message: "internal compiler error: Illegal instruction", code: "compiler_internal_error", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }] });
+  const store = execution();
+  await store.runOne(testcase);
+  expect(store.results[0].status).toBe("Error");
+  expect(api.runProgram).not.toHaveBeenCalled();
+});
+
+it("a clangd recheck must preserve independent linker errors", () => {
+  const store = lsp();
+  (store as any).editor.openLspDocuments = () => [{ path, text: "int main() { return 0; }" }];
+  const diagnostic = { path, severity: 1, source: "链接器", code: "build_failed", fileLevel: true, message: "undefined reference", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } };
+  store.acceptCompileResult(path, { ...compiled, success: false, diagnostics: [diagnostic] }, (store as any).editor.sourceSnapshot());
+  store.recheck(path);
+  publish(store, null, 2);
+  expect(store.diagnostics).toContainEqual(diagnostic);
+});
+
+it("does not count the same compiler and clangd error twice", () => {
+  const store = lsp();
+  publish(store, "Use of undeclared identifier 'missing'", 1);
+  store.acceptCompileResult(path, { ...compiled, success: false, diagnostics: [{ path, severity: 1, source: "编译器", code: "", fileLevel: false, message: "'missing' was not declared in this scope", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 7 } } }] }, (store as any).editor.sourceSnapshot());
+  expect(store.errorCount).toBe(1);
+  expect(store.diagnostics[0].source).toBe("编译器");
+});
+
+it("immediately invalidates live diagnostics when compilation flags change", () => {
+  const store = lsp();
+  (store as any).editor.clearLspDiagnostics = vi.fn();
+  publish(store, "wrong standard", 1);
+  store.configure("D:\\Code", "", "g++", "c++23", []);
+  expect(store.ready).toBe(false);
+  expect(store.errorCount).toBe(0);
+  publish(store, "old configuration", 1);
+  expect(store.errorCount).toBe(0);
+});
+
+it("does not publish an old toolchain failure after its configuration was corrected", async () => {
+  const onCompile = vi.fn();
+  const store = execution(onCompile);
+  let reject!: (error: Error) => void;
+  api.compileCurrentFile.mockImplementationOnce(() => new Promise((_resolve, rejectResult) => { reject = rejectResult; }));
+  const pending = store.compileCurrent();
+  await vi.advanceTimersByTimeAsync(0);
+  (store as any).settings.value.compilerPath = "C:\\fixed\\g++.exe";
+  reject(new Error("old compiler not found"));
+  await pending;
+  expect(onCompile).not.toHaveBeenCalled();
+  expect(store.error).toContain("配置已更改");
+});
+
+it("restores a live marker when its overlapping compiler marker becomes invalid", async () => {
+  const store = lsp();
+  const editor = (store as any).editor;
+  editor.clearCompileDiagnostics = vi.fn();
+  editor.openLspDocuments = () => [];
+  publish(store, "undeclared", 1);
+  const diagnostic = { path, severity: 1, source: "编译器", code: "", message: "was not declared", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } };
+  store.acceptCompileResult(path, { ...compiled, success: false, diagnostics: [diagnostic] }, { ...editor.sourceSnapshot(), documents: [{ path, revision: 20 }, { path: "D:\\Code\\other.cpp", revision: 20 }] });
+  store.didChange("D:\\Code\\other.cpp", [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: "x" }]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(store.errorCount).toBe(1);
+  expect(editor.setLspDiagnostics).toHaveBeenLastCalledWith(path, store.diagnosticsFor(path));
+  expect(store.diagnosticsFor(path)[0].source).toBe("clangd");
 });

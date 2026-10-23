@@ -21,6 +21,8 @@ pub struct CompilerConfig {
 #[serde(rename_all = "camelCase")]
 pub struct CompileRequest {
     #[serde(default)]
+    pub reuse_artifact: bool,
+    #[serde(default)]
     pub client_task_id: Option<String>,
     pub source_path: String,
     pub profile: CompileProfile,
@@ -43,7 +45,18 @@ pub struct CompileDiagnostic {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CompileDependency {
+    pub path: String,
+    pub content_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompileResult {
+    pub dependencies: Vec<CompileDependency>,
+    pub dependencies_complete: bool,
+    pub diagnostics_incomplete: bool,
+    pub cache_hit: bool,
     pub command: Vec<String>,
     pub working_directory: String,
     pub task_id: String,

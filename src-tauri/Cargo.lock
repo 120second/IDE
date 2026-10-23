@@ -1949,7 +1949,7 @@ dependencies = [
 
 [[package]]
 name = "lightcp"
-version = "0.1.1-dev.5"
+version = "0.1.1-dev.14"
 dependencies = [
  "dunce",
  "keyring",
@@ -1960,6 +1960,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

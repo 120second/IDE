@@ -14,6 +14,7 @@ import {
   updateTestcase,
 } from "../api/execution";
 import type { EditorWorkspace } from "../editor/workspace.svelte";
+import { buildContentHash, buildPathKey } from "../editor/buildInputs";
 import type {
   CompileProfile,
   CompileResult,
@@ -49,6 +50,8 @@ export class ExecutionStore {
 
   private unlisten: UnlistenFn | undefined;
   private testcaseRequest = 0;
+  private testcaseLoad: Promise<void> | undefined;
+  private loadedTestcaseSource: string | undefined;
   private runSequence = 0;
   private taskSequence = 0;
   private clientTaskId = "";
@@ -114,24 +117,42 @@ export class ExecutionStore {
 
   async syncActiveSource(sourcePath?: string, force = false): Promise<void> {
     const source = sourcePath ?? "";
-    if (!force && source === this.sourcePath && (this.testcases.length > 0 || !source)) return;
+    if (!force && source === this.sourcePath) {
+      if (this.testcaseLoad) return this.testcaseLoad;
+      if (this.loadedTestcaseSource === source) return;
+    }
+    const changed = source !== this.sourcePath;
     this.sourcePath = source;
-    this.results = [];
+    const request = ++this.testcaseRequest;
+    this.loadedTestcaseSource = undefined;
+    this.testcaseLoad = undefined;
+    if (changed) { this.results = []; this.testcases = []; }
     if (!source) {
       this.testcases = [];
+      this.loadingTestcases = false;
+      this.loadedTestcaseSource = source;
       return;
     }
-    const request = ++this.testcaseRequest;
     this.loadingTestcases = true;
     this.error = "";
-    try {
+    const pending = (async () => { try {
       const testcases = await listTestcases(source);
-      if (request === this.testcaseRequest) this.testcases = testcases;
+      if (request === this.testcaseRequest && !this.disposed) {
+        this.testcases = testcases;
+        this.loadedTestcaseSource = source;
+      }
     } catch (error) {
       if (request === this.testcaseRequest) this.error = errorMessage(error);
     } finally {
-      if (request === this.testcaseRequest) this.loadingTestcases = false;
-    }
+      if (request === this.testcaseRequest) { this.loadingTestcaseComplete(); }
+    } })();
+    this.testcaseLoad = pending;
+    return pending;
+  }
+
+  private loadingTestcaseComplete(): void {
+    this.loadingTestcases = false;
+    this.testcaseLoad = undefined;
   }
 
   async saveTestcase(input: TestcaseInput, id?: number): Promise<Testcase | undefined> {
@@ -191,6 +212,7 @@ export class ExecutionStore {
     try { return await action(); }
     catch (error) {
       this.error = errorMessage(error);
+      this.shell.showBottomPanel("output");
       this.appendOutput(`[任务] ${this.error}\n`);
       return undefined;
     } finally {
@@ -211,8 +233,11 @@ export class ExecutionStore {
 
   async runCurrent(): Promise<void> { await this.runInput("", "当前程序"); }
 
-  async runInput(stdin: string, label = "随机数据"): Promise<void> {
-    await this.task(async () => {
+  async runInput(stdin: string, label = "随机数据", expectedSourcePath?: string): Promise<RunResult | undefined> {
+    return this.task(async () => {
+      if (expectedSourcePath && this.editor.activeTab?.path !== expectedSourcePath) {
+        return this.preflightFailure("当前代码文件已切换，请回到原文件后再运行。");
+      }
       this.compiling = true;
       const source = await this.prepareSource();
       if (!source) return;
@@ -222,7 +247,7 @@ export class ExecutionStore {
       this.compiling = false;
       if (!compiled?.success || !compiled.executablePath || this.compileCancelled) return;
       this.appendOutput(`\n[运行] ${label}\n`);
-      await this.execute(compiled.executablePath, source, stdin);
+      return this.execute(compiled.executablePath, source, stdin);
     });
   }
 
@@ -232,13 +257,17 @@ export class ExecutionStore {
       const prepared = await this.beforeTestRun?.(testcase.id);
       if (prepared === false) return;
       if (prepared) testcase = prepared;
+      if (this.editor.activeTab?.path !== testcase.sourcePath) {
+        return this.preflightFailure("测试点所属文件与当前文件不一致，请回到原文件后再运行。");
+      }
       const source = await this.prepareSource();
       if (!source) return;
+      if (source !== testcase.sourcePath) return;
       this.clearOutput();
       const compiled = await this.compileSource(source, "release", false);
       this.compiling = false;
       if (!compiled?.success || !compiled.executablePath || this.compileCancelled) {
-        this.setResult({ ...emptyResult(testcase), status: this.compileCancelled ? "Stopped" : this.error ? "Error" : "CE", stderr: this.error || compiled?.stderr || "" });
+        this.setResult({ ...emptyResult(testcase), status: this.compileCancelled ? "Stopped" : this.error || isToolchainFailure(compiled) ? "Error" : "CE", stderr: this.error || compileFailureText(compiled) });
         return;
       }
       await this.executeTestcase(compiled.executablePath, source, testcase);
@@ -252,14 +281,15 @@ export class ExecutionStore {
       const source = await this.prepareSource();
       if (!source) return;
       await this.syncActiveSource(source);
+      if (this.sourcePath !== source || this.editor.activeTab?.path !== source || this.compileCancelled) return;
       const enabled = this.testcases.filter((testcase) => testcase.enabled);
-      if (!enabled.length) { this.error = "请至少添加或启用一个测试点后再全部运行。"; return; }
+      if (!enabled.length) return this.preflightFailure("请至少添加或启用一个测试点后再全部运行。");
       this.results = [];
       this.clearOutput();
       const compiled = await this.compileSource(source, "release", false);
       this.compiling = false;
       if (!compiled?.success || !compiled.executablePath || this.compileCancelled) {
-        this.results = enabled.map((testcase) => ({ ...emptyResult(testcase), status: this.compileCancelled ? "Stopped" : this.error ? "Error" : "CE", stderr: this.error || compiled?.stderr || "" }));
+        this.results = enabled.map((testcase) => ({ ...emptyResult(testcase), status: this.compileCancelled ? "Stopped" : this.error || isToolchainFailure(compiled) ? "Error" : "CE", stderr: this.error || compileFailureText(compiled) }));
         return;
       }
       for (let index = 0; index < enabled.length; index++) {
@@ -293,27 +323,34 @@ export class ExecutionStore {
   }
 
   private async reloadTestcases(): Promise<void> {
-    const source = this.sourcePath;
-    this.sourcePath = "";
-    await this.syncActiveSource(source);
+    await this.syncActiveSource(this.sourcePath, true);
   }
 
   private async prepareSource(): Promise<string | undefined> {
     const tab = this.editor.activeTab;
     if (!tab?.path) {
-      this.error = "请先在当前工作区中打开或创建一个实际的 C++ 文件。";
-      return undefined;
+      return this.preflightFailure("请先在当前工作区中打开或创建一个实际的 C++ 文件。");
     }
     if (!tab.path.toLowerCase().endsWith(".cpp")) {
-      this.error = "当前文件不是 .cpp 源文件。";
-      return undefined;
+      return this.preflightFailure("当前文件不是 .cpp 源文件。");
     }
-    if (tab.dirty && !(await this.editor.saveActive())) {
-      this.error = this.editor.notice;
-      return undefined;
+    if (tab.dirty) {
+      const saved = await this.editor.saveActive();
+      if (this.compileCancelled || this.disposed) return undefined;
+      if (!saved) return this.preflightFailure(this.editor.notice || "源码保存失败，请保存后重新编译。");
+    }
+    if (this.editor.activeTab?.path !== tab.path || this.editor.sourceSnapshot?.(tab.path)?.dirty) {
+      return this.preflightFailure("保存期间文件已切换或再次修改，请保存后重新运行。");
     }
     this.error = "";
     return tab.path;
+  }
+
+  private preflightFailure(message: string): undefined {
+    this.error = message;
+    this.shell.showBottomPanel("output");
+    this.appendOutput(`[任务] ${message}\n`);
+    return undefined;
   }
 
   private async compileSource(
@@ -329,53 +366,101 @@ export class ExecutionStore {
     this.compileResult = undefined;
     this.error = "";
     const sourceSnapshot = this.editor.sourceSnapshot?.(sourcePath);
-    const snapshot = sourceSnapshot ? { ...sourceSnapshot, documents: this.editor.tabs?.flatMap((tab) => {
-      const state = tab.path ? this.editor.sourceSnapshot(tab.path) : undefined;
-      return state && tab.path ? [{ path: tab.path, revision: state.revision }] : [];
-    }) } : undefined;
+    const inputVersion = this.editor.buildInputVersion?.();
+    let snapshot = sourceSnapshot ? { ...sourceSnapshot, documents: [{ path: sourcePath, revision: sourceSnapshot.revision }] } : undefined;
     if (clearOutput) this.clearOutput();
     this.shell.showBottomPanel("output");
     this.appendOutput(`[编译] ${fileName(sourcePath)} · ${profile === "release" ? "发布模式" : "调试模式"}\n`);
-    const settings = this.settings.value;
-    const config = { compilerPath: settings.compilerPath, standard: settings.compilerStandard,
-      releaseArgs: [...settings.releaseArgs], debugArgs: [...settings.debugArgs], maxOutputBytes: settings.maxOutputBytes };
+    const config = this.compilerConfiguration();
     const configuration = JSON.stringify(config);
     this.buildDetails = JSON.stringify({ sourcePath, profile, ...config }, null, 2);
     try {
-      const result = await compileCurrentFile({
+      let result = await compileCurrentFile({
         sourcePath,
         clientTaskId: this.clientTaskId,
         expectedSource: snapshot?.text,
+        reuseArtifact: !clearOutput && profile === "release",
         profile,
         config,
       });
-      const currentSettings = this.settings.value;
-      const currentConfig = { compilerPath: currentSettings.compilerPath, standard: currentSettings.compilerStandard,
-        releaseArgs: [...currentSettings.releaseArgs], debugArgs: [...currentSettings.debugArgs], maxOutputBytes: currentSettings.maxOutputBytes };
-      if (configuration !== JSON.stringify(currentConfig)) {
+      if (configuration !== JSON.stringify(this.compilerConfiguration())) {
         this.error = "编译期间配置已更改，请重新编译。";
         this.appendOutput(`[编译] ${this.error}\n`);
         return undefined;
+      }
+      const dependencies = result.dependencies ?? [{ path: sourcePath }];
+      const checked = new Map<string, { path: string; text: string; revision: number }>();
+      for (const dependency of dependencies) {
+        if (buildPathKey(dependency.path) === buildPathKey(sourcePath)) continue;
+        const state = this.editor.sourceSnapshot?.(dependency.path);
+        if (!state) continue;
+        if (state.dirty) {
+          this.error = `请先保存相关头文件 ${fileName(dependency.path)}，再编译运行。`;
+          this.appendOutput(`[编译] ${this.error}\n`);
+          return undefined;
+        }
+        checked.set(buildPathKey(dependency.path), { path: dependency.path, ...state });
+        if (dependency.contentHash && await buildContentHash(state.text) !== dependency.contentHash) {
+          this.error = "编译期间相关文件已修改，本次结果已过期，请重新运行。";
+          this.appendOutput(`[编译] ${this.error}\n`);
+          return undefined;
+        }
+      }
+      const dependencyChanged = dependencies.some((dependency) => {
+        if (buildPathKey(dependency.path) === buildPathKey(sourcePath)) return false;
+        const current = this.editor.sourceSnapshot?.(dependency.path);
+        const verified = checked.get(buildPathKey(dependency.path));
+        return current && (!verified || current.dirty || current.revision !== verified.revision || current.text !== verified.text);
+      });
+      const currentSnapshot = this.editor.sourceSnapshot?.(sourcePath);
+      const externalInputChanged = inputVersion !== undefined && this.editor.buildInputsChangedSince?.(inputVersion, [sourcePath, ...dependencies.map((dependency) => dependency.path)]);
+      if (result.sourceChanged || dependencyChanged || externalInputChanged || snapshot && (!currentSnapshot || currentSnapshot.revision !== snapshot.revision || currentSnapshot.text !== snapshot.text)) {
+        this.error = "编译期间代码已修改，本次结果已过期，请重新运行。";
+        this.appendOutput(`[编译] ${this.error}\n`);
+        return undefined;
+      }
+      if (this.compileCancelled || this.disposed) return undefined;
+      if (configuration !== JSON.stringify(this.compilerConfiguration())) {
+        this.error = "编译期间配置已更改，请重新编译。";
+        this.appendOutput(`[编译] ${this.error}\n`);
+        return undefined;
+      }
+      if (snapshot) snapshot = { ...snapshot, documents: [
+        { path: sourcePath, revision: snapshot.revision },
+        ...[...checked.values()].flatMap((verified) => this.editor.sourceSnapshot(verified.path) ? [{ path: verified.path, revision: verified.revision }] : []),
+      ] };
+      const unverified = result.dependenciesComplete === false;
+      if (unverified) {
+        // Known dependencies were checked above, but unknown inputs must not
+        // turn disk diagnostics into apparently verified editor locations.
+        this.error = "无法完整确认本次构建的相关文件；请查看编译输出，保存相关文件后重新编译。";
+        result = { ...result, success: false, executablePath: undefined, diagnostics: [{
+          path: sourcePath, severity: 1, source: "构建", code: "dependencies_unverified", fileLevel: true, message: this.error,
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+        }] };
       }
       this.compileResult = result;
       if (result.command) this.buildDetails = JSON.stringify({ taskId: result.taskId, workingDirectory: result.workingDirectory, command: result.command }, null, 2);
       if (!this.compileCancelled && !this.disposed) this.onCompileResult?.(sourcePath, result, snapshot);
       this.appendOutput(result.stdout);
+      if (unverified) this.appendOutput(result.stderr);
       this.appendOutput(result.diagnostics?.length
         ? result.diagnostics.map((d) => `[${d.severity === 1 ? "错误" : d.severity === 2 ? "警告" : "说明"}] ${d.fileLevel ? d.path : `${d.path}:${d.range.start.line + 1}:${d.range.start.character + 1}`} ${d.message}\n`).join("")
         : result.stderr);
       this.appendOutput(
-        `[编译] ${result.success ? "成功" : "失败"}，耗时 ${result.durationMs}ms`
+        `[编译] ${result.success ? "成功" : "失败"}${result.cacheHit ? "（预处理校验通过，复用构建）" : ""}，耗时 ${result.durationMs}ms`
           + `${result.exitCode === undefined ? "" : ` · 退出码 ${result.exitCode}`}\n`,
       );
       if (result.outputTruncated) this.appendTruncationNotice();
+      if (!result.success && !this.compileCancelled) this.shell.showBottomPanel("problems");
       return this.compileCancelled || this.disposed ? undefined : result;
     } catch (error) {
       const code = (error as { code?: string })?.code;
       if (code === "PROCESS_CANCELLED") this.compileCancelled = true;
       this.compileResult = undefined;
-      this.error = this.compileCancelled ? "" : errorMessage(error);
-      if (!this.compileCancelled && !this.disposed) this.onCompileResult?.(sourcePath, {
+      const configurationChanged = configuration !== JSON.stringify(this.compilerConfiguration());
+      this.error = this.compileCancelled ? "" : configurationChanged ? "编译期间配置已更改，请重新编译。" : errorMessage(error);
+      if (!this.compileCancelled && !this.disposed && !configurationChanged) this.onCompileResult?.(sourcePath, {
         success: false, stdout: "", stderr: this.error, durationMs: 0, outputTruncated: false,
         diagnostics: [{ path: sourcePath, severity: 1, source: "工具链", code: code || "toolchain_error", fileLevel: true, message: this.error, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } }],
       }, snapshot);
@@ -384,6 +469,12 @@ export class ExecutionStore {
     } finally {
       this.stopping = false;
     }
+  }
+
+  private compilerConfiguration() {
+    const settings = this.settings.value;
+    return { compilerPath: settings.compilerPath, standard: settings.compilerStandard,
+      releaseArgs: [...settings.releaseArgs], debugArgs: [...settings.debugArgs], maxOutputBytes: settings.maxOutputBytes };
   }
 
   private async executeTestcase(executablePath: string, sourcePath: string, testcase: Testcase): Promise<TestcaseResult> {
@@ -396,6 +487,7 @@ export class ExecutionStore {
     else if (run.status === "timedOut") status = "TLE";
     else if (run.exitCode !== 0) status = "RE";
     else if (run.outputTruncated) status = "OLE";
+    else if (!testcase.expectedOutput.trim()) status = "OK";
     else {
       try { status = await compareTestcaseOutput(run.stdout, testcase.expectedOutput) ? "AC" : "WA"; }
       catch (error) { this.error = errorMessage(error); status = "Error"; }
@@ -493,6 +585,16 @@ function emptyResult(testcase: Testcase): TestcaseResult {
     expectedOutput: testcase.expectedOutput,
     stderr: "",
   };
+}
+
+function compileFailureText(result?: CompileResult): string {
+  return result?.diagnostics?.length ? result.diagnostics.map((item) =>
+    `${item.fileLevel ? "构建任务" : `${fileName(item.path)}:${item.range.start.line + 1}:${item.range.start.character + 1}`} ${item.message}`,
+  ).join("\n") : result?.stderr ?? "";
+}
+
+function isToolchainFailure(result?: CompileResult): boolean {
+  return result?.diagnostics?.some((diagnostic) => diagnostic.source === "工具链") ?? false;
 }
 
 function runLabel(result: RunResult): string {

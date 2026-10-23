@@ -14,10 +14,11 @@ export interface LspCompletionContext {
 
 export interface LspClient {
   readonly ready: boolean;
+  inputChanged?(path: string, external?: boolean): void;
   didOpen(path: string, text: string): void;
   didChange(path: string, changes: readonly LspTextChange[]): void;
   didSave(path: string): void;
-  didClose(path: string): void;
+  didClose(path: string, inputChanged?: boolean): void;
   completion(
     path: string,
     position: LspPosition,

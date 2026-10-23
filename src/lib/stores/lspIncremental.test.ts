@@ -137,7 +137,7 @@ describe("LSP incremental batching", () => {
     store.dispose();
   });
 
-  it("keeps existing errors visible until diagnostics for the new document arrive", async () => {
+  it("clears edited diagnostics immediately and rejects old publications while checking", async () => {
     const editor = {
       setLspClient: vi.fn(),
       setLspDiagnostics: vi.fn(),
@@ -152,10 +152,11 @@ describe("LSP incremental batching", () => {
     store.didChange(path, [firstChange]);
     await Promise.resolve();
 
-    expect(store.errorCount).toBe(1);
-    expect(editor.setLspDiagnostics).not.toHaveBeenCalled();
+    expect(store.errorCount).toBe(0);
+    expect(store.isChecked(path)).toBe(false);
+    expect(editor.setLspDiagnostics).toHaveBeenLastCalledWith(path, []);
     publish(store, { type: "diagnostics", path, version: 1, diagnostics: [] });
-    expect(store.errorCount).toBe(1);
+    expect(store.errorCount).toBe(0);
     publish(store, { type: "diagnostics", path, version: 2, diagnostics: [] });
     expect(store.errorCount).toBe(0);
     expect(editor.setLspDiagnostics).toHaveBeenLastCalledWith(path, []);
@@ -319,6 +320,48 @@ describe("LSP incremental batching", () => {
     expect(api.lspDidOpen).toHaveBeenCalledTimes(2);
     publish(store, diagnosticEvent(second, "undeclared add_subtree", 2));
     expect(store.errorCount).toBe(1);
+    store.dispose();
+  });
+
+  it("checks open translation units again after unsaved header changes and header close", async () => {
+    const main = "D:\\Code\\main.cpp", header = "D:\\Code\\types.hpp";
+    const editor = { tabs: [{ path: main }, { path: header }], setLspClient: vi.fn(), setLspDiagnostics: vi.fn(), openLspDocuments: () => [{ path: main, text: "int main(){}" }, { path: header, text: "struct Item{};" }] };
+    const store = new LspStore(editor as never, {} as never);
+    store.state = "ready";
+    store.didOpen(main, "int main(){}");
+    store.didOpen(header, "struct Item{};");
+    await vi.advanceTimersByTimeAsync(240);
+    publish(store, { type: "diagnostics", path: main, version: 2, diagnostics: [] });
+    expect(store.isChecked(main)).toBe(true);
+    store.didChange(header, [firstChange]);
+    publish(store, diagnosticEvent(main, "outdated dependency result", 2));
+    expect(store.errorCount).toBe(0);
+    expect(store.isChecked(main)).toBe(false);
+    await vi.advanceTimersByTimeAsync(240);
+    expect(api.lspDidOpen).toHaveBeenCalledWith(main, "int main(){}", 3);
+    publish(store, diagnosticEvent(main, "header changed", 3));
+    expect(store.errorCount).toBe(1);
+    store.didClose(header);
+    await vi.advanceTimersByTimeAsync(240);
+    publish(store, { type: "diagnostics", path: main, version: 4, diagnostics: [] });
+    expect(store.isChecked(main)).toBe(true);
+    expect(store.errorCount).toBe(0);
+    store.dispose();
+  });
+
+  it("ignores a failed notification from before a configuration change", async () => {
+    const editor = { setLspClient: vi.fn(), setLspDiagnostics: vi.fn(), clearLspDiagnostics: vi.fn() };
+    const store = new LspStore(editor as never, {} as never);
+    store.state = "ready";
+    let reject!: (error: Error) => void;
+    api.lspDidOpen.mockImplementationOnce(() => new Promise((_resolve, rejectResult) => { reject = rejectResult; }));
+    store.didOpen("D:\\Code\\main.cpp", "");
+    await vi.advanceTimersByTimeAsync(0);
+    store.configure("D:\\Code", "", "g++", "c++23", []);
+    reject(new Error("old session has exited"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.state).toBe("starting");
+    expect(store.message).not.toContain("old session");
     store.dispose();
   });
 });

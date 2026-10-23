@@ -165,6 +165,7 @@
   }
 
   function statusLabel(status?: string): string {
+    if (status === "OK") return "已运行";
     if (status === "Error") return "执行失败";
     if (status === "OLE") return "输出超限";
     if (status === "Stopped") return "已停止";
@@ -274,14 +275,14 @@
       <label class="case-io-field">
         <span class="case-io-heading">
           <strong>输入</strong>
-          <button type="button" onclick={() => void readFromFile("input")}><Icon name="file" size={13} />从文件读取</button>
+          <button type="button" aria-label="读取测试点输入文件" onclick={() => void readFromFile("input")}><Icon name="file" size={13} />从文件读取</button>
         </span>
         <span class="case-code-field"><textarea rows="4" spellcheck="false" aria-label="测试点输入" placeholder="输入测试数据…" bind:value={draft.input}></textarea></span>
       </label>
       <label class="case-io-field">
         <span class="case-io-heading">
           <strong>期望输出</strong>
-          <button type="button" onclick={() => void readFromFile("expectedOutput")}><Icon name="file" size={13} />从文件读取</button>
+          <button type="button" aria-label="读取测试点期望输出文件" onclick={() => void readFromFile("expectedOutput")}><Icon name="file" size={13} />从文件读取</button>
         </span>
         <span class="case-code-field"><textarea rows="4" spellcheck="false" aria-label="测试点期望输出" placeholder="输入期望输出…" bind:value={draft.expectedOutput}></textarea></span>
       </label>
@@ -710,7 +711,7 @@
     gap: 7px;
   }
 
-  .result-ac { color: var(--success); }
+  .result-ac, .result-ok { color: var(--success); }
   .result-wa,
   .result-re,
   .result-ce { color: var(--danger); }
@@ -1136,7 +1137,7 @@
     font-weight: 620;
   }
 
-  .case-status.result-ac {
+  .case-status.result-ac, .case-status.result-ok {
     color: color-mix(in srgb, var(--success) 88%, white);
     background: color-mix(in srgb, var(--success) 20%, transparent);
   }
@@ -1478,7 +1479,7 @@
   }
   /* Keep press feedback local. Text input never resets its height on a keystroke. */
   .testcase-card { transition: border-color 100ms ease, background-color 100ms ease; }
-  .testcase-card-row { position: relative; }
+  .testcase-card-row, .testcase-card-row:active { position: relative; cursor: default; }
   .case-sort-handle { position: absolute; top: 12px; left: 0; width: 12px; height: 26px; padding: 0; opacity: 0; cursor: grab; color: var(--text-muted); background: transparent; }
   .testcase-card-row:hover .case-sort-handle, .case-sort-handle:focus-visible { opacity: 1; }
   .case-sort-handle:active { cursor: grabbing; }
@@ -1500,6 +1501,7 @@
   .compact-style .case-run-button { height: 30px; border-radius: 4px; padding: 0 10px; font-size: 13px; }
   .compact-style .case-run-button :global(svg) { display: none; }
   .compact-style .case-delete-button { height: 30px; width: 30px; border: 0; border-radius: 4px; color: white; background: color-mix(in srgb, var(--danger) 35%, var(--surface-sunken)); }
+  :global([data-theme="light"]) .compact-style .case-delete-button { background: var(--danger); }
   .compact-style .case-expand-button { height: 30px; width: 20px; }
   .compact-style .case-editor, .compact-style .testcase-card .case-editor { padding: 12px; gap: 12px; }
   .compact-style .case-io-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

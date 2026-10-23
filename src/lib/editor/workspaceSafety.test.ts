@@ -13,6 +13,25 @@ vi.mock("../api/workspace", () => workspaceApi);
 import { EditorWorkspace } from "./workspace.svelte";
 
 describe("editor save checkpoint", () => {
+  it.each(["lightcp", "classic", "sublime"] as const)("does not register plain text on open, restore, or rename in %s", async (interfaceStyle) => {
+    const workspace = new EditorWorkspace({ ...DEFAULT_SETTINGS, interfaceStyle });
+    const client = { ready: true, didOpen: vi.fn(), didClose: vi.fn() };
+    workspace.setLspClient(client as never);
+    workspaceApi.readTextFile.mockImplementation(async (path: string) => ({ path, content: "3 1\n1 0 1\n", revision: "disk" }));
+    await workspace.openFile("D:\\Code\\in.txt");
+    expect(client.didOpen).not.toHaveBeenCalled();
+    expect(workspace.openLspDocuments()).toEqual([]);
+    workspace.handlePathRenamed("D:\\Code\\in.txt", "D:\\Code\\renamed.txt");
+    expect(client.didOpen).not.toHaveBeenCalled();
+    workspace.handlePathRenamed("D:\\Code\\renamed.txt", "D:\\Code\\main.cpp");
+    expect(client.didOpen).toHaveBeenCalledWith("D:\\Code\\main.cpp", "3 1\n1 0 1\n");
+    workspace.handlePathRenamed("D:\\Code\\main.cpp", "D:\\Code\\out.txt");
+    expect(workspace.openLspDocuments()).toEqual([]);
+    client.didOpen.mockClear();
+    await workspace.restoreSessionTabs(["D:\\Code\\in.txt"]);
+    expect(client.didOpen).not.toHaveBeenCalled();
+    workspace.dispose();
+  });
   beforeEach(() => {
     workspaceApi.getTextFileRevision.mockReset();
     workspaceApi.readTextFile.mockReset();

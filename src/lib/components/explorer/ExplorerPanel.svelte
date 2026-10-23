@@ -18,6 +18,7 @@
     ux: UxStore;
     keybindings: KeybindingMap;
     newFile: (parent: string) => void;
+    filesOnly?: boolean;
   }
 
   interface ContextMenuState {
@@ -26,7 +27,7 @@
     entry: FileEntry;
   }
 
-  let { fileWorkspace, editor, archiveStore, ux, keybindings, newFile }: Props = $props();
+  let { fileWorkspace, editor, archiveStore, ux, keybindings, newFile, filesOnly = false }: Props = $props();
   let menu = $state<ContextMenuState>();
   let view = $state<"files" | "archive" | "review">("files");
   let rootDropActive = $state(false);
@@ -132,14 +133,14 @@
 
 <section class="explorer-panel">
   {#if fileWorkspace.info}
-    <div class="explorer-view-tabs" role="tablist" aria-label="资源管理器视图">
+    {#if !filesOnly}<div class="explorer-view-tabs" role="tablist" aria-label="资源管理器视图">
       <button class:active={view === "files"} role="tab" aria-selected={view === "files"} onclick={() => (view = "files")}>文件</button>
       <button class:active={view === "archive"} role="tab" aria-selected={view === "archive"} onclick={() => { view = "archive"; void archiveStore.refreshAll(); }}>代码归档</button>
       <button class:active={view === "review"} role="tab" aria-selected={view === "review"} onclick={() => { view = "review"; void archiveStore.refreshReviews(); }}>复习题目{archiveStore.facets.dueReviewCount > 0 ? ` ${archiveStore.facets.dueReviewCount}` : ""}</button>
-    </div>
-    {#if view === "review"}
+    </div>{/if}
+    {#if !filesOnly && view === "review"}
       <ReviewPanel {archiveStore} />
-    {:else if view === "archive"}
+    {:else if !filesOnly && view === "archive"}
       <ArchivePanel {archiveStore} {keybindings} />
     {:else}
       <header

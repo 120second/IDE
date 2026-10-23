@@ -142,7 +142,7 @@
           </div>
           <div class="lsp-result-list">
             {#each visibleDiagnostics as diagnostic, index (`${diagnostic.path}:${diagnostic.range.start.line}:${diagnostic.range.start.character}:${diagnostic.message}:${index}`)}
-              <button disabled={!!diagnostic.fileLevel} onclick={() => void workspace.openLocation({ path: diagnostic.path, range: diagnostic.range })}>
+              <button title={diagnostic.fileLevel ? "查看构建输出" : "跳转到错误位置"} onclick={() => diagnostic.fileLevel ? shell.showBottomPanel("output") : void workspace.openLocation({ path: diagnostic.path, range: diagnostic.range })}>
                 <span class:error={diagnostic.severity === 1} class:warning={diagnostic.severity === 2} class="lsp-severity">
                   {diagnostic.severity === 1 ? "错误" : diagnostic.severity === 2 ? "警告" : diagnostic.severity === 4 ? "提示" : "信息"}
                 </span>

@@ -22,7 +22,7 @@ let onImport: (event: { payload: ImportedProblem }) => void;
 function fixture() {
   const editor = { tabs: [] as { path: string; loading: boolean }[], notice: "", openFile: vi.fn(async (path: string) => { editor.tabs.push({ path, loading: false }); }) };
   const files = { info: { path: root } as { path: string } | undefined, refresh: vi.fn().mockResolvedValue(undefined) };
-  const shell = { activeActivity: "templates", generatorOpen: true, problemReaderVisible: false };
+  const shell = { activeActivity: "templates", generatorOpen: true, problemReaderVisible: false, showSublimeTool: vi.fn() };
   const execution = { syncActiveSource: vi.fn().mockResolvedValue(undefined) };
   const ux = { success: vi.fn(), error: vi.fn() };
   const templates = {
@@ -31,7 +31,7 @@ function fixture() {
     loadTemplateCode: vi.fn(async (id: number): Promise<{ code: string } | undefined> => ({ code: `// template ${id}` })),
     error: "",
   };
-  const store = new ProblemImportStore(editor as unknown as EditorWorkspace, files as unknown as WorkspaceStore, shell as ShellStore, execution as unknown as ExecutionStore, ux as unknown as UxStore, templates as unknown as TemplateStore);
+  const store = new ProblemImportStore(editor as unknown as EditorWorkspace, files as unknown as WorkspaceStore, shell as unknown as ShellStore, execution as unknown as ExecutionStore, ux as unknown as UxStore, templates as unknown as TemplateStore);
   return { store, editor, files, shell, execution, ux, templates };
 }
 beforeEach(() => {
@@ -63,6 +63,7 @@ describe("problem import editor integration", () => {
     expect(editor.openFile).toHaveBeenCalledWith(problem.sourcePath);
     expect(mocks.flush.mock.invocationCallOrder[0]).toBeLessThan(editor.openFile.mock.invocationCallOrder[0]);
     expect(shell.problemReaderVisible).toBe(true);
+    expect(shell.showSublimeTool).toHaveBeenCalledWith("statement");
     expect(shell.generatorOpen).toBe(false);
     expect(shell.activeActivity).toBe("explorer");
     expect(execution.syncActiveSource).toHaveBeenCalledWith(problem.sourcePath, true);

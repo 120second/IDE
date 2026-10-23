@@ -9,6 +9,7 @@ export interface CompilerConfig {
 }
 
 export interface CompileRequest {
+  reuseArtifact?: boolean;
   clientTaskId?: string;
   expectedSource?: string;
   sourcePath: string;
@@ -17,6 +18,10 @@ export interface CompileRequest {
 }
 
 export interface CompileResult {
+  dependencies?: { path: string; contentHash?: string | null }[];
+  dependenciesComplete?: boolean;
+  diagnosticsIncomplete?: boolean;
+  cacheHit?: boolean;
   command?: string[];
   workingDirectory?: string;
   taskId?: string;
@@ -84,7 +89,7 @@ export interface TestcaseInput {
   enabled: boolean;
 }
 
-export type TestcaseStatus = "AC" | "WA" | "RE" | "TLE" | "CE" | "OLE" | "Error" | "Stopped" | "Running";
+export type TestcaseStatus = "AC" | "OK" | "WA" | "RE" | "TLE" | "CE" | "OLE" | "Error" | "Stopped" | "Running";
 
 export interface TestcaseResult {
   testcaseId: number;

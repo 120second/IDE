@@ -15,9 +15,10 @@
 .classic-file-search { display: flex; align-items: center; gap: 8px; min-height: 28px; min-width: 170px; padding: 4px 10px; background: var(--surface-raised); color: var(--text-secondary); border-radius: 4px; font-size: 12px; }
 .classic-file-search kbd { margin-left: auto; color: var(--text-muted); font: 11px "Segoe UI", sans-serif; }
 .classic-settings-shortcut { display: grid; width: 30px; height: 30px; place-items: center; background: transparent; color: var(--text-secondary); }
-.window-titlebar.controls-only { height: 40px; min-height: 40px; flex: 0 0 132px; padding: 0; background: transparent; border: 0; }
+[data-interface-style="classic"] .window-frame { padding-top: 0; }
+.window-titlebar.controls-only { position: relative; inset: auto; z-index: auto; width: 132px; height: 40px; min-height: 40px; flex: 0 0 132px; padding: 0; background: transparent; border: 0; }
 .controls-only .window-titlebar-brand { display: none; }
-.controls-only .window-titlebar-controls { height: 100%; width: 100%; }
+.controls-only .window-titlebar-controls { position: static; inset: auto; height: 100%; width: 100%; }
 .controls-only .window-titlebar-controls > button { height: 100%; width: 44px; }
 [data-interface-style="classic"] .activity-bar { width: 52px; flex-basis: 52px; padding-top: 9px; border-color: var(--border); }
 [data-interface-style="classic"] .activity-bar .brand-mark, [data-interface-style="classic"] .activity-bar button > span { display: none; }
@@ -41,6 +42,6 @@
 [data-interface-style="classic"] .primary-button { border-radius: 4px; }
 [data-interface-style="classic"] .status-bar { font-size: 11px; background: var(--panel-background); }
 @media (min-width: 1250px) { .classic-file-search { position: absolute; left: 50%; transform: translateX(-50%); min-width: 225px; } }
-@media (max-width: 1050px) { .classic-menubar nav > button, .classic-menu-anchor > button { padding: 0 7px; font-size: 13px; } .classic-file-search { min-width: 115px; } .classic-file-search kbd { display: none; } }
+@media (max-width: 1050px) { .classic-menubar nav > button, .classic-menu-anchor > button { padding: 0 7px; font-size: 13px; } .classic-file-search { min-width: 115px; } .classic-file-search kbd { display: none; } [data-interface-style="classic"] .editor-actions .tab-reader-action, [data-interface-style="classic"] .editor-actions .tab-action { display: none; } }
 @media (max-width: 820px) { .classic-brand strong { display: none; } .classic-menubar { gap: 2px; } .classic-settings-shortcut { display: none; } }
 @media (prefers-reduced-motion: reduce) { .classic-menubar * { transition: none !important; } }

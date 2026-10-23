@@ -7,6 +7,7 @@ import "./auth.css";
 import "./community.css";
 import "./generator.css";
 import "./classic.css";
+import "./sublime.css";
 
 const target = document.getElementById("app");
 

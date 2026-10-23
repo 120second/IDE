@@ -167,6 +167,7 @@ export class ProblemImportStore {
     this.shell.activeActivity = "explorer";
     this.shell.generatorOpen = false;
     this.shell.problemReaderVisible = true;
+    this.shell.showSublimeTool("statement");
     await this.execution.syncActiveSource(problem.sourcePath, true);
     await this.files.refresh();
     this.lastImported = problem.title;

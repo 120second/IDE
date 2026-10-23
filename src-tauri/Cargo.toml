@@ -1,6 +1,6 @@
 [package]
 name = "lightcp"
-version = "0.1.1-dev.5"
+version = "0.1.1-dev.14"
 description = "A lightweight competitive programming IDE"
 authors = ["LightCP contributors"]
 edition = "2021"
@@ -23,6 +23,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
+sha2 = "0.10.9"
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
@@ -35,8 +36,8 @@ uuid = { version = "1", features = ["v4"] }
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects"] }
 
 # The Tauri context embeds the complete frontend in this crate. On the current
-# Windows MSVC toolchain, LLVM opt-level 3 can overflow/crash while optimizing
-# that generated static data. Dependencies keep the normal release profile;
-# only the small LightCP orchestration crate uses the stable, faster build path.
+# Windows MSVC toolchain, LLVM has crashed at opt-level 1 and 3 while optimizing
+# that generated static data. Keep dependencies optimized in release builds;
+# disable optimization only for the LightCP orchestration/embedded-assets crate.
 [profile.release.package.lightcp]
-opt-level = 1
+opt-level = 0

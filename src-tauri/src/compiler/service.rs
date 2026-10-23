@@ -24,6 +24,8 @@ const DEFAULT_OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
 #[derive(Default)]
 pub struct CompilerManager {
     active: Mutex<Option<(Option<String>, Arc<AtomicBool>)>>,
+    pub(super) cache: Mutex<Option<super::cache::CachedBuild>>,
+    pub(super) unstable_cache_key: Mutex<Option<String>>,
 }
 
 impl CompilerManager {
@@ -79,7 +81,7 @@ impl Compilation {
         build: &Path,
         request: &CompileRequest,
     ) -> AppResult<CompileResult> {
-        compile_with_stop(root, build, request, &self.stop, Duration::from_secs(120))
+        super::cache::compile(&self.manager, root, build, request, &self.stop)
     }
 }
 
@@ -121,11 +123,17 @@ pub fn compile_with_stop(
         return Err(AppError::ProcessCancelled);
     }
     let source = checked_source(workspace_root, &request.source_path)?;
+    let profile_args = match request.profile {
+        CompileProfile::Release => &request.config.release_args,
+        CompileProfile::Debug => &request.config.debug_args,
+    };
+    validate_profile_args(profile_args)?;
     let source_before = fs::read(&source)?;
+    let started = Instant::now();
     if request
         .expected_source
         .as_ref()
-        .is_some_and(|text| text.as_bytes() != source_before)
+        .is_some_and(|text| !expected_source_matches(text, &source_before))
     {
         return Err(AppError::Configuration(
             "源码已更改，请保存当前版本后重新编译。".into(),
@@ -157,13 +165,19 @@ pub fn compile_with_stop(
             "构建可执行程序不能使用 -c、-S、-E 或 -fsyntax-only；请从编译参数中移除。".into(),
         ));
     }
-    let compiler_name = Path::new(compiler)
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_lowercase();
-    let json_diagnostics = !compiler_name.contains("clang")
-        && (compiler_name.ends_with("g++") || compiler_name.ends_with("gcc"));
+    let dependency_snapshot = super::dependencies::inspect(
+        &source,
+        request,
+        stop,
+        timeout.saturating_sub(started.elapsed()),
+    )?;
+    let actual_manifest = super::dependencies::Manifest::new()?;
+    let json_diagnostics = super::toolchain::supports_json(
+        compiler,
+        source.parent().unwrap_or(workspace_root),
+        stop,
+        timeout.saturating_sub(started.elapsed()),
+    )?;
 
     let mut command = Command::new(compiler);
     command
@@ -178,6 +192,9 @@ pub fn compile_with_stop(
         command.arg("-fdiagnostics-format=json");
     }
     command
+        .args(["-MD", "-MT", "lightcp", "-MF"])
+        .arg(&actual_manifest.0);
+    command
         .arg(&source)
         .arg("-o")
         .arg(&compiler_executable)
@@ -187,7 +204,6 @@ pub fn compile_with_stop(
         .stderr(Stdio::piped());
     configure_hidden(&mut command);
 
-    let started = Instant::now();
     let command_line = std::iter::once(compiler.to_owned())
         .chain(
             command
@@ -224,7 +240,12 @@ pub fn compile_with_stop(
     let truncated = Arc::new(AtomicBool::new(false));
     let stdout_reader = spawn_limited_reader(stdout, limit, used.clone(), truncated.clone());
     let stderr_reader = spawn_limited_reader(stderr, limit, used, truncated.clone());
-    let status = wait_for_compiler(&mut child, &process_tree, stop, timeout);
+    let status = wait_for_compiler(
+        &mut child,
+        &process_tree,
+        stop,
+        timeout.saturating_sub(started.elapsed()),
+    );
     drop(process_tree);
     let stdout = join_reader(stdout_reader)?;
     let stderr = join_reader(stderr_reader)?;
@@ -235,14 +256,47 @@ pub fn compile_with_stop(
             return Err(error);
         }
     };
-    let source_changed = fs::read(&source).map_or(true, |current| current != source_before);
+    let source_changed = fs::read(&source).map_or(true, |current| current != source_before)
+        || dependency_snapshot.as_ref().is_some_and(|snapshot| {
+            !snapshot.unchanged()
+                || status.success()
+                    && !snapshot.matches_manifest(
+                        &actual_manifest.0,
+                        source.parent().unwrap_or(workspace_root),
+                    )
+        });
     let mut success = status.success() && !source_changed;
     let mut diagnostics = super::diagnostics::parse(&stderr, &source, status.success());
+    if truncated.load(Ordering::Relaxed)
+        && !diagnostics
+            .iter()
+            .any(|d| d.code == "diagnostics_incomplete")
+    {
+        let mut note = super::diagnostics::task_error(
+            &source,
+            "编译输出已截断，诊断可能不完整；已保留完整收到的错误。",
+            "diagnostics_incomplete",
+        );
+        note.severity = 2;
+        diagnostics.push(note);
+    }
     if source_changed {
         diagnostics.push(super::diagnostics::task_error(
             &source,
-            "编译期间源码已修改，本次结果已过期，请重新编译。",
+            "编译期间源码或相关头文件已修改，本次结果已过期，请重新编译。",
             "source_changed",
+        ));
+    }
+    if success
+        && !dependency_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.complete)
+    {
+        success = false;
+        diagnostics.push(super::diagnostics::task_error(
+            &source,
+            "无法确认本次构建的依赖，请检查编译参数或过大的依赖文件。",
+            "dependencies_unavailable",
         ));
     }
     if success && !valid_executable(&compiler_executable) {
@@ -262,6 +316,17 @@ pub fn compile_with_stop(
     }
 
     Ok(CompileResult {
+        dependencies: dependency_snapshot
+            .as_ref()
+            .map_or_else(Vec::new, |snapshot| snapshot.describe()),
+        dependencies_complete: dependency_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.complete),
+        diagnostics_incomplete: diagnostics
+            .iter()
+            .any(|d| d.code == "diagnostics_incomplete")
+            || truncated.load(Ordering::Relaxed),
+        cache_hit: false,
         command: command_line,
         working_directory: source
             .parent()
@@ -281,7 +346,78 @@ pub fn compile_with_stop(
     })
 }
 
-fn wait_for_compiler(
+fn validate_profile_args(args: &[String]) -> AppResult<()> {
+    let mut operand = false;
+    for argument in args
+        .iter()
+        .map(|arg| arg.trim())
+        .filter(|arg| !arg.is_empty())
+    {
+        if argument.starts_with('@') || argument.contains(",@") {
+            return Err(AppError::Configuration(
+                "当前构建入口仅支持单个 .cpp，暂不支持响应文件参数（@file）；请直接配置编译选项。"
+                    .into(),
+            ));
+        }
+        if operand {
+            operand = false;
+            continue;
+        }
+        if matches!(
+            argument,
+            "-I" | "-isystem"
+                | "-iquote"
+                | "-idirafter"
+                | "-include"
+                | "-imacros"
+                | "-include-pch"
+                | "-isysroot"
+                | "--sysroot"
+                | "-D"
+                | "-U"
+                | "-L"
+                | "-l"
+                | "-B"
+                | "-o"
+                | "-x"
+                | "-MT"
+                | "-MQ"
+                | "-MF"
+                | "-Xclang"
+                | "-Xpreprocessor"
+                | "-Xassembler"
+                | "-Xlinker"
+                | "-iprefix"
+                | "-iwithprefix"
+                | "-iwithprefixbefore"
+                | "-dumpbase"
+                | "-dumpdir"
+        ) {
+            operand = true;
+            continue;
+        }
+        if !argument.starts_with('-') {
+            let extension = Path::new(argument)
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if !matches!(extension.as_str(), "o" | "obj" | "a" | "lib" | "dll" | "so") {
+                return Err(AppError::Configuration(format!(
+                    "当前构建入口仅支持单个 .cpp，不能通过编译参数加入额外源码：{argument}"
+                )));
+            }
+        }
+        if argument == "--" {
+            return Err(AppError::Configuration(
+                "请移除编译参数中的 --；源码和输出路径由应用管理。".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn wait_for_compiler(
     child: &mut std::process::Child,
     tree: &ProcessTree,
     stop: &AtomicBool,
@@ -308,7 +444,7 @@ fn wait_for_compiler(
     }
 }
 
-fn checked_source(root: &Path, source_path: &str) -> AppResult<PathBuf> {
+pub(super) fn checked_source(root: &Path, source_path: &str) -> AppResult<PathBuf> {
     let root = dunce::canonicalize(root)?;
     let source = dunce::canonicalize(source_path)?;
     if !is_within(&root, &source) || !source.is_file() {
@@ -318,6 +454,20 @@ fn checked_source(root: &Path, source_path: &str) -> AppResult<PathBuf> {
         )));
     }
     Ok(source)
+}
+
+pub(super) fn expected_source_matches(expected: &str, actual: &[u8]) -> bool {
+    if expected.as_bytes() == actual {
+        return true;
+    }
+    let Ok(actual) = std::str::from_utf8(actual) else {
+        return false;
+    };
+    normalize_line_endings(expected) == normalize_line_endings(actual)
+}
+
+pub(super) fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn output_path(build_root: &Path, source: &Path) -> PathBuf {
@@ -377,7 +527,7 @@ fn prune_build_cache(current: &Path) {
 }
 
 #[cfg(windows)]
-fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
+pub(super) fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
     if desired.as_os_str().to_string_lossy().is_ascii() {
         return Ok(desired.to_owned());
     }
@@ -397,7 +547,7 @@ fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
     Ok(desired.to_owned())
 }
 
-fn valid_executable(path: &Path) -> bool {
+pub(super) fn valid_executable(path: &Path) -> bool {
     let Ok(mut file) = fs::File::open(path) else {
         return false;
     };
@@ -429,11 +579,11 @@ fn valid_executable(path: &Path) -> bool {
 }
 
 #[cfg(not(windows))]
-fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
+pub(super) fn compatible_compiler_output(desired: &Path) -> AppResult<PathBuf> {
     Ok(desired.to_owned())
 }
 
-fn spawn_limited_reader<R: Read + Send + 'static>(
+pub(super) fn spawn_limited_reader<R: Read + Send + 'static>(
     mut reader: R,
     limit: usize,
     used: Arc<AtomicUsize>,
@@ -475,7 +625,9 @@ fn reserve_bytes(used: &AtomicUsize, limit: usize, requested: usize) -> usize {
     }
 }
 
-fn join_reader(handle: thread::JoinHandle<std::io::Result<String>>) -> AppResult<String> {
+pub(super) fn join_reader(
+    handle: thread::JoinHandle<std::io::Result<String>>,
+) -> AppResult<String> {
     handle
         .join()
         .map_err(|_| AppError::Internal("compiler output reader panicked".to_owned()))?
@@ -496,14 +648,14 @@ fn path_text(path: &Path) -> String {
 }
 
 #[cfg(windows)]
-fn configure_hidden(command: &mut Command) {
+pub(super) fn configure_hidden(command: &mut Command) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
 #[cfg(not(windows))]
-fn configure_hidden(_command: &mut Command) {}
+pub(super) fn configure_hidden(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
@@ -671,6 +823,7 @@ mod tests {
 
     fn request(source: &Path) -> CompileRequest {
         CompileRequest {
+            reuse_artifact: false,
             client_task_id: None,
             expected_source: None,
             source_path: path_text(source),

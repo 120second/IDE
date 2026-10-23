@@ -1,0 +1,77 @@
+/* Optional screenshot-inspired Sublime/Mariana shell. */
+:root[data-interface-style="sublime"] { --ui-font: "Segoe UI", "Microsoft YaHei UI", sans-serif; --ui-font-small: 12px; --ui-font-caption: 11px; }
+[data-interface-style="sublime"] .window-frame { padding-top: 0; }
+[data-interface-style="sublime"] .classic-menubar { position: relative; z-index: 15; display: flex; align-items: center; flex: 0 0 32px; gap: 7px; min-width: 0; padding-left: 12px; border-bottom: 1px solid var(--border-subtle); background: var(--tab-background); user-select: none; }
+[data-interface-style="sublime"] .classic-brand > span { display: none; }
+[data-interface-style="sublime"] .classic-brand strong { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+[data-interface-style="sublime"] .classic-menubar nav > button, [data-interface-style="sublime"] .classic-menu-anchor > button { padding-inline: 10px; font-size: 12px; }
+[data-interface-style="sublime"] .classic-file-search { min-height: 23px; min-width: 155px; padding-block: 2px; border-radius: 3px; color: var(--text-muted); background: var(--surface); }
+[data-interface-style="sublime"] .classic-settings-shortcut { width: 25px; height: 25px; }
+[data-interface-style="sublime"] .window-titlebar.controls-only { height: 32px; min-height: 32px; }
+[data-interface-style="sublime"] .activity-bar { display: none; }
+[data-interface-style="sublime"] .sidebar { backdrop-filter: none; border-right: 1px solid var(--border-subtle); }
+[data-interface-style="sublime"] .sidebar-header { height: 31px; flex-basis: 31px; padding: 0 12px 0 16px; border: 0; font-size: 11px; font-weight: 700; letter-spacing: .02em; color: var(--text-secondary); }
+[data-interface-style="sublime"] .sidebar-header button { opacity: .5; }
+[data-interface-style="sublime"] .sidebar-header button:hover { opacity: 1; }
+[data-interface-style="sublime"] .explorer-view-tabs { min-height: 28px; height: 28px; padding-inline: 8px; border-color: var(--border-subtle); }
+[data-interface-style="sublime"] .explorer-view-tabs button { min-height: 26px; padding: 3px 6px; border-radius: 2px; font-size: 11px; font-weight: 500; }
+[data-interface-style="sublime"] .explorer-view-tabs button.active { background: transparent; }
+[data-interface-style="sublime"] .workspace-heading { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; color: var(--text-secondary); background: transparent; }
+[data-interface-style="sublime"] .tree-row { min-height: 25px; border-radius: 0; font-size: 12px; }
+[data-interface-style="sublime"] .tree-row.selected { background: var(--active-background); box-shadow: none; border-radius: 0; }
+[data-interface-style="sublime"] .tree-file-icon { color: var(--text-muted); opacity: .75; }
+[data-interface-style="sublime"] .tree-row.directory .tree-file-icon { color: var(--text-muted); }
+[data-interface-style="sublime"] .tree-file-icon:not(.cpp-file) svg { fill: currentColor; fill-opacity: .55; }
+[data-interface-style="sublime"] .tree-file-icon.cpp-file svg { display: none; }
+[data-interface-style="sublime"] .tree-file-icon.cpp-file::before { content: "/*"; font: 11px Consolas, monospace; }
+[data-interface-style="sublime"] .editor-breadcrumbs { display: none; }
+[data-interface-style="sublime"] .tab-bar { height: 32px; min-height: 32px; border-bottom: 0; background: var(--tab-background); }
+[data-interface-style="sublime"] .editor-tab { min-width: 135px; height: 32px; min-height: 32px; border: 0; border-radius: 4px 4px 0 0; padding-inline: 13px; font-size: 12px; }
+[data-interface-style="sublime"] .editor-tab.active { background: var(--tab-active-background); box-shadow: none; border-bottom: 0; }
+[data-interface-style="sublime"] .editor-actions { display: none; }
+[data-interface-style="sublime"] .editor-surface { background: color-mix(in srgb, var(--code-background) var(--editor-opacity-percent), transparent); }
+[data-interface-style="sublime"] .cm-gutters { border-right: 0; }
+[data-interface-style="sublime"] .cm-content { padding-top: 5px; }
+[data-interface-style="sublime"] .cm-lineNumbers .cm-gutterElement { min-width: 45px; padding-right: 11px; }
+[data-interface-style="sublime"] .cm-cursor { border-left-width: 2px; }
+[data-interface-style="sublime"] .status-bar { border-top: 1px solid var(--border-subtle); background: var(--sidebar-background); font-size: 11px; }
+[data-interface-style="sublime"] .primary-button, [data-interface-style="sublime"] .secondary-button { border-radius: 3px; box-shadow: none; }
+@media (max-width: 1050px) { [data-interface-style="sublime"] .classic-menubar nav > button, [data-interface-style="sublime"] .classic-menu-anchor > button { padding-inline: 7px; } [data-interface-style="sublime"] .classic-file-search { min-width: 115px; } }
+
+/* One translucent foundation: stacking opaque editor/sidebar layers would hide the desktop. */
+:root[data-interface-style="sublime"], [data-interface-style="sublime"] body,
+[data-interface-style="sublime"] .window-frame { background: transparent; }
+[data-interface-style="sublime"] .workspace-background {
+  background: color-mix(in srgb, var(--code-background) var(--window-opacity-percent), transparent);
+}
+[data-interface-style="sublime"] .workspace-background::after { display: none; }
+[data-interface-style="sublime"] .sidebar,
+[data-interface-style="sublime"] .editor-surface,
+[data-interface-style="sublime"] .sublime-tools,
+[data-interface-style="sublime"] .sublime-tools > header,
+[data-interface-style="sublime"] .problem-reader.embedded,
+[data-interface-style="sublime"] .tab-bar,
+[data-interface-style="sublime"] .status-bar { background: transparent; backdrop-filter: none; }
+[data-interface-style="sublime"] .classic-menubar { background: rgb(0 0 0 / 15%); }
+[data-interface-style="sublime"] .editor-tab.active { background: color-mix(in srgb, var(--tab-active-background) 65%, transparent); }
+[data-interface-style="sublime"] .editor-layout.sublime-layout {
+  position: relative; display: grid; flex: 1; min-height: 0; min-width: 0;
+  grid-template-columns: minmax(0, 1fr); grid-template-rows: 32px minmax(0, 1fr);
+}
+[data-interface-style="sublime"] .editor-layout.tools-open {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, min(var(--sublime-tools-width), 58%));
+}
+[data-interface-style="sublime"] .editor-layout > .tab-bar { grid-column: 1; grid-row: 1; }
+[data-interface-style="sublime"] .editor-layout > .editor-workspace { display: contents; }
+[data-interface-style="sublime"] .editor-layout .editor-surface { grid-column: 1; grid-row: 2; }
+[data-interface-style="sublime"] .editor-layout .sublime-tools {
+  grid-column: 2; grid-row: 1 / 3; width: auto !important; min-width: 0; max-width: none; background: transparent;
+}
+[data-interface-style="sublime"] .editor-layout .problem-reader.embedded { background: transparent; }
+[data-interface-style="sublime"] .sublime-tools > header { height: 32px; flex-basis: 32px; }
+[data-interface-style="sublime"] .sublime-tools > header button.active {
+  background: color-mix(in srgb, var(--tab-active-background) 50%, transparent); box-shadow: inset 0 -1px var(--accent);
+}
+[data-interface-style="sublime"] .problem-reader.embedded .problem-reader-toolbar { background: rgb(0 0 0 / 10%); }
+[data-interface-style="sublime"][data-theme="light"] .cph-test-number { background: #d1dabb; }
+[data-interface-style="sublime"][data-theme="light"] .cph-run { background: #b8d5d9; }

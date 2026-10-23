@@ -115,6 +115,7 @@
         interfaceStyle: DEFAULT_SETTINGS.interfaceStyle,
         testcaseStyle: DEFAULT_SETTINGS.testcaseStyle,
         uiDensity: DEFAULT_SETTINGS.uiDensity,
+        sublimeTransparency: DEFAULT_SETTINGS.sublimeTransparency,
         sidebarOpacity: DEFAULT_SETTINGS.sidebarOpacity,
         editorOpacity: DEFAULT_SETTINGS.editorOpacity,
         panelOpacity: DEFAULT_SETTINGS.panelOpacity,
@@ -324,9 +325,11 @@
 
       <div class="appearance-advanced interface-advanced">
         <strong>分区域不透明度</strong>
-        <small>透明度始终生效：没有图片时透出工作台底色，选择图片后透出背景图片。</small>
+        <small>{settings.value.interfaceStyle === "sublime" ? "Sublime 的侧栏、编辑区与右侧工具背景由上方“整体透明度”统一控制。" : "没有图片时透出工作台底色，选择图片后透出背景图片。"}</small>
+        {#if settings.value.interfaceStyle !== "sublime"}
         <AppearanceRange label="侧栏不透明度" value={settings.value.sidebarOpacity} min={0.2} max={1} defaultValue={DEFAULT_SETTINGS.sidebarOpacity} change={(value) => settings.update({ sidebarOpacity: value })} />
         <AppearanceRange label="编辑区不透明度" value={settings.value.editorOpacity} min={0.2} max={1} defaultValue={DEFAULT_SETTINGS.editorOpacity} change={(value) => settings.update({ editorOpacity: value })} />
+        {/if}
         <AppearanceRange label="底部输出区不透明度" value={settings.value.panelOpacity} min={0.2} max={1} defaultValue={DEFAULT_SETTINGS.panelOpacity} change={(value) => settings.update({ panelOpacity: value })} />
         <AppearanceRange label="菜单与弹窗不透明度" value={settings.value.popupOpacity} min={0.6} max={1} defaultValue={DEFAULT_SETTINGS.popupOpacity} change={(value) => settings.update({ popupOpacity: value })} />
         <label class="appearance-range">

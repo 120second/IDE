@@ -37,6 +37,10 @@ interface SessionSnapshot {
   sketchBoardVisible: boolean;
   problemReaderDock: ProblemReaderDock;
   sidebarWidth: number;
+  classicSidebarWidth?: number;
+  sublimeSidebarWidth?: number;
+  sublimeToolsVisible?: boolean;
+  sublimeToolPage?: import("./shell.svelte").SublimeToolPage;
   bottomPanelHeight: number;
   problemReaderWidth: number;
   window?: WindowGeometry;
@@ -178,6 +182,10 @@ export class SessionStore {
     this.shell.sketchBoardVisible = snapshot.sketchBoardVisible;
     this.shell.problemReaderDock = snapshot.problemReaderDock;
     this.shell.setSidebarWidth(snapshot.sidebarWidth);
+    this.shell.setClassicSidebarWidth(snapshot.classicSidebarWidth ?? 420);
+    this.shell.setSublimeSidebarWidth(snapshot.sublimeSidebarWidth ?? 288);
+    this.shell.sublimeToolsVisible = snapshot.sublimeToolsVisible !== false;
+    this.shell.sublimeToolPage = snapshot.sublimeToolPage ?? "testcases";
     this.shell.setBottomPanelHeight(snapshot.bottomPanelHeight);
     this.shell.setProblemReaderWidth(snapshot.problemReaderWidth);
   }
@@ -197,6 +205,10 @@ export class SessionStore {
       sketchBoardVisible: this.shell.sketchBoardVisible,
       problemReaderDock: this.shell.problemReaderDock,
       sidebarWidth: this.shell.sidebarWidth,
+      classicSidebarWidth: this.shell.classicSidebarWidth,
+      sublimeSidebarWidth: this.shell.sublimeSidebarWidth,
+      sublimeToolsVisible: this.shell.sublimeToolsVisible,
+      sublimeToolPage: this.shell.sublimeToolPage,
       bottomPanelHeight: this.shell.bottomPanelHeight,
       problemReaderWidth: this.shell.problemReaderWidth,
       window: this.geometry,
@@ -320,6 +332,10 @@ function readSnapshot(): SessionSnapshot | undefined {
       sketchBoardVisible: parsed.sketchBoardVisible === true,
       problemReaderDock: parsed.problemReaderDock === "left" ? "left" : "right",
       sidebarWidth: finite(parsed.sidebarWidth, 210, 380, 264),
+      classicSidebarWidth: finite(parsed.classicSidebarWidth, 420, 600, 420),
+      sublimeSidebarWidth: finite(parsed.sublimeSidebarWidth, 200, 520, 288),
+      sublimeToolsVisible: parsed.sublimeToolsVisible !== false,
+      sublimeToolPage: parsed.sublimeToolPage === "statement" ? "statement" : "testcases",
       bottomPanelHeight: finite(parsed.bottomPanelHeight, 120, 420, 190),
       problemReaderWidth: finite(parsed.problemReaderWidth, 300, 760, 460),
       window: sanitizeGeometry(parsed.window),

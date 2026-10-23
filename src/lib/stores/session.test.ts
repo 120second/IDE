@@ -26,10 +26,16 @@ describe("workspace session persistence", () => {
 
   it("reopens the last folder while keeping editor data out of localStorage", async () => {
     const firstWorkspace = workspaceStub("D:\\Recent");
+    const firstShell = new ShellStore();
+    firstShell.setSidebarWidth(280);
+    firstShell.setClassicSidebarWidth(540);
+    firstShell.setSublimeSidebarWidth(320);
+    firstShell.sublimeToolPage = "testcases";
+    firstShell.sublimeToolsVisible = false;
     const first = new SessionStore(
       firstWorkspace as never,
       editorStub() as never,
-      new ShellStore(),
+      firstShell,
       { error: vi.fn() } as never,
     );
 
@@ -43,19 +49,28 @@ describe("workspace session persistence", () => {
 
     const persisted = JSON.parse(values.get("lightcp.session.v1") ?? "{}") as Record<string, unknown>;
     expect(persisted.workspacePath).toBe("D:\\Problem Set");
+    expect(persisted.sidebarWidth).toBe(280);
+    expect(persisted.classicSidebarWidth).toBe(540);
+    expect(persisted.sublimeSidebarWidth).toBe(320);
     expect(persisted).not.toHaveProperty("openFiles");
     expect(persisted).not.toHaveProperty("activeFile");
 
     const reopenedWorkspace = workspaceStub("D:\\Recent");
+    const reopenedShell = new ShellStore();
     const reopened = new SessionStore(
       reopenedWorkspace as never,
       editorStub() as never,
-      new ShellStore(),
+      reopenedShell,
       { error: vi.fn() } as never,
     );
     await reopened.initialize();
 
     expect(reopenedWorkspace.openPath).toHaveBeenCalledWith("D:\\Problem Set");
+    expect(reopenedShell.sidebarWidth).toBe(280);
+    expect(reopenedShell.classicSidebarWidth).toBe(540);
+    expect(reopenedShell.sublimeSidebarWidth).toBe(320);
+    expect(reopenedShell.sublimeToolPage).toBe("testcases");
+    expect(reopenedShell.sublimeToolsVisible).toBe(false);
     reopened.dispose();
   });
 
@@ -82,6 +97,17 @@ describe("workspace session persistence", () => {
     await store.initialize();
 
     expect(shell.activeBottomPanel).toBe("output");
+    store.dispose();
+  });
+
+  it("migrates the removed Sublime input/output page to testcases", async () => {
+    values.set("lightcp.session.v1", JSON.stringify({ version: 1, activeActivity: "explorer", sublimeToolPage: "io", sublimeToolsVisible: true }));
+    const shell = new ShellStore();
+    const workspace = workspaceStub(""); workspace.recent = [];
+    const store = new SessionStore(workspace as never, editorStub() as never, shell, { error: vi.fn() } as never);
+    await store.initialize();
+    expect(shell.sublimeToolPage).toBe("testcases");
+    expect(shell.sublimeToolsVisible).toBe(true);
     store.dispose();
   });
 

@@ -2,11 +2,11 @@ export type ThemePreference = "system" | "dark" | "light";
 export type ResolvedTheme = "dark" | "light";
 export type ColorThemeId = "signal" | "graphite" | "forest";
 export type UiDensity = "compact" | "standard" | "comfortable";
-export type InterfaceStyle = "lightcp" | "classic";
+export type InterfaceStyle = "lightcp" | "classic" | "sublime";
 export type TestcaseStyle = "follow" | "standard" | "compact";
 
 export function effectiveTestcaseStyle(settings: Pick<AppSettings, "interfaceStyle" | "testcaseStyle">): "standard" | "compact" {
-  return settings.testcaseStyle === "follow" ? (settings.interfaceStyle === "classic" ? "compact" : "standard") : settings.testcaseStyle;
+  return settings.testcaseStyle === "follow" ? (settings.interfaceStyle === "lightcp" ? "standard" : "compact") : settings.testcaseStyle;
 }
 export type BackgroundFit = "cover" | "contain" | "fill";
 
@@ -84,6 +84,7 @@ export interface AppSettings {
   activeCustomTheme: string;
   customThemes: CustomThemeDefinition[];
   uiDensity: UiDensity;
+  sublimeTransparency: number;
   backgroundImage: string;
   backgroundImageName: string;
   backgroundImageOpacity: number;

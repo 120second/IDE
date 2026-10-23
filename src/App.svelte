@@ -67,6 +67,10 @@
     shell.sketchBoardVisible;
     shell.problemReaderDock;
     shell.sidebarWidth;
+    shell.classicSidebarWidth;
+    shell.sublimeSidebarWidth;
+    shell.sublimeToolsVisible;
+    shell.sublimeToolPage;
     shell.bottomPanelHeight;
     shell.problemReaderWidth;
     untrack(() => sessionStore?.schedulePersist());
@@ -222,7 +226,7 @@
 </svelte:head>
 
 <div class="window-frame">
-  {#if settings.value.interfaceStyle !== "classic"}<TitleBar />{/if}
+  {#if settings.value.interfaceStyle === "lightcp"}<TitleBar />{/if}
   <div class="window-content">
     {#if workspace && fileWorkspace && templateStore && execution && archiveStore && debugStore && stressStore && lspStore}
       <Workbench {shell} {workspace} {fileWorkspace} {templateStore} {execution} {archiveStore} {debugStore} {stressStore} {lspStore} {generator} {settings} {ux} {auth} {backendState} {health} />

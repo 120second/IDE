@@ -314,6 +314,8 @@ impl ClangdSession {
             let mut command = Command::new(&executable);
             command
                 .arg("--background-index")
+                // Preambles must see unsaved editor headers, not old disk data.
+                .arg("--use-dirty-headers")
                 .arg("--enable-config=false")
                 .arg(format!("--query-driver={compiler_executable}"))
                 .current_dir(&workspace_root)
@@ -1194,6 +1196,62 @@ mod tests {
         .unwrap();
         assert_eq!(params["wantDiagnostics"], true);
         assert_eq!(params["textDocument"]["version"], 2);
+    }
+
+    #[test]
+    fn fenwick_loops_and_structured_bindings_are_not_false_errors() {
+        let _lock = CLANGD_TEST_LOCK.lock().unwrap();
+        let Some(clangd) = clangd_candidates("").into_iter().find(|candidate| {
+            Command::new(candidate)
+                .arg("--version")
+                .output()
+                .is_ok_and(|o| o.status.success())
+        }) else {
+            return;
+        };
+        let root =
+            std::env::temp_dir().join(format!("lightcp-for-regression-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("main.cpp");
+        let text = "#include <bits/stdc++.h>\nint tr[10001];\nint lowbit(int x){return x&(-x);}\nvoid update(int x,int k){for(int i=x;i<=10000;i+=lowbit(i)){tr[i]+=k;}}\nint query(int x){int res=0;for(int i=x;i>=1;i-=lowbit(i)){res+=tr[i];}return res;}\nint main(){std::pair<int,int> q[]={{1,2}};for(auto [k,id]:q){update(k,id);}return query(1);}\n";
+        fs::write(&path, text).unwrap();
+        let manager = ClangdManager::default();
+        let (sender, receiver) = mpsc::channel();
+        manager
+            .start(
+                root.clone(),
+                clangd,
+                "g++".into(),
+                "c++20".into(),
+                vec!["-O2".into()],
+                move |event| {
+                    let _ = sender.send(event);
+                },
+            )
+            .unwrap();
+        manager
+            .did_open(&path.to_string_lossy(), text.into(), 1)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut checked = false;
+        while Instant::now() < deadline {
+            if let Ok(LspEvent::Diagnostics {
+                version: Some(1),
+                diagnostics,
+                ..
+            }) = receiver.recv_timeout(Duration::from_millis(100))
+            {
+                assert!(
+                    !diagnostics.iter().any(|d| d.severity == 1),
+                    "valid for loops must not be reported as range-for errors: {diagnostics:?}"
+                );
+                checked = true;
+                break;
+            }
+        }
+        manager.stop().unwrap();
+        assert!(checked, "no current-version clangd publication");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { ShellStore } from "./shell.svelte";
 
 describe("settings navigation", () => {
+  it("opens a Sublime tool without moving the folder tree or changing a document", () => {
+    const shell = new ShellStore();
+    shell.sublimeToolsVisible = false;
+    shell.showSublimeTool("testcases");
+    expect(shell.sublimeToolsVisible).toBe(true);
+    expect(shell.sublimeToolPage).toBe("testcases");
+    expect(shell.activeActivity).toBe("explorer");
+    shell.showSublimeTool("statement");
+    expect(shell.sublimeToolPage).toBe("statement");
+  });
   it("opens and closes settings without changing the active workspace", () => {
     const shell = new ShellStore();
     shell.activeActivity = "templates";

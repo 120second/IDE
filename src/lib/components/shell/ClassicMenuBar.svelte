@@ -4,14 +4,15 @@
   import TitleBar from "./TitleBar.svelte";
   import Icon from "./Icon.svelte";
 
-  let { commands, quickOpen, shortcut, settings, account, about }: {
+  let { commands, quickOpen, shortcut, settings, account, about, minimal = false }: {
     commands: WorkbenchCommand[]; quickOpen: () => void; shortcut: string;
     settings: () => void; account: () => void; about: () => void;
+    minimal?: boolean;
   } = $props();
   const menus = [
     { label: "文件", ids: ["file.new", "file.openFolder", "file.quickOpen", "file.save", "file.saveAll", "file.reveal", "editor.close"] },
-    { label: "工具", ids: ["view.generator", "view.templates", "view.todos", "problem.listen"] },
-    { label: "选项", ids: ["view.settings", "view.toggleSidebar", "view.togglePanel", "view.zen"] },
+    { label: "工具", ids: ["view.explorer", "view.testcases", "view.problemReader", "view.generator", "view.templates", "view.todos", "view.community", "problem.listen"] },
+    { label: "选项", ids: ["view.settings", "view.explorer", "view.problemReader", "view.sketchBoard", "view.problems", "view.output", "view.toggleSidebar", "view.togglePanel", "view.zen"] },
     { label: "运行", ids: ["build.compile", "build.run", "test.runAll", "build.stop", "debug.start", "stress.start"] },
   ];
   let open = $state<string>();
@@ -39,7 +40,7 @@
 
 <svelte:window onpointerdown={(event) => { if (event.target instanceof Node && !root?.contains(event.target)) open = undefined; }} onkeydown={keydown} />
 <header class="classic-menubar" bind:this={root} data-tauri-drag-region>
-  <div class="classic-brand" data-tauri-drag-region><span aria-hidden="true">&lt;/&gt;</span><strong data-tauri-drag-region>LightCP IDE</strong></div>
+  <div class="classic-brand" data-tauri-drag-region><span aria-hidden="true">&lt;/&gt;</span><strong data-tauri-drag-region>{minimal ? "LightCP" : "LightCP IDE"}</strong></div>
   <nav aria-label="应用菜单">
     {#each menus as menu}
       <div class="classic-menu-anchor">

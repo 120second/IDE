@@ -1,0 +1,51 @@
+// @vitest-environment happy-dom
+import { afterEach, expect, it, vi } from "vitest";
+import { EditorView } from "@codemirror/view";
+import { forEachDiagnostic } from "@codemirror/lint";
+import { EditorWorkspace } from "./workspace.svelte";
+import { LspStore } from "../stores/lsp.svelte";
+import { DEFAULT_SETTINGS } from "../stores/settings.svelte";
+import type { LspEvent } from "../types/lsp";
+
+vi.mock("../api/lsp", () => ({ lspDidOpen: vi.fn(async () => {}), lspDidChange: vi.fn(async () => {}), lspDidClose: vi.fn(async () => {}), stopClangd: vi.fn(async () => {}) }));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false }));
+const cleanup: (() => void)[] = [];
+afterEach(() => { cleanup.splice(0).forEach((fn) => fn()); document.body.replaceChildren(); });
+
+it.each(["lightcp", "classic", "sublime"] as const)("keeps editor marks and problem counts synchronized in %s", async (interfaceStyle) => {
+  const path = "D:\\Code\\main.cpp";
+  const editor = new EditorWorkspace({ ...DEFAULT_SETTINGS, interfaceStyle });
+  editor.createTab();
+  editor.insertSnippet("int main(){return missing;}");
+  editor.tabs = editor.tabs.map((tab) => ({ ...tab, path }));
+  const store = new LspStore(editor, {} as never);
+  cleanup.push(() => { store.dispose(); editor.dispose(); });
+  store.state = "ready";
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  editor.attach(host);
+  const view = EditorView.findFromDOM(host.querySelector(".cm-editor")!)!;
+  store.didOpen(path, view.state.doc.toString());
+  const diagnostic = { path, range: { start: { line: 0, character: 18 }, end: { line: 0, character: 25 } }, message: "Use of undeclared identifier 'missing'", severity: 1, source: "clangd", code: "undeclared_var_use" };
+  const publish = (event: LspEvent) => (store as unknown as { handleEvent(event: LspEvent): void }).handleEvent(event);
+  publish({ type: "diagnostics", path, version: 1, diagnostics: [diagnostic] });
+  store.acceptCompileResult(path, { success: false, stdout: "", stderr: "", durationMs: 1, outputTruncated: false, diagnostics: [{ ...diagnostic, source: "编译器", message: "'missing' was not declared in this scope" }] }, editor.sourceSnapshot(path));
+  let marks = 0;
+  forEachDiagnostic(view.state, () => marks++);
+  expect(marks).toBe(1);
+  expect(store.errorCount).toBe(1);
+  view.dispatch({ changes: { from: 18, to: 25, insert: "0" } });
+  await Promise.resolve();
+  await Promise.resolve();
+  marks = 0;
+  forEachDiagnostic(view.state, () => marks++);
+  expect(marks).toBe(0);
+  expect(store.errorCount).toBe(0);
+  expect(store.isChecked(path)).toBe(false);
+  publish({ type: "diagnostics", path, version: 1, diagnostics: [diagnostic] });
+  expect(store.errorCount).toBe(0);
+  publish({ type: "diagnostics", path, version: 2, diagnostics: [] });
+  expect(store.isChecked(path)).toBe(true);
+  editor.updateAppearance({ ...DEFAULT_SETTINGS, interfaceStyle, theme: "light" });
+  expect(store.errorCount).toBe(0);
+});

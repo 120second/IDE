@@ -23,3 +23,25 @@ export function classicInterfaceColors(variant: ResolvedTheme): ThemeColorOverri
     focusRing: "#0074bd",
   };
 }
+
+export function sublimeInterfaceColors(variant: ResolvedTheme): ThemeColorOverrides {
+  return variant === "dark" ? {
+    background: "#242622", backgroundElevated: "#30322d", activityBackground: "#20221f",
+    sidebarBackground: "#20221f", panelBackground: "#242622", editorBackground: "#242622",
+    tabBackground: "#232520", tabActiveBackground: "#34362f", inputBackground: "#30332e",
+    surface: "#454841", surfaceRaised: "#62655f", surfaceSunken: "#20221f",
+    hoverBackground: "#555950", activeBackground: "#44493b", textPrimary: "#e5e5db",
+    textSecondary: "#c9ccc0", textMuted: "#a4a79a", accent: "#a6ad91", accentStrong: "#c7cfac",
+    accentContrast: "#22251e", accentSoft: "#3d4333", border: "#363a32", borderStrong: "#5f6558",
+    borderSubtle: "#30342d", focusRing: "#bdc5a5",
+  } : {
+    background: "#eef1f5", backgroundElevated: "#f7f8fa", activityBackground: "#e4e8ed",
+    sidebarBackground: "#e7ebf0", panelBackground: "#edf0f4", editorBackground: "#f7f8fa",
+    tabBackground: "#e3e8ed", tabActiveBackground: "#f7f8fa", inputBackground: "#ffffff",
+    surface: "#eef1f5", surfaceRaised: "#ffffff", surfaceSunken: "#e4e9ef",
+    hoverBackground: "#dae2eb", activeBackground: "#d6e1eb", textPrimary: "#303c49",
+    textSecondary: "#526171", textMuted: "#627284", accent: "#377c9b", accentStrong: "#246581",
+    accentContrast: "#ffffff", accentSoft: "#d6e7ef", border: "#d0d7e0", borderStrong: "#9aaabb",
+    borderSubtle: "#dce2e9", focusRing: "#377c9b",
+  };
+}

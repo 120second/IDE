@@ -81,6 +81,88 @@ describe("execution store coordination", () => {
     executionApi.listTestcases.mockResolvedValue([]);
   });
 
+  it("does not restore tests after their source is closed during loading", async () => {
+    let finish!: (tests: Testcase[]) => void;
+    executionApi.listTestcases.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { store } = fixture();
+    const pending = store.syncActiveSource(sourcePath);
+    await store.syncActiveSource();
+    finish([testcase()]);
+    await pending;
+    expect(store.testcases).toEqual([]);
+    expect(store.sourcePath).toBe("");
+    expect(store.loadingTestcases).toBe(false);
+    store.dispose();
+  });
+
+  it("shares in-flight testcase loads and remembers a successful empty list", async () => {
+    let finish!: (tests: Testcase[]) => void;
+    executionApi.listTestcases.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { store } = fixture();
+    const first = store.syncActiveSource(sourcePath);
+    const second = store.syncActiveSource(sourcePath);
+    finish([]);
+    await Promise.all([first, second]);
+    await store.syncActiveSource(sourcePath);
+    expect(executionApi.listTestcases).toHaveBeenCalledTimes(1);
+    store.dispose();
+  });
+
+  it("refuses to compile a testcase from another source", async () => {
+    const { store } = fixture();
+    await store.runOne(testcase({ sourcePath: "D:\\Code\\other.cpp" }));
+    expect(executionApi.compileCurrentFile).not.toHaveBeenCalled();
+    expect(store.error).toContain("不一致");
+    store.dispose();
+  });
+
+  it("still compiles and runs the current file with no testcases", async () => {
+    executionApi.runProgram.mockResolvedValue({ status: "exited", stdout: "", stderr: "", exitCode: 0, durationMs: 1, outputTruncated: false });
+    const { store } = fixture();
+    await store.runCurrent();
+    expect(executionApi.compileCurrentFile).toHaveBeenCalledOnce();
+    expect(executionApi.runProgram).toHaveBeenCalledOnce();
+    store.dispose();
+  });
+
+  it.each(["not_cpp", "save_failed"])("visibly explains preflight failure: %s", async (reason) => {
+    const { editor, shell, store } = fixture(vi.fn().mockResolvedValue(false));
+    if (reason === "not_cpp") editor.activeTab.path = "D:\\Code\\notes.txt";
+    await store.compileCurrent();
+    expect(store.error).not.toBe("");
+    expect(shell.showBottomPanel).toHaveBeenCalledWith("output");
+    expect(executionApi.compileCurrentFile).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it("runs without judging when expected output is empty instead of reporting WA or AC", async () => {
+    executionApi.runProgram.mockResolvedValue({ status: "exited", stdout: "42\n", stderr: "", exitCode: 0, durationMs: 1, outputTruncated: false });
+    const { store } = fixture();
+    await store.runOne(testcase({ expectedOutput: "" }));
+    expect(store.results[0].status).toBe("OK");
+    expect(executionApi.compareTestcaseOutput).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it("returns the run result for input/output files without including build logs", async () => {
+    const { store } = fixture();
+    const result = { clientRunId: "qa", status: "exited", stdout: "5\n", stderr: "", exitCode: 0, durationMs: 5, outputTruncated: false };
+    executionApi.runProgram.mockResolvedValue(result);
+    expect(await store.runInput("2 3\n", "in.txt → out.txt", sourcePath)).toEqual(result);
+    expect(executionApi.runProgram.mock.calls[0][0].stdin).toBe("2 3\n");
+    store.dispose();
+  });
+
+  it("does not compile another source if the active tab changes before file input runs", async () => {
+    const { editor, store } = fixture();
+    editor.activeTab.path = "D:\\Code\\other.cpp";
+    expect(await store.runInput("old input", "file input", sourcePath)).toBeUndefined();
+    expect(executionApi.compileCurrentFile).not.toHaveBeenCalled();
+    expect(executionApi.runProgram).not.toHaveBeenCalled();
+    expect(store.error).toContain("文件已切换");
+    store.dispose();
+  });
+
   it("reserves compilation before awaiting a source save", async () => {
     let finishSave!: (saved: boolean) => void;
     const saveActive = vi.fn(() => new Promise<boolean>((resolve) => { finishSave = resolve; }));
@@ -171,5 +253,6 @@ it.each([true, false])("stops before compilation when a pending source save reso
   expect(executionApi.compileCurrentFile).not.toHaveBeenCalled();
   expect(store.compiling).toBe(false);
   expect(store.stopping).toBe(false);
+  expect(store.error).toBe("");
   store.dispose();
 });

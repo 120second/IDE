@@ -4,6 +4,8 @@ release/
 .vite/
 .tauri-build-target/
 .codex/ui-qa/
+.codex/compiler-qa/
+.codex/release-qa/
 
 src-tauri/target/
 src-tauri/gen/

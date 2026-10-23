@@ -39,6 +39,11 @@ export function createAppearanceExtension(settings: Partial<AppSettings>): Exten
   if (settings.interfaceStyle === "classic" && (!settings.editorTheme || settings.editorTheme === "inherit") && !light) {
     colors = { ...colors, text: "#d4d4d4", muted: "#85858c", activeLine: "#ffffff06", selection: "#264f78", keyword: "#c586c0", type: "#4ec9b0", function: "#dcdcaa", comment: "#6a9955", string: "#ce9178", number: "#b5cea8", variable: "#d4d4d4" };
   }
+  if (settings.interfaceStyle === "sublime" && (!settings.editorTheme || settings.editorTheme === "inherit")) {
+    colors = light
+      ? { ...colors, text: "#303c49", muted: "#64778a", activeLine: "#e7edf3", selection: "#d5e4ee", cursor: "#a76829", keyword: "#875b9c", type: "#875b9c", function: "#497bad", comment: "#727e8d", string: "#4c7d3c", number: "#a76829", variable: "#303c49" }
+      : { ...colors, text: "#f8f8f2", muted: "#a6a799", activeLine: "#ffffff06", selection: "#73776170", cursor: "#f8f8f2", keyword: "#f92672", type: "#a6e22e", function: "#a6e22e", comment: "#999b8b", string: "#e6db74", number: "#ae81ff", variable: "#f8f8f2" };
+  }
 
   const editorTheme = EditorView.theme(
     {

@@ -38,7 +38,7 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**", "**/.tauri-build-target/**", "**/release/**"],
+      ignored: ["**/src-tauri/**", "**/.tauri-build-target/**", "**/release/**", "**/*.exe"],
     },
   },
 });

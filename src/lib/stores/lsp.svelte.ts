@@ -23,6 +23,8 @@ import {
   parseSignatureResponse,
 } from "../lsp/protocol";
 import { recordIpcEvent } from "../performance";
+import { mapDiagnosticChanges } from "../editor/diagnosticChanges";
+import { isCppHeader, usesCppLanguageServices } from "../editor/languageServicePolicy";
 import type {
   LspCompletionItem,
   LspConnectionState,
@@ -63,10 +65,13 @@ export class LspStore implements LspClient {
   private readonly documentVersions = new Map<string, number>();
   private readonly openedDocuments = new Set<string>();
   private readonly pendingChanges = new Map<string, PendingChanges>();
+  private readonly pendingHeaders = new Map<string, number>();
+  private headerSequence = 0;
   private readonly documentQueues = new Map<string, Promise<void>>();
   private readonly activeRequests = new Set<number>();
   private readonly latestRequestByKind = new Map<string, number>();
   private requestSequence = 0;
+  private connectionGeneration = 0;
   private desiredWorkspace = "";
   private desiredClangdPath = "";
   private desiredCompilerPath = "g++";
@@ -125,6 +130,7 @@ export class LspStore implements LspClient {
     this.desiredCompilerPath = nextCompiler;
     this.desiredCompilerStandard = nextStandard;
     this.desiredCompilerArgs = nextArgs;
+    this.invalidateConnection();
     if (this.configureTimer) clearTimeout(this.configureTimer);
     this.configureTimer = setTimeout(() => {
       this.configureTimer = undefined;
@@ -136,17 +142,34 @@ export class LspStore implements LspClient {
     if (this.configureTimer) clearTimeout(this.configureTimer);
     this.configureTimer = undefined;
     this.appliedConfiguration = "";
+    this.invalidateConnection();
     this.enqueueReconnect();
   }
 
+  private invalidateConnection(): void {
+    this.connectionGeneration++;
+    this.activeSessionId = "";
+    this.state = "starting";
+    this.message = "正在按当前编译配置重新连接和检查…";
+    this.clearPendingChanges();
+    this.cancelActiveRequests();
+    for (const key of this.checkTimers.keys()) this.cancelCheck(key);
+    this.checkStates = {};
+    this.clearAllDiagnostics();
+  }
+
   didOpen(path: string, text: string): void {
-    if (!this.ready || this.openedDocuments.has(pathKey(path))) return;
+    if (!this.ready || !usesCppLanguageServices(path, text) || this.openedDocuments.has(pathKey(path))) return;
     const key = pathKey(path);
+    this.retryChecks.delete(key);
     const version = (this.documentVersions.get(key) ?? 0) + 1;
     this.openedDocuments.add(key);
     this.documentVersions.set(key, version);
     this.markChecking(path);
+    const headerToken = isCppHeader(path) ? this.markHeaderPending(path) : undefined;
+    const generation = this.connectionGeneration;
     void this.enqueueDocumentNotification(path, () => lspDidOpen(path, text, version))
+      .then(() => { if (generation === this.connectionGeneration) { this.refreshTranslationUnits(path); this.clearHeaderPending(key, headerToken); } })
       .catch(() => undefined);
   }
 
@@ -157,14 +180,26 @@ export class LspStore implements LspClient {
     if (!this.openedDocuments.has(key)) {
       // A restored tab may finish loading after startup's document snapshot.
       // Open its current content rather than silently dropping all later edits.
-      const document = this.editor.openLspDocuments().find((item) => pathKey(item.path) === key);
-      if (document) this.didOpen(document.path, document.text);
+      queueMicrotask(() => {
+        if (this.disposed || !this.ready || this.openedDocuments.has(key)) return;
+        const document = this.editor.openLspDocuments().find((item) => pathKey(item.path) === key);
+        if (document) this.didOpen(document.path, document.text);
+      });
       return;
     }
+    this.retryChecks.delete(key);
     this.markChecking(path);
-    // Keep existing errors visible while clangd checks the edit. CodeMirror
-    // maps their ranges; the next publication (including an empty one) replaces
-    // them. Clearing the whole file on every keystroke hides unrelated errors.
+    if (isCppHeader(path)) this.markHeaderPending(path);
+    // Edited tokens invalidate their own diagnostic immediately; untouched
+    // errors follow their text while the exact new version is being checked.
+    const previous = this.diagnosticsByPath.get(key);
+    if (previous?.length) {
+      this.diagnosticsByPath.set(key, mapDiagnosticChanges(previous, changes));
+      this.rebuildDiagnostics();
+      queueMicrotask(() => {
+        if (!this.disposed) this.editor.setLspDiagnostics(path, this.diagnosticsFor(path));
+      });
+    }
     const version = (this.documentVersions.get(key) ?? 1) + 1;
     this.documentVersions.set(key, version);
     let pending = this.pendingChanges.get(key);
@@ -177,24 +212,49 @@ export class LspStore implements LspClient {
     pending.timer ??= setTimeout(() => void this.flushPath(path), CHANGE_BATCH_MS);
   }
 
-  didSave(path: string): void {
-    if (!this.ready || !this.openedDocuments.has(pathKey(path))) return;
-    void (async () => {
-      await this.flushPath(path);
-      await this.enqueueDocumentNotification(path, () => lspDidSave(path));
-    })().catch((error) => this.handleNotificationError(error));
+  inputChanged(path: string, external = false): void {
+    const affected = this.invalidateCompileDiagnostics(path);
+    if (external) {
+      // A closed header (or a renamed/deleted directory) still invalidates
+      // checks of translation units that depended on its disk contents.
+      for (const [key] of this.documentVersions) {
+        if (sameOrChildPath(key, path)) affected.add(key);
+      }
+      for (const key of affected) {
+        this.cancelCheck(key);
+        this.checkStates = { ...this.checkStates, [key]: "stale" };
+        const document = this.editor.openLspDocuments().find((item) => pathKey(item.path) === key);
+        if (document && this.ready) queueMicrotask(() => {
+          if (!this.disposed && this.ready) this.recheck(document.path);
+        });
+      }
+    }
   }
 
-  didClose(path: string): void {
+  didSave(path: string): void {
+    if (!this.ready || !this.openedDocuments.has(pathKey(path))) return;
+    const generation = this.connectionGeneration;
+    void (async () => {
+      await this.flushPath(path);
+      if (!this.ready || generation !== this.connectionGeneration) return;
+      await this.enqueueDocumentNotification(path, () => lspDidSave(path));
+    })().catch((error) => this.handleNotificationError(error, generation));
+  }
+
+  didClose(path: string, inputChanged = false): void {
     const key = pathKey(path);
-    this.invalidateCompileDiagnostics(path);
+    if (inputChanged) this.invalidateCompileDiagnostics(path);
     if (!this.openedDocuments.delete(key)) return;
     this.dropPending(key);
     this.cancelCheck(key);
+    this.retryChecks.delete(key);
     this.checkStates = { ...this.checkStates, [key]: "paused" };
     this.clearDiagnostics(path);
     if (this.ready) {
+      const generation = this.connectionGeneration;
+      const headerToken = isCppHeader(path) ? this.markHeaderPending(path) : undefined;
       void this.enqueueDocumentNotification(path, () => lspDidClose(path))
+        .then(() => { if (generation === this.connectionGeneration) { this.refreshTranslationUnits(path); this.clearHeaderPending(key, headerToken); } })
         .catch(() => undefined);
     }
   }
@@ -206,20 +266,21 @@ export class LspStore implements LspClient {
     signal: AbortSignal,
   ): Promise<LspCompletionItem[]> {
     if (!this.ready || signal.aborted) return [];
+    const generation = this.connectionGeneration;
     const version = this.documentVersions.get(pathKey(path));
     await this.flushPath(path);
-    if (!this.ready || signal.aborted || version !== this.documentVersions.get(pathKey(path))) return [];
+    if (!this.ready || generation !== this.connectionGeneration || signal.aborted || version !== this.documentVersions.get(pathKey(path))) return [];
     const requestId = this.nextRequest("completion");
     const cancel = () => this.cancelRequest(requestId);
     signal.addEventListener("abort", cancel, { once: true });
     try {
       const value = await lspCompletion(path, position, context, requestId);
-      return signal.aborted || this.latestRequestByKind.get("completion") !== requestId
+      return generation !== this.connectionGeneration || signal.aborted || this.latestRequestByKind.get("completion") !== requestId
         || version !== this.documentVersions.get(pathKey(path))
         ? []
         : parseCompletionResponse(value);
     } catch (error) {
-      if (!signal.aborted) this.handleRequestError(error);
+      if (!signal.aborted && this.latestRequestByKind.get("completion") === requestId) this.handleRequestError(error, generation);
       return [];
     } finally {
       signal.removeEventListener("abort", cancel);
@@ -287,9 +348,56 @@ export class LspStore implements LspClient {
     if (!path || !this.ready) { if (!automatic) this.reconnect(); return; }
     const document = this.editor.openLspDocuments().find((item) => pathKey(item.path) === pathKey(path));
     if (!document) return;
-    this.didClose(path);
+    // A language-service refresh cannot verify or clear linker/build errors.
+    const key = pathKey(path);
+    this.dropPending(key);
+    this.openedDocuments.delete(key);
+    this.diagnosticsByPath.delete(key);
+    this.rebuildDiagnostics();
+    this.editor.setLspDiagnostics(path, this.diagnosticsFor(path));
+    void this.enqueueDocumentNotification(path, () => lspDidClose(path)).catch(() => undefined);
     this.didOpen(document.path, document.text);
     if (automatic) this.retryChecks.add(pathKey(path));
+  }
+
+  private translationUnitsFor(path: string): { path: string }[] {
+    if (!isCppHeader(path) || !this.ready) return [];
+    // Called from an editor update: inspecting tab paths must not capture or
+    // dispatch to the active CodeMirror view recursively.
+    return (this.editor.tabs ?? []).flatMap((tab) => tab.path && !isCppHeader(tab.path)
+      && this.openedDocuments.has(pathKey(tab.path)) ? [{ path: tab.path }] : []);
+  }
+
+  private markTranslationUnitsPending(path: string): void {
+    const documents = this.translationUnitsFor(path);
+    if (!documents.length) return;
+    for (const document of documents) {
+      this.markChecking(document.path);
+      this.diagnosticsByPath.delete(pathKey(document.path));
+    }
+    this.rebuildDiagnostics();
+    queueMicrotask(() => {
+      if (!this.disposed) for (const document of documents) this.editor.setLspDiagnostics(document.path, this.diagnosticsFor(document.path));
+    });
+  }
+
+  private markHeaderPending(path: string): number {
+    const token = ++this.headerSequence;
+    this.pendingHeaders.set(pathKey(path), token);
+    this.markTranslationUnitsPending(path);
+    return token;
+  }
+
+  private clearHeaderPending(key: string, token?: number): void {
+    if (token !== undefined && this.pendingHeaders.get(key) === token) this.pendingHeaders.delete(key);
+  }
+
+  private refreshTranslationUnits(path: string): void {
+    // Empty didChange notifications can be elided by clangd. Reopen the unit
+    // after the header write so its preamble and dependency contents are fresh.
+    for (const document of this.translationUnitsFor(path)) {
+      this.recheck(document.path);
+    }
   }
 
   acceptCompileResult(path: string, result: CompileResult, snapshot?: { text: string; revision: number; documents?: { path: string; revision: number }[] }): void {
@@ -297,31 +405,35 @@ export class LspStore implements LspClient {
     if (result.sourceChanged || !snapshot || !current || current.revision !== snapshot.revision || current.text !== snapshot.text) return;
     if (snapshot.documents?.some((document) => this.editor.sourceSnapshot(document.path)?.revision !== document.revision)) return;
     const oldPaths = this.compileDiagnostics.get(pathKey(path))?.diagnostics.map((diagnostic) => diagnostic.path) ?? [];
-    this.compileDiagnostics.set(pathKey(path), { diagnostics: result.diagnostics ?? [], dependencies: snapshot.documents?.map((doc) => pathKey(doc.path)) ?? [pathKey(path)] });
+    this.compileDiagnostics.set(pathKey(path), { diagnostics: result.diagnostics ?? [], dependencies: result.dependencies?.map((doc) => pathKey(doc.path)) ?? snapshot.documents?.map((doc) => pathKey(doc.path)) ?? [pathKey(path)] });
     this.rebuildDiagnostics();
     for (const target of new Set([path, ...oldPaths, ...(result.diagnostics ?? []).map((diagnostic) => diagnostic.path)])) {
       this.editor.setLspDiagnostics(target, this.diagnosticsFor(target));
     }
   }
 
-  private invalidateCompileDiagnostics(path: string): void {
+  private invalidateCompileDiagnostics(path: string): Set<string> {
     const changed = pathKey(path);
     const affected = new Set<string>();
+    const roots = new Set<string>();
     for (const [key, record] of this.compileDiagnostics) {
-      if (key === changed || record.dependencies.includes(changed) || record.diagnostics.some((d) => pathKey(d.path) === changed)) {
+      if (sameOrChildPath(key, changed) || record.dependencies.some((dependency) => sameOrChildPath(dependency, changed)) || record.diagnostics.some((d) => sameOrChildPath(d.path, changed))) {
+        roots.add(key);
+        this.cancelCheck(key);
+        this.checkStates = { ...this.checkStates, [key]: "stale" };
         record.diagnostics.forEach((d) => affected.add(d.path));
         this.compileDiagnostics.delete(key);
       }
     }
-    if (!affected.size) return;
+    if (!affected.size) return roots;
     this.rebuildDiagnostics();
     // Called by CodeMirror's update listener: do not dispatch recursively.
     queueMicrotask(() => {
       if (!this.disposed) for (const target of affected) {
-        if (this.editor.clearCompileDiagnostics) this.editor.clearCompileDiagnostics(target);
-        else this.editor.setLspDiagnostics(target, this.diagnosticsFor(target));
+        this.editor.setLspDiagnostics(target, this.diagnosticsFor(target));
       }
     });
+    return roots;
   }
 
   private cancelCheck(key: string): void {
@@ -492,9 +604,12 @@ export class LspStore implements LspClient {
         this.clearPendingChanges();
         this.openedDocuments.clear();
         for (const key of this.checkTimers.keys()) this.cancelCheck(key);
+        this.clearAllDiagnostics();
       }
       return;
     }
+    if (!this.ready) return;
+    if (this.pendingHeaders.size && !isCppHeader(event.path)) return;
     if (this.desiredWorkspace && !sameOrChildPath(event.path, this.desiredWorkspace)) return;
     const key = pathKey(event.path);
     if (!this.openedDocuments.has(key)) return;
@@ -527,25 +642,31 @@ export class LspStore implements LspClient {
   }
 
   private async flushPath(path: string): Promise<void> {
+    const generation = this.connectionGeneration;
     const key = pathKey(path);
     const pending = this.pendingChanges.get(key);
     if (!pending) {
       // A timer may already have taken the batch while its IPC write is still
       // in flight. Requests must wait for didOpen/didChange in that case too.
       try { await this.documentQueues.get(key); }
-      catch (error) { this.handleNotificationError(error); }
+      catch (error) { this.handleNotificationError(error, generation); }
       return;
     }
     this.pendingChanges.delete(key);
     if (pending.timer) clearTimeout(pending.timer);
     if (!this.ready || !this.openedDocuments.has(key)) return;
+    const headerToken = this.pendingHeaders.get(key);
     try {
       await this.enqueueDocumentNotification(
         path,
         () => lspDidChange(path, pending.version, pending.changes),
       );
+      if (generation === this.connectionGeneration) {
+        this.refreshTranslationUnits(path);
+        this.clearHeaderPending(key, headerToken);
+      }
     } catch (error) {
-      this.handleNotificationError(error);
+      this.handleNotificationError(error, generation);
     }
   }
 
@@ -556,16 +677,17 @@ export class LspStore implements LspClient {
     invokeRequest: (path: string, position: LspPosition, requestId: number) => Promise<unknown>,
   ): Promise<unknown | undefined> {
     if (!this.ready) return undefined;
+    const generation = this.connectionGeneration;
     const version = this.documentVersions.get(pathKey(path));
     await this.flushPath(path);
-    if (!this.ready || version !== this.documentVersions.get(pathKey(path))) return undefined;
+    if (!this.ready || generation !== this.connectionGeneration || version !== this.documentVersions.get(pathKey(path))) return undefined;
     const requestId = this.nextRequest(kind);
     try {
       const value = await invokeRequest(path, position, requestId);
-      return this.latestRequestByKind.get(kind) === requestId
+      return generation === this.connectionGeneration && this.latestRequestByKind.get(kind) === requestId
         && version === this.documentVersions.get(pathKey(path)) ? value : undefined;
     } catch (error) {
-      if (this.latestRequestByKind.get(kind) === requestId) this.handleRequestError(error);
+      if (this.latestRequestByKind.get(kind) === requestId) this.handleRequestError(error, generation);
       return undefined;
     } finally {
       this.finishRequest(requestId);
@@ -577,12 +699,16 @@ export class LspStore implements LspClient {
     notification: () => Promise<void>,
   ): Promise<void> {
     const key = pathKey(path);
+    const generation = this.connectionGeneration;
     const previous = this.documentQueues.get(key) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
-      .then(notification)
+      .then(() => {
+        if (generation !== this.connectionGeneration || this.disposed) return;
+        return notification();
+      })
       .catch((error) => {
-        this.handleNotificationError(error);
+        this.handleNotificationError(error, generation);
         throw error;
       });
     this.documentQueues.set(key, next);
@@ -627,15 +753,15 @@ export class LspStore implements LspClient {
       if (pending.timer) clearTimeout(pending.timer);
     }
     this.pendingChanges.clear();
+    this.pendingHeaders.clear();
   }
 
   private clearDiagnostics(path: string): void {
-    this.invalidateCompileDiagnostics(path);
     this.diagnosticsByPath.delete(pathKey(path));
     this.rebuildDiagnostics();
     // A document can leave LSP mode inside CodeMirror's update listener.
     queueMicrotask(() => {
-      if (!this.disposed && !this.diagnosticsByPath.has(pathKey(path))) this.editor.setLspDiagnostics(path, []);
+      if (!this.disposed && !this.diagnosticsByPath.has(pathKey(path))) this.editor.setLspDiagnostics(path, this.diagnosticsFor(path));
     });
   }
 
@@ -649,27 +775,48 @@ export class LspStore implements LspClient {
 
   private rebuildDiagnostics(): void {
     const seen = new Set<string>();
-    this.diagnostics = [...this.diagnosticsByPath.values()].flat().concat([...this.compileDiagnostics.values()].flatMap((record) => record.diagnostics)).filter((diagnostic) => {
+    const compiled = [...this.compileDiagnostics.values()].flatMap((record) => record.diagnostics);
+    const compilerErrors = new Map<string, LspDiagnostic[]>();
+    for (const diagnostic of compiled) {
+      if (diagnostic.severity !== 1 || diagnostic.fileLevel) continue;
+      const key = `${pathKey(diagnostic.path)}\0${diagnostic.range.start.line}`;
+      const line = compilerErrors.get(key) ?? [];
+      line.push(diagnostic);
+      compilerErrors.set(key, line);
+    }
+    const live = [...this.diagnosticsByPath.values()].flat().filter((diagnostic) =>
+      diagnostic.severity !== 1 || diagnostic.fileLevel
+      || !compilerErrors.get(`${pathKey(diagnostic.path)}\0${diagnostic.range.start.line}`)?.some((build) => rangesOverlap(build.range, diagnostic.range)));
+    this.diagnostics = compiled.concat(live).filter((diagnostic) => {
       const key = [pathKey(diagnostic.path), diagnostic.range.start.line, diagnostic.range.start.character, diagnostic.severity, diagnostic.message.toLowerCase()].join("\0");
       if (seen.has(key)) return false;
       seen.add(key); return true;
     });
   }
 
-  private handleNotificationError(error: unknown): void {
+  private handleNotificationError(error: unknown, generation = this.connectionGeneration): void {
+    if (this.disposed || generation !== this.connectionGeneration) return;
     const message = lspErrorMessage(error);
     this.state = /not running|has exited|已退出/i.test(message) ? "crashed" : "unavailable";
     this.message = `${message}。可点击状态栏重新连接。`;
     this.clearPendingChanges();
     this.openedDocuments.clear();
     for (const key of this.checkTimers.keys()) this.cancelCheck(key);
+    this.clearAllDiagnostics();
   }
 
-  private handleRequestError(error: unknown): void {
+  private handleRequestError(error: unknown, generation = this.connectionGeneration): void {
+    if (this.disposed || generation !== this.connectionGeneration) return;
     const message = lspErrorMessage(error);
     if (/cancel/i.test(message)) return;
-    if (/not running|has exited|已退出/i.test(message)) this.handleNotificationError(error);
+    if (/not running|has exited|已退出/i.test(message)) this.handleNotificationError(error, generation);
   }
+}
+
+function rangesOverlap(a: LspDiagnostic["range"], b: LspDiagnostic["range"]): boolean {
+  const compare = (x: LspPosition, y: LspPosition) => x.line - y.line || x.character - y.character;
+  return compare(a.start, b.end) < 0 && compare(b.start, a.end) < 0
+    || compare(a.start, b.start) === 0;
 }
 
 function pathKey(path: string): string {

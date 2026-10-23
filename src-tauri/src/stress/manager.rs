@@ -185,6 +185,7 @@ impl StressManager {
             workspace_root,
             build_root,
             &CompileRequest {
+                reuse_artifact: false,
                 client_task_id: None,
                 expected_source: None,
                 source_path: request.solution_path.clone(),
@@ -207,6 +208,7 @@ impl StressManager {
             workspace_root,
             build_root,
             &CompileRequest {
+                reuse_artifact: false,
                 client_task_id: None,
                 expected_source: None,
                 source_path: request.brute_path.clone(),

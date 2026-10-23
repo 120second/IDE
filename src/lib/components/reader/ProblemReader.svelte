@@ -39,9 +39,10 @@
     close: () => void;
     importSample: (sample: { name: string; input: string; expectedOutput: string }) => Promise<boolean>;
     ux: UxStore;
+    embedded?: boolean;
   }
 
-  let { sourcePath, sourceTitle, width, dock, setWidth, toggleDock, close, importSample, ux }: Props = $props();
+  let { sourcePath, sourceTitle, width, dock, setWidth, toggleDock, close, importSample, ux, embedded = false }: Props = $props();
   let fileInput: HTMLInputElement;
   let activeKey = "";
   let activeAnnotationKey = "";
@@ -687,13 +688,15 @@
   class:dragging-file={draggingFile}
   class:dock-left={dock === "left"}
   class="problem-reader"
-  style:width={`${width}px`}
+  class:embedded
+  style:width={embedded ? "100%" : `${width}px`}
   aria-label="读题面板"
   onpaste={handlePaste}
   ondragover={handleDragOver}
   ondragleave={handleDragLeave}
   ondrop={handleDrop}
 >
+  {#if !embedded}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
@@ -708,6 +711,7 @@
     onpointerdown={beginResize}
     onkeydown={resizeWithKeyboard}
   ></div>
+  {/if}
 
   <div class="problem-reader-toolbar">
     <div class="problem-reader-actions">
@@ -731,10 +735,10 @@
         <button class:active={view === "edit"} role="tab" aria-selected={view === "edit"} onclick={() => selectMarkdownView("edit")}>Markdown</button>
         <button class:active={view === "pdf"} role="tab" aria-selected={view === "pdf"} disabled={!pdfBlob} title={pdfBlob ? "查看已导入的 PDF" : "导入 PDF 后可用"} onclick={selectPdfView}>PDF</button>
       </div>
-      <div class="problem-reader-header-actions">
+      {#if !embedded}<div class="problem-reader-header-actions">
         <button aria-label={dock === "right" ? "将读题面板移到左侧" : "将读题面板移到右侧"} title={dock === "right" ? "移到左侧" : "移到右侧"} onclick={toggleDock}><Icon name="repeat" size={14} /></button>
         <button aria-label="关闭读题面板" title="关闭读题面板" onclick={close}><Icon name="close" size={15} /></button>
-      </div>
+      </div>{/if}
     </div>
   </div>
 
@@ -851,6 +855,7 @@
 </aside>
 
 <style>
+  .problem-reader.embedded { min-width: 0; max-width: none; flex: 1; border: 0; }
   .problem-reader {
     position: relative;
     display: flex;
