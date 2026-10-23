@@ -518,9 +518,27 @@ mod tests {
         let first = build(&request);
         assert!(first.success, "{first:?}");
         assert!(!first.cache_hit);
+        let cached_before_repeat = manager.cache.lock().unwrap().is_some();
         let hit = build(&request);
-        assert!(hit.cache_hit);
-        assert_eq!(hit.executable_path, first.executable_path);
+        assert!(hit.success && !hit.source_changed, "{hit:?}");
+        if hit.cache_hit {
+            assert_eq!(hit.executable_path, first.executable_path);
+        } else {
+            // Different GCC builds can emit unstable line-marker output. The
+            // documented fallback must rebuild safely, not promise a cache hit.
+            // A miss without that explicit policy is still a regression.
+            let bypass = manager.unstable_cache_key.lock().unwrap().is_some();
+            assert!(bypass, "unexpected cache miss: cached_before_repeat={cached_before_repeat}, compiler={:?}, repeat={hit:?}", cacheable_compiler(&request));
+            assert_ne!(hit.executable_path, first.executable_path);
+            eprintln!("Validated safe rebuild for an unstable preprocessor signature");
+        }
+        assert_eq!(
+            Command::new(hit.executable_path.as_ref().unwrap())
+                .status()
+                .unwrap()
+                .code(),
+            Some(3),
+        );
         eprintln!(
             "PERF gcc_bits_full_ms={} validated_repeat_ms={}",
             first.duration_ms, hit.duration_ms

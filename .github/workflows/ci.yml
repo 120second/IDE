@@ -54,7 +54,10 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Rust and native C++ regressions
         working-directory: src-tauri
-        run: cargo test --all-targets
+        run: |
+          g++ --version
+          clangd --version
+          cargo test --all-targets -- --show-output
       - name: Build desktop release
         run: npm run tauri -- build --no-bundle
 
