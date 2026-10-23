@@ -22,6 +22,41 @@ pub(super) fn supports_json(
     stop: &AtomicBool,
     timeout: Duration,
 ) -> AppResult<bool> {
+    supports_flags(
+        compiler,
+        directory,
+        &["-fdiagnostics-format=json"],
+        stop,
+        timeout,
+    )
+}
+
+pub(super) fn supports_byte_columns(
+    compiler: &str,
+    directory: &Path,
+    stop: &AtomicBool,
+    timeout: Duration,
+) -> AppResult<bool> {
+    supports_flags(
+        compiler,
+        directory,
+        &[
+            "-fdiagnostics-format=text",
+            "-fdiagnostics-column-unit=byte",
+            "-fdiagnostics-column-origin=1",
+        ],
+        stop,
+        timeout,
+    )
+}
+
+fn supports_flags(
+    compiler: &str,
+    directory: &Path,
+    flags: &[&str],
+    stop: &AtomicBool,
+    timeout: Duration,
+) -> AppResult<bool> {
     static CAPABILITIES: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
     let configured = Path::new(compiler);
     let resolved = if configured.is_absolute() {
@@ -45,7 +80,7 @@ pub(super) fn supports_json(
         .and_then(|path| std::fs::metadata(path).ok())
         .map(|m| (m.len(), m.modified().ok()));
     let key = format!(
-        "{compiler}\0{}\0{resolved:?}\0{revision:?}\0{:?}",
+        "{compiler}\0{}\0{resolved:?}\0{revision:?}\0{flags:?}\0{:?}",
         directory.display(),
         std::env::var_os("PATH")
     );
@@ -55,13 +90,9 @@ pub(super) fn supports_json(
     }
     let mut command = Command::new(compiler);
     command
-        .args([
-            "-x",
-            "c++",
-            "-fsyntax-only",
-            "-fdiagnostics-format=json",
-            "-",
-        ])
+        .args(["-x", "c++", "-fsyntax-only"])
+        .args(flags)
+        .arg("-")
         .current_dir(directory)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -98,4 +129,19 @@ pub(super) fn supports_json(
         cache.insert(key, supported);
     }
     Ok(supported)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn gcc_text_capability_uses_byte_columns_with_a_fixed_origin() {
+        assert!(supports_byte_columns(
+            "g++",
+            Path::new("."),
+            &AtomicBool::new(false),
+            Duration::from_secs(10)
+        )
+        .unwrap());
+    }
 }

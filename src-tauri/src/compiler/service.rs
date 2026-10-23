@@ -178,6 +178,13 @@ pub fn compile_with_stop(
         stop,
         timeout.saturating_sub(started.elapsed()),
     )?;
+    let gcc_text = !json_diagnostics
+        && super::toolchain::supports_byte_columns(
+            compiler,
+            source.parent().unwrap_or(workspace_root),
+            stop,
+            timeout.saturating_sub(started.elapsed()),
+        )?;
 
     let mut command = Command::new(compiler);
     command
@@ -190,6 +197,12 @@ pub fn compile_with_stop(
         .arg("-fdiagnostics-color=never");
     if json_diagnostics {
         command.arg("-fdiagnostics-format=json");
+    } else if gcc_text {
+        command.args([
+            "-fdiagnostics-format=text",
+            "-fdiagnostics-column-unit=byte",
+            "-fdiagnostics-column-origin=1",
+        ]);
     }
     command
         .args(["-MD", "-MT", "lightcp", "-MF"])
@@ -266,7 +279,11 @@ pub fn compile_with_stop(
                     )
         });
     let mut success = status.success() && !source_changed;
-    let mut diagnostics = super::diagnostics::parse(&stderr, &source, status.success());
+    let mut diagnostics = if gcc_text {
+        super::diagnostics::parse_with_gcc_text(&stderr, &source, status.success(), true)
+    } else {
+        super::diagnostics::parse(&stderr, &source, status.success())
+    };
     if truncated.load(Ordering::Relaxed)
         && !diagnostics
             .iter()

@@ -224,6 +224,7 @@ fn preprocess(
     stop: &AtomicBool,
     timeout: Duration,
 ) -> AppResult<Option<Probe>> {
+    let started = Instant::now();
     if stop.load(Ordering::Acquire) {
         return Err(AppError::ProcessCancelled);
     }
@@ -237,6 +238,12 @@ fn preprocess(
         uuid::Uuid::new_v4()
     )));
     let mut command = Command::new(compiler);
+    let json_diagnostics = super::toolchain::supports_json(
+        compiler.to_str().unwrap_or_default(),
+        source.parent().unwrap_or(Path::new(".")),
+        stop,
+        timeout,
+    )?;
     let standard = request.config.standard.trim();
     command
         .arg(format!(
@@ -254,12 +261,14 @@ fn preprocess(
                 .iter()
                 .filter(|arg| !arg.trim().is_empty()),
         )
-        .args([
-            "-fdiagnostics-color=never",
-            "-fdiagnostics-format=json",
-            "-Wdate-time",
-            "-E",
-        ])
+        .arg("-fdiagnostics-color=never");
+    // GCC 16 removed the legacy JSON format. Cache probes must negotiate it
+    // exactly like normal compilation instead of silently disabling reuse.
+    if json_diagnostics {
+        command.arg("-fdiagnostics-format=json");
+    }
+    command
+        .args(["-Wdate-time", "-E"])
         .arg(source)
         .arg("-o")
         .arg(&probe.0)
@@ -284,7 +293,12 @@ fn preprocess(
         Arc::new(AtomicUsize::new(0)),
         truncated.clone(),
     );
-    let status = service::wait_for_compiler(&mut child, &tree, stop, timeout);
+    let status = service::wait_for_compiler(
+        &mut child,
+        &tree,
+        stop,
+        timeout.saturating_sub(started.elapsed()),
+    );
     drop(tree);
     let warnings = service::join_reader(reader)?;
     // Time-dependent builtins are valid C++, but a second validation naturally

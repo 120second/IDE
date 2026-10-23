@@ -28,6 +28,15 @@ pub fn task_error(source: &Path, message: impl Into<String>, code: &str) -> Comp
 }
 
 pub fn parse(stderr: &str, source: &Path, success: bool) -> Vec<CompileDiagnostic> {
+    parse_with_gcc_text(stderr, source, success, false)
+}
+
+pub fn parse_with_gcc_text(
+    stderr: &str,
+    source: &Path,
+    success: bool,
+    gcc_text: bool,
+) -> Vec<CompileDiagnostic> {
     let mut result = Vec::new();
     let mut source_lines = SourceLines::new();
     let (items, remainder, incomplete) = split_output(stderr);
@@ -52,7 +61,7 @@ pub fn parse(stderr: &str, source: &Path, success: bool) -> Vec<CompileDiagnosti
                     source,
                     file,
                     // Clang's text diagnostic columns count UTF-8 bytes.
-                    (row, column, Some(column), false),
+                    (row, column, Some(column), gcc_text),
                     message,
                     severity,
                     "",
@@ -509,5 +518,40 @@ mod tests {
         let result = parse(crash, source, false);
         assert!(result[0].file_level);
         assert_eq!(result[0].source, "工具链");
+    }
+
+    #[test]
+    fn gcc_text_byte_columns_handle_bom_tabs_and_unicode() {
+        let root = std::env::temp_dir().join(format!("lightcp-gcc-text-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("main.cpp");
+        let line = "\u{feff}\tint main(){ /* 中文😀 */ return missing_name; }";
+        std::fs::write(&source, line).unwrap();
+        let byte = line
+            .strip_prefix('\u{feff}')
+            .unwrap()
+            .find("missing_name")
+            .unwrap();
+        let result = parse_with_gcc_text(
+            &format!(
+                "{}:1:{}: error: 'missing_name' was not declared in this scope",
+                source.display(),
+                byte + 1
+            ),
+            &source,
+            false,
+            true,
+        );
+        assert_eq!(
+            result[0].range.start.character,
+            line[..line.find("missing_name").unwrap()]
+                .encode_utf16()
+                .count() as u32
+        );
+        assert_eq!(
+            result[0].range.end.character - result[0].range.start.character,
+            12
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

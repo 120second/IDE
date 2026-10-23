@@ -61,7 +61,7 @@ LightCP 默认从 `PATH` 查找 g++ 和 GDB。clangd 除了 `PATH`，还会检�
 
 ## 快速开始
 
-直接使用可下载 [dev.14 Windows 安装版或便携版](https://github.com/120second/IDE/releases/tag/v0.1.1-dev.14)。本版改动与验证记录见[发布说明](docs/releases/v0.1.1-dev.14.md)。
+直接使用可下载 [dev.15 Windows 安装版或便携版](https://github.com/120second/IDE/releases/tag/v0.1.1-dev.15)。本版改动与验证记录见[发布说明](docs/releases/v0.1.1-dev.15.md)。
 
 ```powershell
 git clone https://github.com/120second/IDE.git
